@@ -226,3 +226,4 @@ snapshots/
 out/*
 !out/.gitkeep
 !out/feature_audit.csv
+.session_curl.txt

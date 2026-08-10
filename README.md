@@ -9,9 +9,12 @@ This repo is the audit tooling. It is not the Twenty deployment.
 
 | Document | What it answers |
 |---|---|
+| [`docs/05-runbook.md`](docs/05-runbook.md) | **Start here.** Exact commands, in order, and what to send back |
 | [`docs/00-audit-method.md`](docs/00-audit-method.md) | How the audit runs — six tiers, disposition rules, what it cannot tell you |
-| [`docs/01-scope-and-questions.md`](docs/01-scope-and-questions.md) | Open decisions. **Q1 blocks project sizing** |
+| [`docs/01-scope-and-questions.md`](docs/01-scope-and-questions.md) | Open decisions still outstanding |
 | [`docs/02-ghl-api-findings.md`](docs/02-ghl-api-findings.md) | Verified API facts with sources — read before writing anything against GHL |
+| [`docs/03-replacement-stack.md`](docs/03-replacement-stack.md) | What "no GHL in Phase 1" actually requires. 52 ESCALATE rows → 8 vendor decisions |
+| [`docs/04-manual-sweep.md`](docs/04-manual-sweep.md) | Tier 5 checklist for everything no API serves |
 | [`CLAUDE.md`](CLAUDE.md) | Operating rules. Read-only, no PII, rate limits |
 
 ## Quick start
