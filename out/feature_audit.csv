@@ -5,7 +5,7 @@ DM-03,Data Model,Custom objects,unknown,raw/custom_objects.json not pulled yet,,
 DM-04,Data Model,Custom values (merge variables),unknown,raw/custom_values.json not pulled yet,,,TWENTY+N8N,partial,supporting,,Twenty has no account-level variable store. Hold in n8n env or a settings object.
 DM-05,Data Model,Tags,unknown,raw/tags.json not pulled yet,,,TWENTY,full,none,,"Check whether tags encode workflow state rather than describing contacts — those become fields, not tags."
 DM-06,Data Model,Companies / businesses,unknown,raw/businesses.json not pulled yet,,,TWENTY,full,none,,Maps to Twenty Company.
-DM-07,Data Model,DND / consent flags,unknown,raw/custom_fields.json not pulled yet,,,ESCALATE,partial,supporting,,Consent must be enforced at send time. Twenty cannot enforce it because Twenty does not send campaigns.
+DM-07,Data Model,DND / consent flags,unknown,requires manual UI check,,,ESCALATE,partial,supporting,,Consent must be enforced at send time. Twenty cannot enforce it because Twenty does not send campaigns.
 CT-01,Contacts & Segmentation,Smart lists / saved filters,unknown,requires manual UI check,,,TWENTY,full,none,,Twenty saved views are equivalent.
 CT-02,Contacts & Segmentation,Bulk actions on contacts,unknown,requires manual UI check,,,TWENTY+N8N,partial,supporting,,Twenty supports bulk edit; bulk workflow enrolment differs.
 CT-03,Contacts & Segmentation,Import / export CSV,unknown,requires manual UI check,,,TWENTY,full,none,,Twenty has native CSV import.
@@ -17,15 +17,15 @@ OP-02,Opportunities & Pipelines,Opportunity value / forecasting,unknown,raw/pipe
 OP-03,Opportunities & Pipelines,Pipeline automation triggers,unknown,raw/workflows.json not pulled yet,,,TWENTY,full,supporting,,Twenty record-updated triggers cover stage changes.
 CV-01,Conversations & Inbox,Unified inbox,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,none,,Twenty has no inbox. Email threads sync to records only.
 CV-02,Conversations & Inbox,SMS conversations,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,none,,No SMS in Twenty.
-CV-03,Conversations & Inbox,WhatsApp,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,primary,,n8n can route via a provider; needs vendor decision.
+CV-03,Conversations & Inbox,WhatsApp,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,primary,,"n8n can route via a provider; needs vendor decision. Confirm the type enum values against the first real pull — an unrecognised field yields unknown, not no, so this fails safe."
 CV-04,Conversations & Inbox,Facebook / Instagram DM,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,primary,,Vendor decision.
 CV-05,Conversations & Inbox,Google Business Messages,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,primary,,Vendor decision.
 CV-06,Conversations & Inbox,Live chat widget,unknown,requires manual UI check,,,ESCALATE,none,none,,No equivalent.
 CV-07,Conversations & Inbox,Snippets / canned replies,unknown,raw/templates_sms.json not pulled yet,,,ESCALATE,none,supporting,,Tied to the inbox that does not exist.
 EM-01,Email & Templates,Email templates,unknown,raw/templates_email.json not pulled yet,,,TWENTY+N8N,partial,supporting,,Twenty Send Email has no template library. Templates live in n8n or the sending vendor.
 EM-02,Email & Templates,Drag-and-drop email builder,unknown,raw/email_builder_templates.json not pulled yet,,,ESCALATE,none,none,,editorData is not readable back via API — HTML export only. Rebuild cost is real.
-EM-03,Email & Templates,Bulk / campaign email send,unknown,raw/campaigns.json not pulled yet,,,ESCALATE,none,partial,,"HARD CEILING. Twenty Send Email = synced mailbox, one recipient per action."
-EM-04,Email & Templates,Drip sequences,unknown,raw/campaigns.json not pulled yet,,,TWENTY+N8N,partial,primary,,n8n Wait + Twenty Delay can sequence; sending still needs a vendor.
+EM-03,Email & Templates,Bulk / campaign email send,unknown,requires manual UI check,,,ESCALATE,none,partial,,"HARD CEILING. Twenty Send Email = synced mailbox, one recipient per action."
+EM-04,Email & Templates,Drip sequences,unknown,workflow internals not captured yet,,,TWENTY+N8N,partial,primary,,n8n Wait + Twenty Delay can sequence; sending still needs a vendor.
 EM-05,Email & Templates,Trigger links / click tracking,unknown,raw/trigger_links.json not pulled yet,,,N8N,none,primary,,n8n webhook redirect can reproduce this.
 EM-06,Email & Templates,Dedicated sending domain / DKIM / SPF,unknown,requires manual UI check,,,ESCALATE,none,none,,Deliverability infrastructure. Vendor decision.
 EM-07,Email & Templates,Unsubscribe / suppression list,unknown,requires manual UI check,,,ESCALATE,none,partial,,Compliance-critical. Must not be lost at cutover.
@@ -54,7 +54,7 @@ FS-03,Forms & Surveys,Surveys / quizzes,unknown,raw/surveys.json not pulled yet,
 FS-04,Forms & Surveys,Form submission volume (evidence),unknown,raw/form_submissions.json not pulled yet,,,UNKNOWN,n/a,n/a,,Evidence row. Drives DROP decisions across FS-01..03.
 FS-05,Forms & Surveys,Survey submission volume (evidence),unknown,raw/survey_submissions.json not pulled yet,,,UNKNOWN,n/a,n/a,,Evidence row.
 FW-01,Funnels & Websites,Funnels,unknown,raw/funnels.json not pulled yet,,,ESCALATE,none,none,,No equivalent. Confirm whether marketing owns these outside GHL already.
-FW-02,Funnels & Websites,Websites / pages,unknown,raw/funnels.json not pulled yet,,,ESCALATE,none,none,,Check whether aspiretss.com is actually hosted here or on WordPress.
+FW-02,Funnels & Websites,Websites / pages,unknown,requires manual UI check,,,ESCALATE,none,none,,Check whether aspiretss.com is actually hosted here or on WordPress.
 FW-03,Funnels & Websites,Order forms / upsells,unknown,requires manual UI check,,,ESCALATE,none,none,,Commerce surface.
 FW-04,Funnels & Websites,Custom domains,unknown,requires manual UI check,,,ESCALATE,none,none,,DNS cutover — sequencing risk at go-live.
 FW-05,Funnels & Websites,Tracking codes / pixels,unknown,requires manual UI check,,,ESCALATE,none,none,,Move with whatever hosts the pages.

@@ -247,14 +247,45 @@ def shape_of(records: Any) -> list[str]:
     return []
 
 
+# Low-cardinality categorical fields worth counting. Never free text, never
+# anything identifying — these are channel/type/status enums.
+HISTOGRAM_FIELDS = ("type", "channel", "status", "source", "provider", "platform",
+                    "messageType", "lastMessageType")
+HISTOGRAM_MAX_BUCKETS = 40
+
+
 def summarise_volume(records: Any) -> dict:
-    """For PII-bearing endpoints: keep the count and the schema, drop the data."""
+    """
+    For PII-bearing endpoints: keep the count, the schema, and per-category
+    counts. Drop everything else.
+
+    The histogram matters: an aggregate count of 1,877 conversations says
+    nothing about WHICH channels are live, and treating it as evidence for
+    every channel overstates the replacement scope badly.
+    """
     items = records if isinstance(records, list) else ([] if records is None else [records])
+
+    histograms: dict[str, dict[str, int]] = {}
+    for field in HISTOGRAM_FIELDS:
+        buckets: dict[str, int] = {}
+        for it in items:
+            if not isinstance(it, dict) or field not in it:
+                continue
+            val = it.get(field)
+            if val is None or isinstance(val, (dict, list)):
+                continue
+            key = str(val)[:60]
+            buckets[key] = buckets.get(key, 0) + 1
+        if buckets and len(buckets) <= HISTOGRAM_MAX_BUCKETS:
+            histograms[field] = dict(sorted(buckets.items(), key=lambda kv: -kv[1]))
+
     return {
         "_class": "volume",
-        "_note": "Bodies discarded at pull time. Counts and field names only.",
+        "_note": "Bodies discarded at pull time. Counts, field names and "
+                 "categorical histograms only — no record content.",
         "count": len(items),
         "fields": shape_of(items),
+        "histograms": histograms,
     }
 
 

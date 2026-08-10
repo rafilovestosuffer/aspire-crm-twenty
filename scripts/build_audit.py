@@ -33,10 +33,20 @@ COLUMNS = [
 
 
 def load_evidence(source: str) -> tuple[str, int | None, str]:
-    """Return (state, count, detail) for one evidence source."""
-    if not source or source in ("ui-observation",):
+    """
+    Return (state, count, detail) for one evidence source.
+
+    A source may target a single histogram bucket:
+        raw/conversations.json#type=TYPE_PHONE
+    That distinction matters. An aggregate of 1,877 conversations is evidence
+    that *the inbox* is used; it is not evidence that WhatsApp is used. Without
+    per-channel targeting, every channel inherits the total and the replacement
+    scope is overstated.
+    """
+    if not source or source == "ui-observation":
         return "unknown", None, "requires manual UI check"
 
+    source, _, selector = source.partition("#")
     path = ROOT / source
     if not path.exists():
         return "unknown", None, f"{source} not pulled yet"
@@ -45,6 +55,17 @@ def load_evidence(source: str) -> tuple[str, int | None, str]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         return "unknown", None, f"{source} unreadable: {e}"
+
+    if selector:
+        field, _, wanted = selector.partition("=")
+        hist = (data or {}).get("histograms", {}) if isinstance(data, dict) else {}
+        if field not in hist:
+            return "unknown", None, (
+                f"{source} has no '{field}' breakdown — cannot separate this "
+                "channel from the aggregate; check by hand")
+        n = int(hist[field].get(wanted, 0))
+        # The field exists, so absence from the histogram is real evidence.
+        return ("yes" if n > 0 else "no"), n, f"{source} {field}={wanted} n={n}"
 
     if isinstance(data, dict) and data.get("_class") == "volume":
         n = int(data.get("count", 0))
