@@ -15,6 +15,7 @@ This repo is the audit tooling. It is not the Twenty deployment.
 | [`docs/02-ghl-api-findings.md`](docs/02-ghl-api-findings.md) | Verified API facts with sources — read before writing anything against GHL |
 | [`docs/03-replacement-stack.md`](docs/03-replacement-stack.md) | What "no GHL in Phase 1" actually requires. 52 ESCALATE rows → 8 vendor decisions |
 | [`docs/04-manual-sweep.md`](docs/04-manual-sweep.md) | Tier 5 checklist for everything no API serves |
+| [`docs/06-twenty-object-model.md`](docs/06-twenty-object-model.md) | The 25-object GHL parity model provisioned into Twenty |
 | [`CLAUDE.md`](CLAUDE.md) | Operating rules. Read-only, no PII, rate limits |
 
 ## Quick start
@@ -27,6 +28,8 @@ python scripts/ghl_pull.py --dry-run      # show the plan, call nothing
 python scripts/ghl_pull.py --only custom_fields   # verify one endpoint first
 python scripts/ghl_pull.py                # full discovery run
 python scripts/twenty_probe.py            # probe the live Twenty instance
+python scripts/twenty_provision.py --dry-run   # preview the object model
+python scripts/twenty_provision.py         # build it
 python scripts/build_audit.py             # → out/feature_audit.csv
 ```
 
@@ -39,8 +42,10 @@ on this account tier.
 ```
 reference/ghl_feature_taxonomy.csv   111-feature master checklist — the spine
 reference/ghl_endpoints.yaml         43 read-only endpoints driving the puller
+reference/twenty_schema.yaml         25-object GHL parity model for Twenty
 scripts/ghl_pull.py                  GET-only, throttled, PII-classified puller
 scripts/twenty_probe.py              reads the live Twenty instance's real capability
+scripts/twenty_provision.py          builds the object model via the Metadata API
 scripts/build_audit.py               merges evidence + taxonomy → the report
 docs/                                method, findings, open decisions
 raw/  workflows/  .env               company data — gitignored, never committed

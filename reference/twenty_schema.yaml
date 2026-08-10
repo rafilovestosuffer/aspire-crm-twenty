@@ -1,0 +1,431 @@
+# Aspire object model for Twenty — GHL parity layer.
+#
+# Twenty cannot SEND email/SMS/voice, host forms, or take bookings. It can be the
+# system of record for all of them. Every object below either (a) implements an
+# Aspire business concept, or (b) gives a GHL feature a home in the CRM so that
+# n8n + a vendor executes while Twenty holds the truth.
+#
+# Standard Twenty objects are NOT redefined here: Company, Person, Opportunity,
+# Note, Task, Attachment, Calendar Event, Message, Workspace Member.
+#
+# SELECT options are written as plain labels; the provisioner derives value,
+# position and colour. Relations are created after all objects exist.
+
+objects:
+
+  # ======================= Aspire core (master context §5) =======================
+
+  - nameSingular: serviceSubscription
+    namePlural: serviceSubscriptions
+    labelSingular: Service Subscription
+    labelPlural: Service Subscriptions
+    description: Recurring service engagement. SOCaaS/SECaaS are subscriptions, not one-off deals — without this, renewal exposure and MRR are invisible.
+    icon: IconRefresh
+    ghl_equivalent: Opportunity + custom fields (GHL has no subscription object)
+    fields:
+      - {name: serviceLine, label: Service Line, type: SELECT, options: [SOCaaS, Cloud Security, MDR, SECaaS, Digital Forensics, Incident Response]}
+      - {name: status, label: Status, type: SELECT, options: [Active, Pending Start, Renewal Due, Churned, Paused]}
+      - {name: startDate, label: Start Date, type: DATE}
+      - {name: renewalDate, label: Renewal Date, type: DATE}
+      - {name: mrr, label: MRR, type: CURRENCY}
+      - {name: termMonths, label: Term (months), type: NUMBER}
+      - {name: autoRenew, label: Auto Renew, type: BOOLEAN}
+    relations:
+      - {to: company, label: Company, reverseLabel: Service Subscriptions, type: MANY_TO_ONE}
+
+  - nameSingular: complianceEngagement
+    namePlural: complianceEngagements
+    labelSingular: Compliance Engagement
+    labelPlural: Compliance Engagements
+    description: CMMC and framework engagements. Levels and FCI/CUI scope must be filterable, not buried in a text field.
+    icon: IconShieldCheck
+    ghl_equivalent: Opportunity + custom fields
+    fields:
+      - {name: framework, label: Framework, type: SELECT, options: [CMMC, NIST 800-171, SOC 2, ISO 27001, HIPAA, PCI DSS]}
+      - {name: cmmcLevel, label: CMMC Level, type: SELECT, options: [Level 1, Level 2, Level 3, Not Applicable]}
+      - {name: dataScope, label: Data Scope, type: MULTI_SELECT, options: [FCI, CUI, Neither]}
+      - {name: status, label: Status, type: SELECT, options: [Scoping, In Progress, Audit Scheduled, Certified, Remediation, Lapsed]}
+      - {name: auditDate, label: Audit Date, type: DATE}
+      - {name: nextReviewDate, label: Next Review Date, type: DATE}
+    relations:
+      - {to: company, label: Company, reverseLabel: Compliance Engagements, type: MANY_TO_ONE}
+
+  - nameSingular: trainingAccount
+    namePlural: trainingAccounts
+    labelSingular: Training Account
+    labelPlural: Training Accounts
+    description: A-SAT seat allocation. Seat consumption is the upsell signal and cannot live on a Person record.
+    icon: IconSchool
+    ghl_equivalent: Membership/course (GHL) — Aspire runs this on aspireelearning.com
+    fields:
+      - {name: seatsPurchased, label: Seats Purchased, type: NUMBER}
+      - {name: seatsConsumed, label: Seats Consumed, type: NUMBER}
+      - {name: deploymentType, label: Deployment Type, type: SELECT, options: [Self-Managed, Managed by Aspire]}
+      - {name: renewalDate, label: Renewal Date, type: DATE}
+      - {name: portalUrl, label: Portal URL, type: LINKS}
+    relations:
+      - {to: company, label: Company, reverseLabel: Training Accounts, type: MANY_TO_ONE}
+
+  - nameSingular: phishingBaseline
+    namePlural: phishingBaselines
+    labelSingular: Phishing Baseline
+    labelPlural: Phishing Baselines
+    description: Phish-prone score over time. Becomes an account-health signal driving renewal and upsell.
+    icon: IconFishHook
+    ghl_equivalent: None — Aspire-specific
+    fields:
+      - {name: testDate, label: Test Date, type: DATE}
+      - {name: phishPronePercent, label: Phish-Prone %, type: NUMBER}
+      - {name: deltaVsPrevious, label: Delta vs Previous, type: NUMBER}
+      - {name: usersTested, label: Users Tested, type: NUMBER}
+    relations:
+      - {to: trainingAccount, label: Training Account, reverseLabel: Phishing Baselines, type: MANY_TO_ONE}
+
+  # ======================= Consent — the compliance keystone =======================
+
+  - nameSingular: consentRecord
+    namePlural: consentRecords
+    labelSingular: Consent Record
+    labelPlural: Consent Records
+    description: >
+      Per-channel consent state. CRITICAL — with GHL removed, consent loses its
+      home (master context §8.3 made GHL authoritative). This object is that new
+      home. It must be populated from the GHL suppression export BEFORE the GHL
+      account is terminated, or previously-unsubscribed people get contacted
+      again. Every send workflow must check this object first.
+    icon: IconShieldLock
+    ghl_equivalent: DND flags + unsubscribe/suppression list
+    fields:
+      - {name: channel, label: Channel, type: SELECT, options: [Email, SMS, Voice, WhatsApp, Postal, All]}
+      - {name: status, label: Status, type: SELECT, options: [Opted In, Opted Out, Pending, Bounced, Complained]}
+      - {name: source, label: Source, type: SELECT, options: [Form Submission, Manual, Imported from GHL, Unsubscribe Link, Reply STOP, Vendor Webhook]}
+      - {name: effectiveAt, label: Effective At, type: DATE_TIME}
+      - {name: proof, label: Proof / Reference, type: TEXT}
+      - {name: vendorReference, label: Vendor Reference, type: TEXT}
+    relations:
+      - {to: person, label: Person, reverseLabel: Consent Records, type: MANY_TO_ONE}
+
+  # ======================= Data model parity =======================
+
+  - nameSingular: crmTag
+    namePlural: crmTags
+    labelSingular: Tag
+    labelPlural: Tags
+    description: GHL tag vocabulary as first-class records, so n8n can sync and so tags that actually encode workflow state are visible rather than hidden in a picklist.
+    icon: IconTag
+    ghl_equivalent: Tags
+    fields:
+      - {name: category, label: Category, type: SELECT, options: [Lifecycle, Source, Interest, Segment, Workflow State, Legacy]}
+      - {name: ghlTagName, label: GHL Tag Name, type: TEXT}
+      - {name: migrationAction, label: Migration Action, type: SELECT, options: [Keep as Tag, Convert to Field, Drop]}
+
+  - nameSingular: mergeVariable
+    namePlural: mergeVariables
+    labelSingular: Merge Variable
+    labelPlural: Merge Variables
+    description: Account-level merge variables. Twenty has no custom-values store (audit row DM-04); this is that store, read by n8n at send time.
+    icon: IconVariable
+    ghl_equivalent: Custom Values
+    fields:
+      - {name: key, label: Key, type: TEXT}
+      - {name: value, label: Value, type: TEXT}
+      - {name: scope, label: Scope, type: SELECT, options: [Global, Aspire TSS, Aspire eLearning]}
+
+  # ======================= Messaging — record, not execution =======================
+
+  - nameSingular: messageLog
+    namePlural: messageLogs
+    labelSingular: Message Log
+    labelPlural: Message Logs
+    description: Every outbound and inbound message, written back by n8n from the sending vendor. Twenty does not send these — it records that they happened, which is what the conversation history in GHL actually gave you.
+    icon: IconMessage
+    ghl_equivalent: Conversations / unified inbox
+    fields:
+      - {name: channel, label: Channel, type: SELECT, options: [Email, SMS, WhatsApp, Voice, Facebook, Instagram, Live Chat]}
+      - {name: direction, label: Direction, type: SELECT, options: [Outbound, Inbound]}
+      - {name: status, label: Status, type: SELECT, options: [Queued, Sent, Delivered, Opened, Clicked, Bounced, Failed, Replied]}
+      - {name: subject, label: Subject, type: TEXT}
+      - {name: vendor, label: Vendor, type: TEXT}
+      - {name: vendorMessageId, label: Vendor Message ID, type: TEXT}
+      - {name: sentAt, label: Sent At, type: DATE_TIME}
+    relations:
+      - {to: person, label: Person, reverseLabel: Message Logs, type: MANY_TO_ONE}
+
+  - nameSingular: callLog
+    namePlural: callLogs
+    labelSingular: Call Log
+    labelPlural: Call Logs
+    description: Call records written back from the telephony vendor. Recording URLs are referenced, never stored here.
+    icon: IconPhone
+    ghl_equivalent: Call reporting / call recording
+    fields:
+      - {name: direction, label: Direction, type: SELECT, options: [Inbound, Outbound, Missed]}
+      - {name: outcome, label: Outcome, type: SELECT, options: [Connected, Voicemail, No Answer, Busy, Wrong Number]}
+      - {name: durationSeconds, label: Duration (s), type: NUMBER}
+      - {name: recordingUrl, label: Recording URL, type: LINKS}
+      - {name: occurredAt, label: Occurred At, type: DATE_TIME}
+    relations:
+      - {to: person, label: Person, reverseLabel: Call Logs, type: MANY_TO_ONE}
+
+  - nameSingular: emailTemplate
+    namePlural: emailTemplates
+    labelSingular: Email Template
+    labelPlural: Email Templates
+    description: Template registry. GHL's editorData cannot be read back via API, so templates are rebuilt once and catalogued here with a pointer to where the HTML actually lives.
+    icon: IconMailForward
+    ghl_equivalent: Email templates / builder
+    fields:
+      - {name: subject, label: Subject, type: TEXT}
+      - {name: purpose, label: Purpose, type: SELECT, options: [Newsletter, Nurture, Transactional, Renewal, Onboarding, Event]}
+      - {name: status, label: Status, type: SELECT, options: [Active, Draft, Retired, Pending Rebuild]}
+      - {name: htmlLocation, label: HTML Location, type: LINKS}
+      - {name: ghlTemplateId, label: GHL Template ID, type: TEXT}
+
+  - nameSingular: campaign
+    namePlural: campaigns
+    labelSingular: Campaign
+    labelPlural: Campaigns
+    description: Campaign definition and aggregate results. Execution happens in the ESP; this holds what was sent, to whom (by segment), and how it performed.
+    icon: IconSend
+    ghl_equivalent: Campaigns / bulk email send
+    fields:
+      - {name: channel, label: Channel, type: SELECT, options: [Email, SMS, Multi-channel]}
+      - {name: status, label: Status, type: SELECT, options: [Draft, Scheduled, Sending, Sent, Paused, Cancelled]}
+      - {name: scheduledFor, label: Scheduled For, type: DATE_TIME}
+      - {name: recipientCount, label: Recipients, type: NUMBER}
+      - {name: deliveredCount, label: Delivered, type: NUMBER}
+      - {name: openCount, label: Opens, type: NUMBER}
+      - {name: clickCount, label: Clicks, type: NUMBER}
+      - {name: unsubscribeCount, label: Unsubscribes, type: NUMBER}
+      - {name: vendor, label: Vendor, type: TEXT}
+
+  - nameSingular: trackedLink
+    namePlural: trackedLinks
+    labelSingular: Tracked Link
+    labelPlural: Tracked Links
+    description: Trigger-link equivalent. n8n serves the redirect and writes the click back here.
+    icon: IconLink
+    ghl_equivalent: Trigger links
+    fields:
+      - {name: destinationUrl, label: Destination URL, type: LINKS}
+      - {name: slug, label: Slug, type: TEXT}
+      - {name: clickCount, label: Clicks, type: NUMBER}
+      - {name: purpose, label: Purpose, type: TEXT}
+
+  # ======================= Capture =======================
+
+  - nameSingular: formDefinition
+    namePlural: formDefinitions
+    labelSingular: Form
+    labelPlural: Forms
+    description: Registry of public forms. Twenty cannot host forms — the form tool hosts, n8n receives the webhook, this records what exists and where it points.
+    icon: IconForms
+    ghl_equivalent: Forms / surveys
+    fields:
+      - {name: status, label: Status, type: SELECT, options: [Live, Draft, Retired]}
+      - {name: hostedUrl, label: Hosted URL, type: LINKS}
+      - {name: vendor, label: Vendor, type: TEXT}
+      - {name: submissionCount, label: Submissions, type: NUMBER}
+      - {name: ghlFormId, label: GHL Form ID, type: TEXT}
+
+  - nameSingular: formSubmission
+    namePlural: formSubmissions
+    labelSingular: Form Submission
+    labelPlural: Form Submissions
+    description: Submissions written in by n8n. Consent captured here must also create a Consent Record.
+    icon: IconFileCheck
+    ghl_equivalent: Form submissions
+    fields:
+      - {name: submittedAt, label: Submitted At, type: DATE_TIME}
+      - {name: payload, label: Payload, type: RAW_JSON}
+      - {name: sourceUrl, label: Source URL, type: LINKS}
+      - {name: consentGiven, label: Consent Given, type: BOOLEAN}
+    relations:
+      - {to: formDefinition, label: Form, reverseLabel: Submissions, type: MANY_TO_ONE}
+      - {to: person, label: Person, reverseLabel: Form Submissions, type: MANY_TO_ONE}
+
+  - nameSingular: appointment
+    namePlural: appointments
+    labelSingular: Appointment
+    labelPlural: Appointments
+    description: Bookings written back from the scheduling vendor. Twenty has no booking engine; this is the CRM-side record.
+    icon: IconCalendarEvent
+    ghl_equivalent: Calendars / booking pages
+    fields:
+      - {name: status, label: Status, type: SELECT, options: [Booked, Confirmed, Completed, No Show, Cancelled, Rescheduled]}
+      - {name: appointmentType, label: Type, type: SELECT, options: [Discovery Call, Technical Demo, QBR, Compliance Review, Training Session]}
+      - {name: scheduledAt, label: Scheduled At, type: DATE_TIME}
+      - {name: durationMinutes, label: Duration (min), type: NUMBER}
+      - {name: meetingUrl, label: Meeting URL, type: LINKS}
+      - {name: vendorEventId, label: Vendor Event ID, type: TEXT}
+    relations:
+      - {to: person, label: Person, reverseLabel: Appointments, type: MANY_TO_ONE}
+
+  # ======================= Commerce =======================
+
+  - nameSingular: product
+    namePlural: products
+    labelSingular: Product
+    labelPlural: Products
+    description: Service and product catalogue underpinning quotes and subscriptions.
+    icon: IconBox
+    ghl_equivalent: Products
+    fields:
+      - {name: sku, label: SKU, type: TEXT}
+      - {name: brand, label: Brand, type: SELECT, options: [Aspire TSS, Aspire eLearning]}
+      - {name: billingModel, label: Billing Model, type: SELECT, options: [Per Seat, Flat Recurring, One-Off, Usage-Based]}
+      - {name: unitPrice, label: Unit Price, type: CURRENCY}
+      - {name: isActive, label: Active, type: BOOLEAN}
+
+  - nameSingular: quote
+    namePlural: quotes
+    labelSingular: Quote
+    labelPlural: Quotes
+    description: Fills Twenty's CPQ gap (audit rows PY-03, SA-04/SA-05). Document generation and e-sign stay with a vendor; the commercial record lives here.
+    icon: IconFileDollar
+    ghl_equivalent: Estimates / proposals
+    fields:
+      - {name: quoteNumber, label: Quote Number, type: TEXT}
+      - {name: status, label: Status, type: SELECT, options: [Draft, Sent, Viewed, Accepted, Declined, Expired]}
+      - {name: totalValue, label: Total Value, type: CURRENCY}
+      - {name: validUntil, label: Valid Until, type: DATE}
+      - {name: documentUrl, label: Document URL, type: LINKS}
+    relations:
+      - {to: opportunity, label: Opportunity, reverseLabel: Quotes, type: MANY_TO_ONE}
+      - {to: company, label: Company, reverseLabel: Quotes, type: MANY_TO_ONE}
+
+  - nameSingular: quoteLineItem
+    namePlural: quoteLineItems
+    labelSingular: Quote Line Item
+    labelPlural: Quote Line Items
+    description: Line-level detail — the part a single quote-total field cannot express.
+    icon: IconListDetails
+    ghl_equivalent: Estimate line items
+    fields:
+      - {name: quantity, label: Quantity, type: NUMBER}
+      - {name: unitPrice, label: Unit Price, type: CURRENCY}
+      - {name: lineTotal, label: Line Total, type: CURRENCY}
+      - {name: discountPercent, label: Discount %, type: NUMBER}
+    relations:
+      - {to: quote, label: Quote, reverseLabel: Line Items, type: MANY_TO_ONE}
+      - {to: product, label: Product, reverseLabel: Quote Line Items, type: MANY_TO_ONE}
+
+  - nameSingular: invoice
+    namePlural: invoices
+    labelSingular: Invoice
+    labelPlural: Invoices
+    description: Invoice record. Billing is executed by the finance system; this is the CRM-visible state so sales can see what is unpaid.
+    icon: IconFileInvoice
+    ghl_equivalent: Invoices
+    fields:
+      - {name: invoiceNumber, label: Invoice Number, type: TEXT}
+      - {name: status, label: Status, type: SELECT, options: [Draft, Sent, Partially Paid, Paid, Overdue, Void]}
+      - {name: amount, label: Amount, type: CURRENCY}
+      - {name: issueDate, label: Issue Date, type: DATE}
+      - {name: dueDate, label: Due Date, type: DATE}
+      - {name: providerReference, label: Provider Reference, type: TEXT}
+    relations:
+      - {to: company, label: Company, reverseLabel: Invoices, type: MANY_TO_ONE}
+      - {to: serviceSubscription, label: Service Subscription, reverseLabel: Invoices, type: MANY_TO_ONE}
+
+  - nameSingular: payment
+    namePlural: payments
+    labelSingular: Payment
+    labelPlural: Payments
+    description: Payment events from the processor, written back by n8n.
+    icon: IconCreditCard
+    ghl_equivalent: Payments / orders / transactions
+    fields:
+      - {name: amount, label: Amount, type: CURRENCY}
+      - {name: status, label: Status, type: SELECT, options: [Succeeded, Pending, Failed, Refunded, Disputed]}
+      - {name: method, label: Method, type: SELECT, options: [Card, ACH, Wire, Cheque, Other]}
+      - {name: paidAt, label: Paid At, type: DATE_TIME}
+      - {name: processorReference, label: Processor Reference, type: TEXT}
+    relations:
+      - {to: invoice, label: Invoice, reverseLabel: Payments, type: MANY_TO_ONE}
+
+  # ======================= Marketing surfaces =======================
+
+  - nameSingular: landingPage
+    namePlural: landingPages
+    labelSingular: Landing Page
+    labelPlural: Landing Pages
+    description: Registry of funnel and landing pages hosted elsewhere, with the conversion numbers attached so marketing performance stays visible in the CRM.
+    icon: IconLayoutBoard
+    ghl_equivalent: Funnels / websites / pages
+    fields:
+      - {name: url, label: URL, type: LINKS}
+      - {name: status, label: Status, type: SELECT, options: [Live, Draft, Archived]}
+      - {name: pageType, label: Page Type, type: SELECT, options: [Landing Page, Funnel Step, Blog Post, Website Page, Thank You]}
+      - {name: visits, label: Visits, type: NUMBER}
+      - {name: conversions, label: Conversions, type: NUMBER}
+      - {name: vendor, label: Vendor, type: TEXT}
+
+  - nameSingular: socialPost
+    namePlural: socialPosts
+    labelSingular: Social Post
+    labelPlural: Social Posts
+    description: Social planner equivalent — scheduled and published posts recorded from the scheduling tool.
+    icon: IconShare
+    ghl_equivalent: Social planner
+    fields:
+      - {name: platform, label: Platform, type: SELECT, options: [LinkedIn, Facebook, Instagram, X, YouTube, Google Business]}
+      - {name: status, label: Status, type: SELECT, options: [Draft, Scheduled, Published, Failed]}
+      - {name: scheduledFor, label: Scheduled For, type: DATE_TIME}
+      - {name: postUrl, label: Post URL, type: LINKS}
+      - {name: engagementCount, label: Engagement, type: NUMBER}
+
+  - nameSingular: review
+    namePlural: reviews
+    labelSingular: Review
+    labelPlural: Reviews
+    description: Reputation records pulled in by n8n from review platforms.
+    icon: IconStar
+    ghl_equivalent: Reputation management
+    fields:
+      - {name: platform, label: Platform, type: SELECT, options: [Google, Facebook, G2, Capterra, Trustpilot, Clutch]}
+      - {name: rating, label: Rating, type: RATING}
+      - {name: reviewedAt, label: Reviewed At, type: DATE}
+      - {name: reviewUrl, label: Review URL, type: LINKS}
+      - {name: responded, label: Responded, type: BOOLEAN}
+    relations:
+      - {to: company, label: Company, reverseLabel: Reviews, type: MANY_TO_ONE}
+
+  # ======================= Operations =======================
+
+  - nameSingular: membershipEnrollment
+    namePlural: membershipEnrollments
+    labelSingular: Membership Enrollment
+    labelPlural: Membership Enrollments
+    description: Course and portal enrolment. Likely served by aspireelearning.com already — verify before treating GHL memberships as a dependency.
+    icon: IconCertificate
+    ghl_equivalent: Memberships / courses / communities
+    fields:
+      - {name: courseName, label: Course Name, type: TEXT}
+      - {name: status, label: Status, type: SELECT, options: [Enrolled, In Progress, Completed, Expired, Withdrawn]}
+      - {name: progressPercent, label: Progress %, type: NUMBER}
+      - {name: enrolledAt, label: Enrolled At, type: DATE}
+      - {name: certificateUrl, label: Certificate URL, type: LINKS}
+    relations:
+      - {to: person, label: Person, reverseLabel: Enrollments, type: MANY_TO_ONE}
+      - {to: trainingAccount, label: Training Account, reverseLabel: Enrollments, type: MANY_TO_ONE}
+
+  - nameSingular: automationRun
+    namePlural: automationRuns
+    labelSingular: Automation Run
+    labelPlural: Automation Runs
+    description: >
+      n8n execution log written back into the CRM. This is what replaces GHL's
+      workflow execution history — the very signal the GHL API refused to expose
+      (docs/02 §2). Building it in from day one means the next migration audit
+      does not repeat this one's hardest problem.
+    icon: IconRobot
+    ghl_equivalent: Workflow execution history
+    fields:
+      - {name: workflowName, label: Workflow Name, type: TEXT}
+      - {name: status, label: Status, type: SELECT, options: [Success, Failed, Running, Cancelled]}
+      - {name: startedAt, label: Started At, type: DATE_TIME}
+      - {name: durationMs, label: Duration (ms), type: NUMBER}
+      - {name: errorMessage, label: Error Message, type: TEXT}
+      - {name: n8nExecutionId, label: n8n Execution ID, type: TEXT}
+      - {name: ghlWorkflowId, label: Origin GHL Workflow ID, type: TEXT}

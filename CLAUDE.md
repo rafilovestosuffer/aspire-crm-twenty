@@ -5,7 +5,10 @@ Inventory every GoHighLevel feature Aspire **actually uses**, and decide for eac
 whether Twenty (self-hosted) + n8n can replace it. Output is one CSV, one row per
 feature, with an evidence-backed disposition.
 
-This repo is the audit *instrument*. It is not the Twenty deployment.
+This repo is the audit *instrument*, and it also holds the **scripted Twenty
+schema** (`reference/twenty_schema.yaml` + `scripts/twenty_provision.py`) so the
+object model rebuilds in one command instead of being clicked through the UI. It
+is not the Twenty deployment itself — no Docker config, no server settings.
 
 ## Hard rules — never violate
 
@@ -43,8 +46,10 @@ Do not hide these — a short, honest ESCALATE list is what makes the rest credi
 ```
 reference/ghl_feature_taxonomy.csv   master checklist — the spine, nothing gets missed
 reference/ghl_endpoints.yaml         endpoint registry driving the puller
+reference/twenty_schema.yaml         25-object GHL parity model for Twenty
 scripts/ghl_pull.py                  read-only GHL puller (registry-driven)
 scripts/twenty_probe.py              probes the live Twenty instance for capability truth
+scripts/twenty_provision.py          builds the object model via the Metadata API
 scripts/build_audit.py               merges pulls + taxonomy → out/feature_audit.csv
 raw/                                 GHL pull output          (gitignored)
 workflows/                           workflow internals       (gitignored)
