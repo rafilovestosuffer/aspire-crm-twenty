@@ -1,0 +1,112 @@
+id,ghl_area,feature,in_use,evidence,volume_90d,criticality,disposition,twenty_component,n8n_component,effort_days,notes
+DM-01,Data Model,Contact custom fields,unknown,raw/custom_fields.json not pulled yet,,,TWENTY,full,none,,Map to Person/Company fields. Count fields with <2% fill as DROP candidates.
+DM-02,Data Model,Opportunity custom fields,unknown,raw/custom_fields.json not pulled yet,,,TWENTY,full,none,,Map to Opportunity fields.
+DM-03,Data Model,Custom objects,unknown,raw/custom_objects.json not pulled yet,,,TWENTY,full,none,,Twenty custom objects are stronger than GHL's. Direct win.
+DM-04,Data Model,Custom values (merge variables),unknown,raw/custom_values.json not pulled yet,,,TWENTY+N8N,partial,supporting,,Twenty has no account-level variable store. Hold in n8n env or a settings object.
+DM-05,Data Model,Tags,unknown,raw/tags.json not pulled yet,,,TWENTY,full,none,,"Check whether tags encode workflow state rather than describing contacts — those become fields, not tags."
+DM-06,Data Model,Companies / businesses,unknown,raw/businesses.json not pulled yet,,,TWENTY,full,none,,Maps to Twenty Company.
+DM-07,Data Model,DND / consent flags,unknown,raw/custom_fields.json not pulled yet,,,ESCALATE,partial,supporting,,Consent must be enforced at send time. Twenty cannot enforce it because Twenty does not send campaigns.
+CT-01,Contacts & Segmentation,Smart lists / saved filters,unknown,requires manual UI check,,,TWENTY,full,none,,Twenty saved views are equivalent.
+CT-02,Contacts & Segmentation,Bulk actions on contacts,unknown,requires manual UI check,,,TWENTY+N8N,partial,supporting,,Twenty supports bulk edit; bulk workflow enrolment differs.
+CT-03,Contacts & Segmentation,Import / export CSV,unknown,requires manual UI check,,,TWENTY,full,none,,Twenty has native CSV import.
+CT-04,Contacts & Segmentation,Duplicate detection / merge,unknown,requires manual UI check,,,TWENTY+N8N,partial,primary,,Dedup logic belongs in n8n at ingest.
+CT-05,Contacts & Segmentation,Manual actions queue (call/SMS tasks),unknown,requires manual UI check,,,TWENTY+N8N,partial,supporting,,Twenty Tasks cover the queue; the dialer does not exist.
+CT-06,Contacts & Segmentation,Notes and tasks on records,unknown,requires manual UI check,,,TWENTY,full,none,,Native.
+OP-01,Opportunities & Pipelines,Pipelines and stages,unknown,raw/pipelines.json not pulled yet,,,TWENTY,full,none,,Direct map. Count stages per pipeline.
+OP-02,Opportunities & Pipelines,Opportunity value / forecasting,unknown,raw/pipelines.json not pulled yet,,,TWENTY+N8N,partial,supporting,,Twenty forecasting is weaker than GHL. Confirm what is actually used before calling it a gap.
+OP-03,Opportunities & Pipelines,Pipeline automation triggers,unknown,raw/workflows.json not pulled yet,,,TWENTY,full,supporting,,Twenty record-updated triggers cover stage changes.
+CV-01,Conversations & Inbox,Unified inbox,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,none,,Twenty has no inbox. Email threads sync to records only.
+CV-02,Conversations & Inbox,SMS conversations,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,none,,No SMS in Twenty.
+CV-03,Conversations & Inbox,WhatsApp,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,primary,,n8n can route via a provider; needs vendor decision.
+CV-04,Conversations & Inbox,Facebook / Instagram DM,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,primary,,Vendor decision.
+CV-05,Conversations & Inbox,Google Business Messages,unknown,raw/conversations.json not pulled yet,,,ESCALATE,none,primary,,Vendor decision.
+CV-06,Conversations & Inbox,Live chat widget,unknown,requires manual UI check,,,ESCALATE,none,none,,No equivalent.
+CV-07,Conversations & Inbox,Snippets / canned replies,unknown,raw/templates_sms.json not pulled yet,,,ESCALATE,none,supporting,,Tied to the inbox that does not exist.
+EM-01,Email & Templates,Email templates,unknown,raw/templates_email.json not pulled yet,,,TWENTY+N8N,partial,supporting,,Twenty Send Email has no template library. Templates live in n8n or the sending vendor.
+EM-02,Email & Templates,Drag-and-drop email builder,unknown,raw/email_builder_templates.json not pulled yet,,,ESCALATE,none,none,,editorData is not readable back via API — HTML export only. Rebuild cost is real.
+EM-03,Email & Templates,Bulk / campaign email send,unknown,raw/campaigns.json not pulled yet,,,ESCALATE,none,partial,,"HARD CEILING. Twenty Send Email = synced mailbox, one recipient per action."
+EM-04,Email & Templates,Drip sequences,unknown,raw/campaigns.json not pulled yet,,,TWENTY+N8N,partial,primary,,n8n Wait + Twenty Delay can sequence; sending still needs a vendor.
+EM-05,Email & Templates,Trigger links / click tracking,unknown,raw/trigger_links.json not pulled yet,,,N8N,none,primary,,n8n webhook redirect can reproduce this.
+EM-06,Email & Templates,Dedicated sending domain / DKIM / SPF,unknown,requires manual UI check,,,ESCALATE,none,none,,Deliverability infrastructure. Vendor decision.
+EM-07,Email & Templates,Unsubscribe / suppression list,unknown,requires manual UI check,,,ESCALATE,none,partial,,Compliance-critical. Must not be lost at cutover.
+EM-08,Email & Templates,Email verification,unknown,requires manual UI check,,,N8N,none,primary,,n8n plus a verification API.
+EM-09,Email & Templates,Scheduled email sends,unknown,raw/email_schedules.json not pulled yet,,,TWENTY+N8N,partial,primary,,Twenty schedule trigger plus n8n.
+SM-01,SMS & Telephony,SMS sending,unknown,raw/templates_sms.json not pulled yet,,,ESCALATE,none,partial,,HARD CEILING. Vendor decision.
+SM-02,SMS & Telephony,Phone numbers (LC Phone),unknown,requires manual UI check,,,ESCALATE,none,none,,Number ownership and porting. Vendor decision.
+SM-03,SMS & Telephony,A2P 10DLC registration,unknown,requires manual UI check,,,ESCALATE,none,none,,Regulatory registration is tied to the number provider. Long lead time — flag early.
+SM-04,SMS & Telephony,Inbound call routing / IVR,unknown,requires manual UI check,,,ESCALATE,none,none,,Vendor decision.
+SM-05,SMS & Telephony,Call recording,unknown,requires manual UI check,,,ESCALATE,none,none,,Retention and consent implications.
+SM-06,SMS & Telephony,Voicemail drop,unknown,requires manual UI check,,,ESCALATE,none,none,,Vendor decision.
+SM-07,SMS & Telephony,Missed-call text-back,unknown,requires manual UI check,,,ESCALATE,none,partial,,Depends on telephony vendor.
+AI-01,Voice & AI Features,Voice AI agents,unknown,raw/voice_ai_agents.json not pulled yet,,,ESCALATE,none,partial,,Export the prompts regardless of disposition — the prompt is the asset.
+AI-02,Voice & AI Features,Conversation AI bot,unknown,requires manual UI check,,,N8N,none,primary,,"n8n plus LLM gateway can reproduce, if a channel exists to speak on."
+AI-03,Voice & AI Features,Content AI,unknown,requires manual UI check,,,N8N,none,primary,,n8n plus LLM gateway.
+AI-04,Voice & AI Features,Reviews AI,unknown,requires manual UI check,,,N8N,none,primary,,Depends on review platform access.
+AI-05,Voice & AI Features,Workflow AI assistant,unknown,requires manual UI check,,,DROP-CANDIDATE,none,none,,"Authoring aid, not a running feature. Usually safe to drop."
+CL-01,Calendars & Scheduling,Calendars and availability,unknown,raw/calendars.json not pulled yet,,,ESCALATE,none,partial,,Twenty has no booking engine.
+CL-02,Calendars & Scheduling,Public booking pages,unknown,raw/calendars.json not pulled yet,,,ESCALATE,none,none,,Vendor decision — this is usually the most-missed feature at cutover.
+CL-03,Calendars & Scheduling,Round-robin / team distribution,unknown,raw/calendar_groups.json not pulled yet,,,ESCALATE,none,partial,,Assignment logic can move to n8n; the booking surface cannot.
+CL-04,Calendars & Scheduling,Appointment reminders,unknown,raw/workflows.json not pulled yet,,,TWENTY+N8N,partial,primary,,Sending channel still needs a vendor.
+CL-05,Calendars & Scheduling,Booking volume (evidence),unknown,raw/calendar_events.json not pulled yet,,,UNKNOWN,n/a,n/a,,Evidence row. Zero bookings in 90 days makes CL-01..04 DROP candidates.
+FS-01,Forms & Surveys,Forms,unknown,raw/forms.json not pulled yet,,,ESCALATE,none,partial,,Twenty has no public forms. n8n webhook plus a hosted form tool.
+FS-02,Forms & Surveys,Form conditional logic,unknown,requires manual UI check,,,ESCALATE,none,partial,,Depends on replacement form tool.
+FS-03,Forms & Surveys,Surveys / quizzes,unknown,raw/surveys.json not pulled yet,,,ESCALATE,none,partial,,Same as FS-01.
+FS-04,Forms & Surveys,Form submission volume (evidence),unknown,raw/form_submissions.json not pulled yet,,,UNKNOWN,n/a,n/a,,Evidence row. Drives DROP decisions across FS-01..03.
+FS-05,Forms & Surveys,Survey submission volume (evidence),unknown,raw/survey_submissions.json not pulled yet,,,UNKNOWN,n/a,n/a,,Evidence row.
+FW-01,Funnels & Websites,Funnels,unknown,raw/funnels.json not pulled yet,,,ESCALATE,none,none,,No equivalent. Confirm whether marketing owns these outside GHL already.
+FW-02,Funnels & Websites,Websites / pages,unknown,raw/funnels.json not pulled yet,,,ESCALATE,none,none,,Check whether aspiretss.com is actually hosted here or on WordPress.
+FW-03,Funnels & Websites,Order forms / upsells,unknown,requires manual UI check,,,ESCALATE,none,none,,Commerce surface.
+FW-04,Funnels & Websites,Custom domains,unknown,requires manual UI check,,,ESCALATE,none,none,,DNS cutover — sequencing risk at go-live.
+FW-05,Funnels & Websites,Tracking codes / pixels,unknown,requires manual UI check,,,ESCALATE,none,none,,Move with whatever hosts the pages.
+BL-01,Blogs & Content,Blog sites,unknown,raw/blog_sites.json not pulled yet,,,ESCALATE,none,partial,,Relevant to S-02 blog pipeline in the 82-item plan.
+BL-02,Blogs & Content,Blog posts,unknown,raw/blog_sites.json not pulled yet,,,ESCALATE,none,primary,,n8n can publish to a replacement CMS.
+BL-03,Blogs & Content,Blog authors / categories,unknown,raw/blog_authors.json not pulled yet,,,ESCALATE,none,none,,Moves with the CMS.
+WF-01,Workflows & Automation,Workflow inventory,unknown,raw/workflows.json not pulled yet,,,TWENTY+N8N,partial,primary,,Metadata only from API. Count published vs draft.
+WF-02,Workflows & Automation,Workflow internals (steps and actions),unknown,workflow internals not captured yet,,,TWENTY+N8N,partial,primary,,NOT available on any public endpoint. Requires the authenticated-session route.
+WF-03,Workflows & Automation,Workflow triggers,unknown,workflow internals not captured yet,,,TWENTY+N8N,partial,primary,,Map each GHL trigger to a Twenty trigger or an n8n trigger.
+WF-04,Workflows & Automation,If/else and conditional branching,unknown,workflow internals not captured yet,,,N8N,partial,primary,,n8n Switch/IF. Twenty Filter is weaker.
+WF-05,Workflows & Automation,Wait / delay steps,unknown,workflow internals not captured yet,,,TWENTY+N8N,full,primary,,Both have this.
+WF-06,Workflows & Automation,Goal / exit conditions,unknown,workflow internals not captured yet,,,N8N,none,partial,,No native equivalent. Rebuild as explicit checks.
+WF-07,Workflows & Automation,Math / formula operations,unknown,workflow internals not captured yet,,,N8N,partial,primary,,n8n Code node.
+WF-08,Workflows & Automation,Outbound webhooks from workflows,unknown,workflow internals not captured yet,,,TWENTY+N8N,full,primary,,Twenty HTTP Request action.
+WF-09,Workflows & Automation,Custom code steps,unknown,workflow internals not captured yet,,,TWENTY+N8N,full,primary,,Twenty Code action plus n8n Code node.
+WF-10,Workflows & Automation,Legacy campaigns (drip),unknown,raw/campaigns.json not pulled yet,,,ESCALATE,none,primary,,Often forgotten and still running. Check before assuming dead.
+WF-11,Workflows & Automation,Workflow execution history / enrolment counts,unknown,workflow internals not captured yet,,,UNKNOWN,n/a,n/a,,NOT exposed by the public API. This is the DROP evidence gap — see docs/02.
+PY-01,Payments & Commerce,Products and prices,unknown,raw/products.json not pulled yet,,,TWENTY+N8N,partial,supporting,,Model as Twenty records; billing stays external.
+PY-02,Payments & Commerce,Invoices,unknown,raw/invoices.json not pulled yet,,,ESCALATE,none,partial,,Twenty has no invoicing.
+PY-03,Payments & Commerce,Estimates / quotes (CPQ),unknown,raw/estimates.json not pulled yet,,,ESCALATE,none,partial,,Known Twenty gap. Maps to SA-04/SA-05 in the 82-item plan.
+PY-04,Payments & Commerce,Subscriptions / recurring billing,unknown,raw/payment_subscriptions.json not pulled yet,,,ESCALATE,partial,supporting,,Twenty can RECORD subscriptions (Service Subscription object) but cannot BILL them.
+PY-05,Payments & Commerce,Payment processor connections,unknown,raw/payment_providers.json not pulled yet,,,ESCALATE,none,none,,Stripe/PayPal connection moves with the billing surface.
+PY-06,Payments & Commerce,Coupons,unknown,raw/payment_coupons.json not pulled yet,,,ESCALATE,none,none,,Commerce surface.
+PY-07,Payments & Commerce,Documents and contracts (e-sign),unknown,requires manual UI check,,,ESCALATE,none,partial,,Vendor decision. Check whether legal already uses something else.
+MC-01,Memberships & Courses,Courses / memberships,unknown,requires manual UI check,,,ESCALATE,none,none,,Check overlap with aspireelearning.com — may already live there.
+MC-02,Memberships & Courses,Client portal,unknown,requires manual UI check,,,ESCALATE,none,none,,Vendor decision.
+MC-03,Memberships & Courses,Communities,unknown,requires manual UI check,,,DROP-CANDIDATE,none,none,,Frequently enabled and unused. Verify before escalating.
+MC-04,Memberships & Courses,Certificates,unknown,requires manual UI check,,,ESCALATE,none,partial,,Relevant to A-SAT training delivery.
+RV-01,Reputation & Reviews,Review requests,unknown,requires manual UI check,,,ESCALATE,none,partial,,Requires a sending channel.
+RV-02,Reputation & Reviews,Review monitoring / widgets,unknown,requires manual UI check,,,N8N,none,primary,,n8n plus platform APIs.
+SO-01,Social & Ads,Social planner scheduling,unknown,raw/social_accounts.json not pulled yet,,,N8N,none,primary,,"n8n plus platform APIs, or a dedicated tool."
+SO-02,Social & Ads,Connected social accounts,unknown,raw/social_accounts.json not pulled yet,,,ESCALATE,none,none,,Reconnection effort at cutover.
+SO-03,Social & Ads,Ad manager (Google / Facebook),unknown,requires manual UI check,,,N8N,none,primary,,Confirm whether ads are actually run from GHL or natively.
+RP-01,Reporting & Dashboards,Attribution reporting,unknown,requires manual UI check,,,TWENTY+N8N,partial,supporting,,"Cross-system attribution needs the AN-01 warehouse, not Twenty alone."
+RP-02,Reporting & Dashboards,Call reporting,unknown,requires manual UI check,,,ESCALATE,none,none,,Moves with telephony.
+RP-03,Reporting & Dashboards,Appointment reporting,unknown,requires manual UI check,,,ESCALATE,none,supporting,,Moves with scheduling.
+RP-04,Reporting & Dashboards,Agent / user performance reporting,unknown,requires manual UI check,,,TWENTY+N8N,partial,supporting,,Twenty views cover some of this.
+RP-05,Reporting & Dashboards,Custom dashboards,unknown,requires manual UI check,,,TWENTY+N8N,partial,supporting,,Twenty dashboards are less mature. Confirm what is actually watched.
+US-01,Users & Permissions,User accounts and seats,unknown,raw/users.json not pulled yet,,,TWENTY,full,none,,Map to workspace members. Count active seats.
+US-02,Users & Permissions,Roles and permission levels,unknown,raw/users.json not pulled yet,,,TWENTY,partial,none,,Twenty object-level roles. Field-level restriction is thinner.
+US-03,Users & Permissions,Teams,unknown,raw/users.json not pulled yet,,,TWENTY,partial,none,,Confirm whether teams drive routing logic.
+US-04,Users & Permissions,SSO,unknown,requires manual UI check,,,ESCALATE,partial,none,,Twenty SSO is Organization-tier. Confirm whether Aspire requires it.
+ST-01,Settings & Business Profile,Business profile / hours,unknown,raw/location_profile.json not pulled yet,,,TWENTY,partial,none,,Low effort.
+ST-02,Settings & Business Profile,Custom menu links,unknown,raw/custom_menus.json not pulled yet,,,TWENTY,partial,none,,Minor.
+ST-03,Settings & Business Profile,URL redirects,unknown,requires manual UI check,,,ESCALATE,none,none,,Moves with hosting.
+ST-04,Settings & Business Profile,Domains and DNS,unknown,requires manual UI check,,,ESCALATE,none,none,,Sequencing risk at go-live.
+IN-01,Integrations & Marketplace,Installed marketplace apps,unknown,requires manual UI check,,,UNKNOWN,none,partial,,No public read endpoint. Must be enumerated by hand.
+IN-02,Integrations & Marketplace,Native integrations (Stripe/Google/Meta/QuickBooks),unknown,requires manual UI check,,,N8N,none,primary,,Each needs its own reconnection plan.
+IN-03,Integrations & Marketplace,Zapier / Make connections,unknown,requires manual UI check,,,N8N,none,primary,,Hidden automation often lives here. Check explicitly.
+IN-04,Integrations & Marketplace,Inbound webhooks into GHL,unknown,requires manual UI check,,,N8N,partial,primary,,External systems posting into GHL will break at cutover unless repointed.
+AG-01,Agency & Multi-Location,Sub-account count,unknown,raw/sub_accounts.json not pulled yet,,,UNKNOWN,n/a,n/a,,Determines audit scope. Answer before estimating effort.
+AG-02,Agency & Multi-Location,Snapshots,unknown,raw/snapshots.json not pulled yet,,,DROP-CANDIDATE,none,none,,Audit instrument rather than a feature to migrate.
+AG-03,Agency & Multi-Location,SaaS mode / rebilling,unknown,requires manual UI check,,,UNKNOWN,none,none,,Only relevant if Aspire resells GHL to clients. Confirm.
+MD-01,Media & Assets,Media library,unknown,raw/media_files.json not pulled yet,,,TWENTY+N8N,partial,supporting,,Twenty attachments cover records; hosted assets for pages do not move.
+MO-01,Mobile & Field Access,Mobile app,unknown,requires manual UI check,,,ESCALATE,none,none,,Twenty has no native mobile app. Confirm whether anyone actually uses the GHL app.

@@ -1,0 +1,4 @@
+# Optional. Every script runs on the Python 3.9+ standard library alone —
+# ghl_pull.py falls back to a built-in parser for the registry if PyYAML
+# is absent. Installing PyYAML just makes registry parsing stricter.
+PyYAML>=6.0

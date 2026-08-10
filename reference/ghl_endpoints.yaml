@@ -1,0 +1,447 @@
+# GHL read-only endpoint registry.
+#
+# The puller walks this file. Every entry is a GET. Entries are never executed
+# with any other HTTP method — scripts/ghl_pull.py enforces that at transport level.
+#
+# class:
+#   config    — configuration/structure. Safe to write to raw/ in full.
+#   volume    — may contain PII. Body is DISCARDED; only a count + shape summary
+#               is retained, used as usage evidence.
+#   agency    — requires an agency-level (company) token. Skipped on sub-account.
+#
+# paginate:
+#   none         — single response
+#   limit_skip   — ?limit=N&skip=M
+#   limit_offset — ?limit=N&offset=M
+#   limit_page   — ?limit=N&page=M
+#
+# list_key: dotted path to the array in the response body.
+# Unverified entries are expected to fail on some tiers. Failure is recorded,
+# not fatal — the first run is a discovery run.
+
+defaults:
+  base_url: https://services.leadconnectorhq.com
+  version: "2021-07-28"
+  page_size: 100
+
+endpoints:
+
+  # ---------- Settings / foundation ----------
+  - key: location_profile
+    area: Settings & Business Profile
+    path: /locations/{locationId}
+    scope: locations.readonly
+    class: config
+    paginate: none
+    list_key: location
+    notes: Business profile, timezone, address, enabled features.
+
+  - key: custom_fields
+    area: Data Model
+    path: /locations/{locationId}/customFields
+    query: {model: all}
+    scope: locations/customFields.readonly
+    class: config
+    paginate: none
+    list_key: customFields
+    notes: Contact + opportunity custom fields. The object-key endpoint does NOT cover these.
+
+  - key: custom_values
+    area: Data Model
+    path: /locations/{locationId}/customValues
+    scope: locations/customValues.readonly
+    class: config
+    paginate: none
+    list_key: customValues
+    notes: Account-level merge variables used across templates and workflows.
+
+  - key: tags
+    area: Data Model
+    path: /locations/{locationId}/tags
+    scope: locations/tags.readonly
+    class: config
+    paginate: none
+    list_key: tags
+    notes: Tag vocabulary. Heavy tag use usually means tags are carrying workflow state.
+
+  - key: users
+    area: Users & Permissions
+    path: /users/
+    query: {locationId: "{locationId}"}
+    scope: users.readonly
+    class: config
+    paginate: none
+    list_key: users
+    notes: Seat count and role assignment. Maps to Twenty workspace members.
+
+  - key: businesses
+    area: Data Model
+    path: /businesses/
+    query: {locationId: "{locationId}"}
+    scope: businesses.readonly
+    class: config
+    paginate: none
+    list_key: businesses
+
+  # ---------- Custom objects ----------
+  - key: custom_objects
+    area: Data Model
+    path: /objects/
+    query: {locationId: "{locationId}"}
+    scope: objects/schema.readonly
+    class: config
+    paginate: none
+    list_key: objects
+    notes: If non-empty, these are the closest analogue to Twenty custom objects.
+
+  # ---------- Pipelines ----------
+  - key: pipelines
+    area: Opportunities & Pipelines
+    path: /opportunities/pipelines
+    query: {locationId: "{locationId}"}
+    scope: opportunities.readonly
+    class: config
+    paginate: none
+    list_key: pipelines
+    notes: Direct 1:1 map to Twenty Opportunity stages.
+
+  # ---------- Calendars ----------
+  - key: calendars
+    area: Calendars & Scheduling
+    path: /calendars/
+    query: {locationId: "{locationId}"}
+    scope: calendars.readonly
+    class: config
+    paginate: none
+    list_key: calendars
+
+  - key: calendar_groups
+    area: Calendars & Scheduling
+    path: /calendars/groups
+    query: {locationId: "{locationId}"}
+    scope: calendars.readonly
+    class: config
+    paginate: none
+    list_key: groups
+
+  - key: calendar_events
+    area: Calendars & Scheduling
+    path: /calendars/events
+    query: {locationId: "{locationId}", startTime: "{window_start_ms}", endTime: "{window_end_ms}"}
+    scope: calendars/events.readonly
+    class: volume
+    paginate: none
+    list_key: events
+    notes: Booking volume over the evidence window. Counts only — bodies discarded.
+
+  # ---------- Forms & surveys ----------
+  - key: forms
+    area: Forms & Surveys
+    path: /forms/
+    query: {locationId: "{locationId}"}
+    scope: forms.readonly
+    class: config
+    paginate: limit_skip
+    list_key: forms
+
+  - key: form_submissions
+    area: Forms & Surveys
+    path: /forms/submissions
+    query: {locationId: "{locationId}", startAt: "{window_start_date}", endAt: "{window_end_date}"}
+    scope: forms.readonly
+    class: volume
+    paginate: limit_page
+    list_key: submissions
+    notes: Per-form submission counts. This is the DROP signal for unused forms.
+
+  - key: surveys
+    area: Forms & Surveys
+    path: /surveys/
+    query: {locationId: "{locationId}"}
+    scope: surveys.readonly
+    class: config
+    paginate: limit_skip
+    list_key: surveys
+
+  - key: survey_submissions
+    area: Forms & Surveys
+    path: /surveys/submissions
+    query: {locationId: "{locationId}", startAt: "{window_start_date}", endAt: "{window_end_date}"}
+    scope: surveys.readonly
+    class: volume
+    paginate: limit_page
+    list_key: submissions
+
+  # ---------- Automation ----------
+  - key: workflows
+    area: Workflows & Automation
+    path: /workflows/
+    query: {locationId: "{locationId}"}
+    scope: workflows.readonly
+    class: config
+    paginate: none
+    list_key: workflows
+    notes: >
+      METADATA ONLY. Returns id/name/status/dates. No steps, no actions, no triggers.
+      This endpoint tells you HOW MANY workflows exist and which are published —
+      it cannot tell you what any of them do. Internals come from the session route.
+
+  - key: campaigns
+    area: Workflows & Automation
+    path: /campaigns/
+    query: {locationId: "{locationId}"}
+    scope: campaigns.readonly
+    class: config
+    paginate: none
+    list_key: campaigns
+    notes: Legacy drip campaigns. Often forgotten and still running.
+
+  - key: trigger_links
+    area: Workflows & Automation
+    path: /links/
+    query: {locationId: "{locationId}"}
+    scope: links.readonly
+    class: config
+    paginate: none
+    list_key: links
+
+  # ---------- Messaging assets ----------
+  - key: templates_email
+    area: Email & Templates
+    path: /locations/{locationId}/templates
+    query: {originId: "{locationId}", type: email, deleted: "false"}
+    scope: locations/templates.readonly
+    class: config
+    paginate: limit_skip
+    list_key: templates
+
+  - key: templates_sms
+    area: SMS & Telephony
+    path: /locations/{locationId}/templates
+    query: {originId: "{locationId}", type: sms, deleted: "false"}
+    scope: locations/templates.readonly
+    class: config
+    paginate: limit_skip
+    list_key: templates
+
+  - key: email_builder_templates
+    area: Email & Templates
+    path: /emails/builder
+    query: {locationId: "{locationId}"}
+    scope: emails/builder.readonly
+    class: config
+    paginate: limit_offset
+    list_key: data
+    notes: Builder-designed email templates. editorData is not readable back — HTML only.
+
+  - key: email_schedules
+    area: Email & Templates
+    path: /emails/schedule
+    query: {locationId: "{locationId}"}
+    scope: emails/schedule.readonly
+    class: config
+    paginate: none
+    list_key: schedules
+
+  - key: conversations
+    area: Conversations & Inbox
+    path: /conversations/search
+    query: {locationId: "{locationId}"}
+    scope: conversations.readonly
+    class: volume
+    paginate: none
+    list_key: conversations
+    notes: Channel mix evidence — which channels are actually live. Counts only.
+
+  # ---------- Sites ----------
+  - key: funnels
+    area: Funnels & Websites
+    path: /funnels/funnel/list
+    query: {locationId: "{locationId}"}
+    scope: funnels/funnel.readonly
+    class: config
+    paginate: none
+    list_key: funnels
+
+  - key: blog_sites
+    area: Blogs & Content
+    path: /blogs/site/all
+    query: {locationId: "{locationId}"}
+    scope: blogs/post.readonly
+    class: config
+    paginate: limit_skip
+    list_key: data
+
+  - key: blog_authors
+    area: Blogs & Content
+    path: /blogs/authors
+    query: {locationId: "{locationId}"}
+    scope: blogs/author.readonly
+    class: config
+    paginate: limit_offset
+    list_key: authors
+
+  - key: blog_categories
+    area: Blogs & Content
+    path: /blogs/categories
+    query: {locationId: "{locationId}"}
+    scope: blogs/category.readonly
+    class: config
+    paginate: limit_offset
+    list_key: categories
+
+  # ---------- Commerce ----------
+  - key: products
+    area: Payments & Commerce
+    path: /products/
+    query: {locationId: "{locationId}"}
+    scope: products.readonly
+    class: config
+    paginate: limit_offset
+    list_key: products
+
+  - key: payment_coupons
+    area: Payments & Commerce
+    path: /payments/coupon/list
+    query: {altId: "{locationId}", altType: location}
+    scope: payments/coupons.readonly
+    class: config
+    paginate: limit_offset
+    list_key: data
+
+  - key: payment_providers
+    area: Payments & Commerce
+    path: /payments/integrations/provider/whitelabel
+    query: {altId: "{locationId}", altType: location}
+    scope: payments/integration.readonly
+    class: config
+    paginate: none
+    list_key: data
+    notes: Which payment processors are actually connected.
+
+  - key: payment_subscriptions
+    area: Payments & Commerce
+    path: /payments/subscriptions
+    query: {altId: "{locationId}", altType: location}
+    scope: payments/subscriptions.readonly
+    class: volume
+    paginate: limit_offset
+    list_key: data
+    notes: Live recurring revenue. Directly relevant to the Service Subscription object.
+
+  - key: payment_orders
+    area: Payments & Commerce
+    path: /payments/orders
+    query: {altId: "{locationId}", altType: location}
+    scope: payments/orders.readonly
+    class: volume
+    paginate: limit_offset
+    list_key: data
+
+  - key: invoices
+    area: Payments & Commerce
+    path: /invoices/
+    query: {altId: "{locationId}", altType: location}
+    scope: invoices.readonly
+    class: volume
+    paginate: limit_offset
+    list_key: invoices
+
+  - key: invoice_templates
+    area: Payments & Commerce
+    path: /invoices/template
+    query: {altId: "{locationId}", altType: location}
+    scope: invoices/template.readonly
+    class: config
+    paginate: limit_offset
+    list_key: data
+
+  - key: invoice_schedules
+    area: Payments & Commerce
+    path: /invoices/schedule
+    query: {altId: "{locationId}", altType: location}
+    scope: invoices/schedule.readonly
+    class: config
+    paginate: limit_offset
+    list_key: schedules
+
+  - key: estimates
+    area: Payments & Commerce
+    path: /invoices/estimate/list
+    query: {altId: "{locationId}", altType: location}
+    scope: invoices/estimate.readonly
+    class: volume
+    paginate: limit_offset
+    list_key: estimates
+    notes: Quoting. Twenty has no CPQ — this is a known gap candidate (SA-04/SA-05).
+
+  # ---------- Marketing surfaces ----------
+  - key: social_accounts
+    area: Social & Ads
+    path: /social-media-posting/{locationId}/accounts
+    scope: social-media-posting.readonly
+    class: config
+    paginate: none
+    list_key: results.accounts
+
+  - key: media_files
+    area: Media & Assets
+    path: /medias/files
+    query: {altId: "{locationId}", altType: location, sortBy: createdAt, sortOrder: desc}
+    scope: medias.readonly
+    class: config
+    paginate: limit_offset
+    list_key: files
+
+  # ---------- Newer / tier-dependent (expected to 404 on some accounts) ----------
+  - key: voice_ai_agents
+    area: AI Features
+    path: /voice-ai/agents
+    query: {locationId: "{locationId}"}
+    scope: voice-ai-agent.readonly
+    class: config
+    paginate: none
+    list_key: agents
+    unverified: true
+    notes: Voice AI config. Prompts are the migration-relevant part.
+
+  - key: custom_menus
+    area: Settings & Business Profile
+    path: /custom-menus/
+    query: {locationId: "{locationId}"}
+    scope: custom-menu-link.readonly
+    class: config
+    paginate: none
+    list_key: customMenus
+    unverified: true
+
+  - key: store_settings
+    area: Payments & Commerce
+    path: /store/store-setting
+    query: {altId: "{locationId}", altType: location}
+    scope: store/setting.readonly
+    class: config
+    paginate: none
+    list_key: data
+    unverified: true
+
+  # ---------- Agency level ----------
+  - key: snapshots
+    area: Agency & Multi-Location
+    path: /snapshots/
+    query: {companyId: "{companyId}"}
+    scope: snapshots.readonly
+    class: agency
+    paginate: none
+    list_key: snapshots
+    notes: Agency token required. Gateway to the Snapshot Assets CSV export.
+
+  - key: sub_accounts
+    area: Agency & Multi-Location
+    path: /locations/search
+    query: {companyId: "{companyId}"}
+    scope: locations.readonly
+    class: agency
+    paginate: limit_skip
+    list_key: locations
+    notes: Confirms how many sub-accounts are in scope for the audit.
