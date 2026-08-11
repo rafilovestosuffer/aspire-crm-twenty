@@ -95,6 +95,7 @@ Prospect books via vendor booking page
 <tr><td>Landing pages / funnels</td><td><span class="pill t-vendor">VENDOR</span></td><td>Existing CMS if there is one; otherwise a page builder. Registered in Twenty as <code>landingPage</code> records with visits and conversions</td></tr>
 <tr><td>Websites</td><td><span class="pill t-vendor">VENDOR</span></td><td>Verify first — likely already elsewhere</td></tr>
 <tr><td>Blogs</td><td><span class="pill t-vendor">VENDOR</span></td><td>CMS. n8n can publish programmatically, which supports the automated content pipeline in the wider automation plan</td></tr>
+<tr><td>Blog authors / categories</td><td><span class="pill t-vendor">VENDOR</span></td><td>Taxonomy moves with the CMS. Map author and category names during content migration — losing them breaks existing blog URLs and internal links</td></tr>
 <tr><td>Order forms / upsells</td><td><span class="pill t-vendor">VENDOR</span></td><td>Commerce surface — see §25</td></tr>
 <tr><td>Custom domains / DNS</td><td><span class="pill t-vendor">VENDOR</span></td><td><b>Sequencing risk.</b> DNS changes propagate for hours and must be choreographed with the page migration</td></tr>
 <tr><td>URL redirects</td><td><span class="pill t-vendor">VENDOR</span></td><td>Move with hosting. Inventory every existing redirect — they exist because something linked to the old URL</td></tr>
@@ -192,7 +193,7 @@ Prospect books via vendor booking page
 <tr><td>Custom audiences / conversion API</td><td><span class="pill t-n8n">N8N</span></td><td>Meta Marketing API and CAPI, GA4 Measurement Protocol, Google Ads offline conversions. All survive unchanged (§13.5)</td></tr>
 </table>
 
-<h2>28. Memberships, courses, communities and affiliates</h2>
+<h2>28. Memberships, courses, affiliates and remaining modules</h2>
 
 <table class="wide">
 <tr><th style="width:24%">GoHighLevel feature</th><th style="width:14%">Replacement</th><th>Build</th></tr>
@@ -206,4 +207,27 @@ Prospect books via vendor booking page
 <div class="callout ok">
 <span class="lbl">This is where the vendor count falls</span>
 <p>Clusters G and H exist in the catalogue because GoHighLevel ships these modules, not because Aspire uses them. Confirming that with evidence removes two of the eight vendor decisions outright and is a morning's work in the manual sweep. Do it early — it materially changes the number reported to management.</p>
+</div>
+
+<h3>28.1 Remaining modules</h3>
+
+<p>The smaller GoHighLevel modules, listed so the coverage claim in this document is complete rather than nearly complete. Each is low-effort individually; collectively they are the kind of thing discovered on cutover day.</p>
+
+<table class="wide">
+<tr><th style="width:24%">GoHighLevel feature</th><th style="width:14%">Replacement</th><th>Build and notes</th></tr>
+<tr><td>Snippets / canned replies</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Short reusable message text. Store as <code>emailTemplate</code> records with <code>purpose = Transactional</code>, or as <code>mergeVariable</code> entries for one-liners. If the inbox decision in §17 selects a shared-inbox vendor, that vendor has its own snippet feature and this becomes a DROP</td></tr>
+<tr><td>Math / formula operations</td><td><span class="pill t-n8n">N8N</span></td><td>n8n expressions or a Code node. Full JavaScript arithmetic rather than GoHighLevel's fixed operation list — this is an upgrade, not a workaround</td></tr>
+<tr><td>Legacy campaigns (drip)</td><td><span class="pill t-vendor">VENDOR</span> / <span class="pill t-drop">DROP</span></td><td>GoHighLevel's pre-workflow drip system. <b>Frequently forgotten and still running</b> — check <code>raw/campaigns.json</code> before assuming it is dead. Anything live rebuilds as a nurture sequence (§15.2); anything dormant is a DROP</td></tr>
+<tr><td>Custom menu links</td><td><span class="pill t-twenty">TWENTY</span></td><td>Sidebar links to external tools. Twenty supports workspace navigation customisation; low effort. Inventory what each link points at — some are shortcuts to systems nobody mentioned in the audit</td></tr>
+<tr><td>Installed marketplace apps</td><td><span class="pill t-n8n">N8N</span> / <span class="pill t-drop">DROP</span></td><td><b>No public endpoint exposes these — enumerate by hand.</b> Each installed app is doing something to your data. Determine what, then rebuild in n8n or retire. A common source of "why did that stop working" after cutover</td></tr>
+<tr><td>Native integrations<br><span class="small">Stripe · Google · Meta · QuickBooks · Shopify</span></td><td><span class="pill t-n8n">N8N</span></td><td>Each needs its own reconnection plan and OAuth re-authorisation against the replacement stack. n8n has nodes for most. <b>QuickBooks and Stripe in particular may be finance-owned</b> — confirm the boundary before touching them</td></tr>
+<tr><td>Inbound webhooks <i>into</i> GoHighLevel</td><td><span class="pill t-n8n">N8N</span></td><td>External systems posting into GoHighLevel <b>break silently at cutover unless repointed</b> to n8n. On the pre-cutover checklist (§30.3) for exactly this reason</td></tr>
+<tr><td>Zapier / Make connections</td><td><span class="pill t-n8n">N8N</span></td><td>Often sit in a personal account and are invisible from inside GoHighLevel. <b>Ask teammates directly</b> — absence of evidence is not evidence of absence</td></tr>
+<tr><td>SaaS mode / rebilling</td><td><span class="pill t-drop">DROP</span></td><td>Agency white-labelling — only relevant if Aspire resells GoHighLevel to clients. For internal use this is out of scope, but <b>confirm rather than assume</b>: if any client is being rebilled, terminating the account has contractual consequences well beyond this migration</td></tr>
+<tr><td>Sub-account management</td><td><span class="pill t-drop">DROP</span></td><td>Twenty uses one workspace with a <code>brand</code> field separating Aspire TSS from Aspire eLearning (§7.2). If GoHighLevel runs multiple sub-accounts, each is a separate audit — confirm the count first, because it multiplies every estimate in this document</td></tr>
+</table>
+
+<div class="callout warn">
+<span class="lbl">Two of these carry disproportionate risk</span>
+<p><b>Installed marketplace apps</b> and <b>inbound webhooks into GoHighLevel</b> are the only items in this entire document that no API can enumerate for you. They must be listed by hand, and anything missed fails silently after the account closes — no error, no alert, just a process that quietly stopped. Both are in the manual sweep and on the pre-cutover checklist.</p>
 </div>

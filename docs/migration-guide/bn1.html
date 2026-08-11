@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="bn">
+<head>
+<meta charset="utf-8">
+<title>GHL থেকে Twenty + n8n — সহজ বাংলা ব্যাখ্যা</title>
+<style>
+@page {
+  size: A4; margin: 19mm 16mm 17mm 16mm;
+  @top-center { content: "GHL → Twenty + n8n · সহজ বাংলা ব্যাখ্যা"; font-size: 7.5pt; color: #8a94a6; padding-bottom: 3mm; }
+  @bottom-right { content: counter(page); font-size: 8.5pt; color: #5a6478; }
+  @bottom-left { content: "Aspire Tech · অভ্যন্তরীণ"; font-size: 7.5pt; color: #8a94a6; }
+}
+@page :first { @top-center { content: ""; } @bottom-left { content: ""; } @bottom-right { content: ""; } }
+
+body { font-family: "Noto Sans Bengali", "DejaVu Sans", sans-serif; font-size: 10pt; line-height: 1.72; color: #1c2430; margin: 0; }
+h1 { bookmark-level: 1; bookmark-label: content(); font-size: 18pt; color: #12325a; margin: 0 0 3mm 0; line-height: 1.35; page-break-after: avoid; }
+h2 { bookmark-level: 2; bookmark-label: content(); font-size: 13pt; color: #12325a; margin: 7mm 0 2.5mm 0; padding-bottom: 1.5mm; border-bottom: 1.6pt solid #12325a; line-height: 1.4; page-break-after: avoid; }
+h3 { font-size: 11pt; color: #1c4a80; margin: 5.5mm 0 2mm 0; line-height: 1.45; page-break-after: avoid; }
+p { margin: 0 0 2.5mm 0; }
+ul, ol { margin: 0 0 2.5mm 0; padding-left: 6mm; }
+li { margin-bottom: 1.4mm; }
+code { font-family: "DejaVu Sans Mono", monospace; font-size: 8.2pt; background: #eef2f7; padding: 0.3mm 1mm; border-radius: 1.5px; color: #0f3d6e; }
+table { border-collapse: collapse; width: 100%; margin: 2.5mm 0 4mm 0; font-size: 8.8pt; page-break-inside: avoid; }
+th { background: #12325a; color: #fff; text-align: left; padding: 1.8mm 2mm; font-weight: bold; font-size: 8.6pt; }
+td { border-bottom: 0.5pt solid #d5dde8; padding: 1.7mm 2mm; vertical-align: top; line-height: 1.6; }
+tr:nth-child(even) td { background: #f7fafd; }
+.wide { page-break-inside: auto; }
+.wide tr { page-break-inside: avoid; }
+
+.cover { padding-top: 34mm; page-break-after: always; }
+.cover .eyebrow { font-size: 9.5pt; color: #2d6cb5; letter-spacing: 1.5pt; margin-bottom: 6mm; }
+.cover h1 { bookmark-level: none; font-size: 27pt; line-height: 1.3; margin-bottom: 5mm; border: none; }
+.cover .sub { font-size: 12pt; color: #48566c; margin-bottom: 20mm; line-height: 1.65; }
+.cover .rule { height: 3pt; background: #2d6cb5; width: 52mm; margin-bottom: 8mm; }
+.cover .meta { font-size: 9.2pt; color: #48566c; line-height: 1.95; border-top: 0.5pt solid #c8d2e0; padding-top: 5mm; }
+.cover .meta b { color: #12325a; }
+
+.box { border-left: 3pt solid #2d6cb5; background: #f0f5fb; padding: 3mm 3.5mm; margin: 3.5mm 0; page-break-inside: avoid; }
+.box.warn { border-left-color: #b8860b; background: #fdf8ec; }
+.box.danger { border-left-color: #a02c2c; background: #fbf0f0; }
+.box.ok { border-left-color: #1e7a4a; background: #eefaf3; }
+.box .lbl { font-weight: bold; font-size: 9pt; color: #2d6cb5; display: block; margin-bottom: 1.5mm; }
+.box.warn .lbl { color: #8a6508; }
+.box.danger .lbl { color: #a02c2c; }
+.box.ok .lbl { color: #1e7a4a; }
+.box p:last-child { margin-bottom: 0; }
+
+.pill { display: inline-block; padding: 0.4mm 1.6mm; border-radius: 2px; font-size: 7.3pt; font-weight: bold; font-family: "DejaVu Sans", sans-serif; }
+.t-twenty { background: #d9ead8; color: #1d5c2e; }
+.t-n8n { background: #dde5f6; color: #23407d; }
+.t-both { background: #e2ddf0; color: #4b2f7a; }
+.t-vendor { background: #fae3cd; color: #8a4b06; }
+.t-drop { background: #e6e8ec; color: #4a5364; }
+
+.toc { page-break-after: always; }
+.toc h1 { border: none; font-size: 16pt; margin-bottom: 2mm; }
+.toc-part { font-weight: bold; color: #12325a; margin-top: 2.6mm; margin-bottom: 1mm; font-size: 9.4pt; border-bottom: 0.5pt solid #c8d2e0; padding-bottom: 0.7mm; }
+.toc-row { display: flex; justify-content: space-between; font-size: 8.6pt; margin-bottom: 0.3mm; }
+.toc-row span:last-child { color: #8a94a6; }
+.newpage { page-break-before: always; }
+.small { font-size: 8.4pt; color: #5a6478; }
+.en { font-family: "DejaVu Sans", sans-serif; }
+.script { background: #f7fafd; border: 0.5pt solid #c8d2e0; border-radius: 2px; padding: 3mm 3.5mm; margin: 3mm 0; page-break-inside: avoid; }
+.script .who { font-weight: bold; color: #12325a; font-size: 9pt; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="eyebrow">ASPIRE TECH · CRM মাইগ্রেশন</div>
+  <div class="rule"></div>
+  <h1>GoHighLevel থেকে<br>Twenty + n8n</h1>
+  <div class="sub">পুরো ৬৭ পাতার ইংরেজি ডকুমেন্টের সহজ বাংলা ব্যাখ্যা।<br>প্রতিটি সেকশন, প্রতিটি ফিচার — আর বসকে কীভাবে বোঝাবেন।</div>
+  <div class="meta">
+    <b>কার জন্য:</b> Rafi — Aspire Tech CRM প্রজেক্ট<br>
+    <b>কী আছে:</b> মূল ডকুমেন্টের ৩৩টি সেকশন · ১১১টি ফিচার · বসকে বোঝানোর স্ক্রিপ্ট<br>
+    <b>যাচাই করা হয়েছে:</b> GHL-এর ৭১টি অ্যাকশন ও ৩৮টি ট্রিগার — সবগুলো কভার করা আছে<br>
+    <b>তারিখ:</b> ১১ আগস্ট ২০২৬ &nbsp;·&nbsp; <b>রিভিশন:</b> ১.০
+  </div>
+</div>
+
+<!--TOC-->
+
+<h1>পর্ব ১ · আগে পুরো ছবিটা বুঝুন</h1>
+
+<h2>১. এই ডকুমেন্টটা কী, আর কেন লাগবে</h2>
+
+<p>মূল ইংরেজি ডকুমেন্টটা ৬৭ পাতার। ওটা <b>বানানোর ম্যানুয়াল</b> — কোন ফিচার কীভাবে রিপ্লেস হবে, ধাপে ধাপে। ওটা টেকনিক্যাল, আর ওটাই বসের কাছে যাবে।</p>
+
+<p>এই বাংলা ডকুমেন্টটা <b>আপনার জন্য</b>। উদ্দেশ্য তিনটা:</p>
+
+<ol>
+<li>ইংরেজি ডকুমেন্টের প্রতিটি সেকশনে কী লেখা আছে, সহজ ভাষায় বুঝিয়ে দেওয়া।</li>
+<li>GHL-এর প্রতিটি ফিচারের কী হবে, এক জায়গায় দেখানো।</li>
+<li><b>বসকে কীভাবে বোঝাবেন</b> — কী বলবেন, কোন প্রশ্ন আসবে, কী উত্তর দেবেন (পর্ব ৪)।</li>
+</ol>
+
+<div class="box">
+<span class="lbl">পড়ার নিয়ম</span>
+<p>তাড়া থাকলে <b>সেকশন ২, ৩ আর পর্ব ৪</b> পড়ুন — এতেই কাজ চলে যাবে। বাকিটা রেফারেন্স, যখন যেটা লাগবে তখন দেখে নেবেন।</p>
+</div>
+
+<h2>২. এক কথায় পুরো ব্যাপারটা</h2>
+
+<div class="box ok">
+<span class="lbl">মূল কথা</span>
+<p><b>Twenty + n8n মিলে GHL-এর ডেটা রাখার কাজ আর অটোমেশনের কাজ পুরোপুরি করতে পারবে — এমনকি আগের চেয়ে ভালোভাবে। কিন্তু মেসেজ পাঠানোর কাজ (ইমেইল, SMS, কল) একদমই পারবে না। ওটার জন্য আলাদা সার্ভিস কিনতে হবে।</b></p>
+</div>
+
+<h3>একটা analogy দেই</h3>
+
+<p>ধরুন GoHighLevel হলো একটা <b>বড় শপিং মল</b>। ভেতরে সব আছে — মুদি দোকান, কাপড়ের দোকান, ফোনের দোকান, রেস্টুরেন্ট, সিনেমা হল। এক জায়গায় সব, এক ভাড়ায়।</p>
+
+<p>এখন আপনি মল ছেড়ে দিচ্ছেন। Twenty হলো <b>একটা খুব ভালো মুদি দোকান</b> — মলের ভেতরের মুদি দোকানের চেয়েও ভালো, জিনিসপত্র গোছানো, নিজের মতো সাজানো যায়।</p>
+
+<p>কিন্তু মল ছাড়ার মানে হলো — কাপড়, ফোন, রেস্টুরেন্ট, সিনেমা এগুলোর জন্য <b>আলাদা আলাদা জায়গা খুঁজতে হবে</b>। মুদি দোকান যতই ভালো হোক, ওখানে সিনেমা দেখা যাবে না। এটা দোকানের দোষ না — মুদি দোকান তো সিনেমা হল না।</p>
+
+<p>ঠিক এই কারণেই GHL-এর ইমেইল-ক্যাম্পেইন, SMS, ফোন কল, ফর্ম, বুকিং পেজ — এগুলোর জন্য আলাদা সার্ভিস লাগবে। Twenty খারাপ বলে না; Twenty একটা CRM, মার্কেটিং প্ল্যাটফর্ম না।</p>
+
+<h3>তিনটা স্তরে ভাগ</h3>
+
+<table>
+<tr><th style="width:26%">স্তর</th><th style="width:24%">কে করবে</th><th>অবস্থা</th></tr>
+<tr><td><b>ডেটা রাখা</b><br><span class="small">কন্টাক্ট, কোম্পানি, ডিল, সাবস্ক্রিপশন</span></td><td>Twenty</td><td><b>১০০% হবে।</b> বরং GHL-এর চেয়ে ভালো — আমাদের ব্যবসার জন্য আলাদা অবজেক্ট বানানো যায়</td></tr>
+<tr><td><b>অটোমেশন</b><br><span class="small">ওয়ার্কফ্লো, ট্রিগার, শর্ত</span></td><td>Twenty + n8n</td><td><b>১০০% হবে।</b> n8n GHL-এর ওয়ার্কফ্লো বিল্ডারের চেয়ে অনেক শক্তিশালী</td></tr>
+<tr><td><b>মেসেজ পাঠানো</b><br><span class="small">ইমেইল, SMS, কল, চ্যাট</span></td><td>বাইরের সার্ভিস</td><td><b>Twenty/n8n পারবে না।</b> আলাদা সার্ভিস কিনতে হবে</td></tr>
+<tr><td><b>ওয়েব</b><br><span class="small">ফর্ম, ফানেল, বুকিং পেজ</span></td><td>বাইরের সার্ভিস</td><td><b>পারবে না।</b> তবে আমাদের হয়তো এগুলো এমনিতেই অন্য জায়গায় আছে</td></tr>
+</table>
+
+<h2>৩. সবচেয়ে জরুরি কথাটা — এটা না বুঝলে বাকি কিছু বোঝা যাবে না</h2>
+
+<p>Twenty-তে ইমেইল পাঠানোর একটা অপশন আছে। কিন্তু Twenty-র নিজের ডকুমেন্টেশনেই স্পষ্ট লেখা:</p>
+
+<div class="box danger">
+<span class="lbl">যাচাই করা তথ্য</span>
+<p>Twenty-র <span class="en">Send Email</span> অ্যাকশন আপনার <b>নিজের মেইলবক্স</b> (অফিসের Gmail/Outlook) থেকে ইমেইল পাঠায়, আর <b>একবারে মাত্র একজনকে</b>।</p>
+<p>মানে — <b>ক্যাম্পেইন ইঞ্জিন নেই। টেমপ্লেট লাইব্রেরি নেই। আনসাবস্ক্রাইব লিস্ট নেই। ডেলিভারেবিলিটি ম্যানেজমেন্ট নেই। SMS নেই। ফোন নেই।</b></p>
+</div>
+
+<p>এই এক লাইন থেকেই GHL-এর প্রায় অর্ধেক ফিচারের ভাগ্য ঠিক হয়ে যায়। যে ফিচারের কাজই হলো <b>একজন মানুষের কাছে কোনো চ্যানেলে পৌঁছানো</b> — সেটার জন্য তৃতীয় একটা সার্ভিস লাগবেই।</p>
+
+<h3>n8n কেন এটা সমাধান করতে পারে না</h3>
+
+<p>এখানে অনেকে ভুল করে। n8n খুব শক্তিশালী, তাই মনে হয় n8n দিয়েই সব হবে। কিন্তু —</p>
+
+<p><b>n8n একটা কুরিয়ার ম্যানেজারের মতো।</b> সে ঠিক করতে পারে কোন প্যাকেট কোথায় যাবে, কখন যাবে, কে পাবে। কিন্তু <b>তার নিজের কোনো গাড়ি নেই</b>। গাড়ি ভাড়া করতে হবে।</p>
+
+<p>ইমেইল পাঠানোর "গাড়ি" হলো একটা ESP (Email Service Provider)। SMS-এর গাড়ি হলো CPaaS। n8n শুধু ঠিক করে দেবে কাকে কী পাঠাতে হবে — পাঠাবে ওই সার্ভিস।</p>
+
+<h2>৪. তাহলে খরচ কি বাড়বে?</h2>
+
+<p>সৎ উত্তর: <b>লাইসেন্স খরচ কমবে, কিন্তু মোট খরচ কমবে কি না সেটা নির্ভর করে।</b> বসকে এটাই বলবেন — এটা লুকানোর চেষ্টা করলে প্রথম ফাইন্যান্স রিভিউতেই ধরা পড়বে।</p>
+
+<table>
+<tr><th style="width:44%">আগে</th><th>পরে</th></tr>
+<tr><td>১টা GHL সাবস্ক্রিপশন</td><td>সার্ভার খরচ + ৪–৬টা সার্ভিসের সাবস্ক্রিপশন + রক্ষণাবেক্ষণের সময়</td></tr>
+</table>
+
+<p>কিন্তু বিনিময়ে যা পাওয়া যায়:</p>
+<ul>
+<li>CRM-এর per-seat লাইসেন্স খরচ শূন্য — টিম বড় হলে খরচ বাড়ে না</li>
+<li>ডেটা মডেল আমাদের ব্যবসার মতো (সাবস্ক্রিপশন, কমপ্লায়েন্স, ট্রেনিং সিট)</li>
+<li>অটোমেশন অনেক শক্তিশালী, আর <b>ভুল হলে ধরা পড়ে</b> — GHL-এ পড়ত না</li>
+<li>কোনো ভেন্ডর লক-ইন নেই, ডেটা নিজেদের সার্ভারে</li>
+</ul>
+
+<div class="box warn">
+<span class="lbl">বসকে এই তুলনাটাই দেখাবেন</span>
+<p>শুধু "GHL-এর টাকা বাঁচবে" বললে সেটা অসম্পূর্ণ তুলনা। বলুন — "লাইসেন্স খরচ যাচ্ছে, কিন্তু ৪–৬টা সার্ভিসের খরচ আসছে। আসল লাভ হলো ডেটা মডেল, অটোমেশনের ক্ষমতা আর নিয়ন্ত্রণ।" এটা বললে আপনাকে বিশ্বাসযোগ্য মনে হবে।</p>
+</div>
+
+<h2>৫. সংখ্যায় পুরো হিসাব</h2>
+
+<p>GHL-এর ১১১টা ফিচার ধরে ধরে হিসাব করা হয়েছে (২৩টা এলাকায় ভাগ করা):</p>
+
+<table>
+<tr><th style="width:22%">রায়</th><th style="width:12%">সংখ্যা</th><th>মানে</th></tr>
+<tr><td><span class="pill t-twenty">TWENTY</span></td><td><b>১৫</b></td><td>Twenty-তে এমনিতেই আছে। শুধু সেটিং করলেই হবে, বানাতে হবে না</td></tr>
+<tr><td><span class="pill t-n8n">N8N</span></td><td><b>১৩</b></td><td>n8n দিয়ে হয়ে যাবে, Twenty লাগবে না</td></tr>
+<tr><td><span class="pill t-both">TWENTY+N8N</span></td><td><b>২০</b></td><td>ডেটা থাকবে Twenty-তে, লজিক চলবে n8n-এ</td></tr>
+<tr><td><span class="pill t-vendor">VENDOR</span></td><td><b>৫২</b></td><td>বাইরের সার্ভিস লাগবে। তবে এটা <b>৮টা সিদ্ধান্তে</b> মিলে যায়</td></tr>
+<tr><td><span class="pill t-drop">DROP</span></td><td><b>১১</b></td><td>আমরা ব্যবহারই করি না, বা অন্য জায়গায় আছে — বাদ</td></tr>
+</table>
+
+<div class="box warn">
+<span class="lbl">৫২ সংখ্যাটা ভয় পাওয়ার মতো — কিন্তু ভুলভাবে পড়া হচ্ছে</span>
+<p>এই ৫২ হলো <b>GHL-এ যা যা আছে</b> তার হিসাব — <b>আমরা যা যা ব্যবহার করি</b> তার না। অডিট শেষ হলে এর অনেকটাই বাদ যাবে।</p>
+<p>যেমন: <b>মেম্বারশিপ/কোর্স</b> — আমাদের তো <span class="en">aspireelearning.com</span> আছেই, তাহলে GHL-এর কোর্স মডিউল ব্যবহারই হয়তো করি না। <b>ওয়েবসাইট</b> — <span class="en">aspiretss.com</span> ২০১১ সাল থেকে চলছে, ওটা নিশ্চয়ই GHL-এ হোস্ট করা না।</p>
+<p><b>বাস্তবে ৩–৫টা সার্ভিস লাগবে, ৮টা না।</b> কিন্তু এটা প্রমাণ দিয়ে দেখাতে হবে, মুখে বললে হবে না।</p>
+</div>
+
+<h2>৬. যাচাই — সব ফিচার কি সত্যিই আছে?</h2>
+
+<p>আপনি বলেছিলেন একটা ফিচারও যেন বাদ না যায়। তাই মুখে দাবি না করে <b>স্ক্রিপ্ট দিয়ে মিলিয়ে দেখা হয়েছে</b>। GHL-এর নিজের অফিসিয়াল ডকুমেন্টেশন থেকে পুরো তালিকা নিয়ে, ডকুমেন্টের সাথে এক এক করে মেলানো হয়েছে:</p>
+
+<table>
+<tr><th style="width:46%">কী মেলানো হয়েছে</th><th style="width:18%">ফলাফল</th><th>উৎস</th></tr>
+<tr><td>GHL ওয়ার্কফ্লো <b>অ্যাকশন</b> (১৪টা ক্যাটাগরি)</td><td><b>৭১ / ৭১</b></td><td>HighLevel সাপোর্ট পোর্টাল</td></tr>
+<tr><td>GHL ওয়ার্কফ্লো <b>ট্রিগার</b></td><td><b>৩৮ / ৩৮</b></td><td>HighLevel ট্রিগার তালিকা + ২০২৬-এর নতুনগুলো</td></tr>
+<tr><td>আমাদের ফিচার তালিকা</td><td><b>১১১ / ১১১</b></td><td>নিজেদের taxonomy CSV</td></tr>
+</table>
+
+<div class="box ok">
+<span class="lbl">প্রথমবার মেলানোর সময় ৭টা ফিচার বাদ পড়েছিল</span>
+<p>স্ক্রিপ্ট ধরিয়ে দিয়েছিল — <span class="en">Snippets, Legacy campaigns, Custom menu links, Marketplace apps, Native integrations, SaaS mode, Sub-account management</span>। সেগুলো এখন <b>সেকশন ২৮.১</b>-এ যোগ করা হয়েছে।</p>
+<p>এটাই স্ক্রিপ্ট দিয়ে যাচাই করার লাভ — চোখে দেখে মেলালে এই ৭টা ধরা পড়ত না, আর go-live-এর দিন জানা যেত।</p>
+</div>

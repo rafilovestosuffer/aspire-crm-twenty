@@ -229,3 +229,4 @@ out/*
 !out/*.pdf
 docs/migration-guide/_combined.html
 .session_curl.txt
+docs/migration-guide/_combined_bn.html
