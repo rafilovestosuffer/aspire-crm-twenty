@@ -1,0 +1,225 @@
+<h1 class="newpage">Part IV · Conversations and channels</h1>
+
+<h2>17. The inbox problem and its architecture</h2>
+
+<p><b>What GoHighLevel does.</b> One inbox showing every conversation with a contact across SMS, email, WhatsApp, Facebook, Instagram, Google Business Messages, live chat and calls — threaded, searchable, with the contact record beside it. A rep works the whole day from that screen.</p>
+
+<p><b>The gap.</b> Twenty has no inbox. Email threads sync to records via a connected mailbox; nothing else appears anywhere. This is the single most-felt daily loss in the migration, and it deserves an explicit decision rather than a hope that nobody notices.</p>
+
+<h3>17.1 Three options, honestly compared</h3>
+
+<table class="wide">
+<tr><th style="width:20%">Option</th><th style="width:30%">What it is</th><th style="width:24%">Cost</th><th>Best when</th></tr>
+<tr><td><b>A. Record-only</b></td><td>All messages become <code>messageLog</code> records on the person. Full history, searchable, reportable. No live conversation view; replying means opening the vendor tool.</td><td>Lowest — included in the build. No extra vendor.</td><td>Conversations are low-volume, mostly email, and reps already live in Outlook or Gmail.</td></tr>
+<tr><td><b>B. Shared inbox vendor</b></td><td>A dedicated shared-inbox or helpdesk product handles live conversation; n8n mirrors messages into Twenty as <code>messageLog</code>.</td><td>Additional vendor and per-seat cost.</td><td>Reps genuinely work conversationally across channels all day.</td></tr>
+<tr><td><b>C. Channel-native</b></td><td>Email in the mail client, SMS in the CPaaS console, social in Meta Business Suite. Twenty holds the record.</td><td>Zero additional cost; highest context-switching burden.</td><td>Each channel has low volume and a single owner.</td></tr>
+</table>
+
+<div class="callout warn">
+<span class="lbl">Decide this from evidence, not preference</span>
+<p>The audit's conversation histogram answers it directly: it shows how many conversations exist per channel over 90 days. If the mix is 95% email with a handful of SMS threads, <b>Option A is correct and costs nothing</b>. If there are thousands of live SMS conversations across several reps, Option A will be rejected by users in week two and Option B was always the answer.</p>
+<p>Do not choose before that number exists — and note that it is one of the few genuinely reversible decisions here, since <code>messageLog</code> is built either way.</p>
+</div>
+
+<h3>17.2 What is built regardless</h3>
+
+<p>Under all three options, every message becomes a <code>messageLog</code> record: channel, direction, status, subject, vendor, vendor message id, timestamp, linked person. That preserves the thing that actually matters for a CRM — <b>the history is on the record, in one place, for reporting and for the next person who picks up the account.</b> What varies between options is only where a human types the reply.</p>
+
+<h2>18. Email</h2>
+
+<h3>18.1 The two kinds of email, and why they must be separated</h3>
+
+<table>
+<tr><th style="width:22%">Kind</th><th style="width:26%">Examples</th><th>Replacement</th></tr>
+<tr><td><b>Transactional / 1:1</b></td><td>Lead acknowledgement, appointment reminder, quote sent, password-style notices</td><td><span class="pill t-both">TWENTY+N8N</span> — Twenty's Send Email works from a synced mailbox; routing through the ESP sub-workflow is still preferable so consent and logging are uniform</td></tr>
+<tr><td><b>Bulk / campaign</b></td><td>Newsletter, nurture sequences, announcements, event invitations</td><td><span class="pill t-vendor">VENDOR</span> — ESP required. No alternative exists</td></tr>
+</table>
+
+<div class="callout danger">
+<span class="lbl">Never send bulk from a synced mailbox</span>
+<p>It is technically possible to loop Twenty's Send Email action over a list. Do not. A personal or shared mailbox has a low daily sending cap, no suppression list, no bounce handling and no reputation management. Sending campaign volume through it will get the mailbox rate-limited, then the sending domain flagged, and it puts <b>every</b> email Aspire sends — including genuine one-to-one sales conversations — at risk. The separation between transactional and bulk is not stylistic.</p>
+</div>
+
+<h3>18.2 ESP requirements</h3>
+
+<table>
+<tr><th style="width:30%">Requirement</th><th>Why it matters here</th></tr>
+<tr><td>Transactional + marketing on one platform</td><td>Two vendors means two suppression lists, and a contact who unsubscribes from one still receives the other</td></tr>
+<tr><td>API with template merge</td><td>n8n passes <code>{ templateKey, mergeData }</code>; the ESP renders. Keeps HTML out of workflows</td></tr>
+<tr><td><b>Suppression list with API access</b></td><td>Must import the GoHighLevel export and stay synchronised with <code>consentRecord</code></td></tr>
+<tr><td>Bounce / complaint / unsubscribe webhooks</td><td>Without these, <code>consentRecord</code> drifts out of date within weeks</td></tr>
+<tr><td>Dedicated sending domain, DKIM/SPF/DMARC</td><td>Deliverability. Warm-up support matters as much as the feature itself</td></tr>
+<tr><td>Open / click tracking with webhooks</td><td>Feeds engagement scoring and <code>campaign</code> statistics</td></tr>
+<tr><td>Scheduled sending</td><td>Or n8n schedules and the ESP sends immediately — either is workable</td></tr>
+</table>
+
+<h3>18.3 Migration sequence for email</h3>
+
+<p>Order matters more here than anywhere else in the project.</p>
+
+<table>
+<tr><th style="width:8%">Step</th><th style="width:30%">Action</th><th>Timing and risk</th></tr>
+<tr><td>1</td><td><b>Export the suppression list from GoHighLevel</b></td><td><b>Before anything else.</b> Verify the export actually works and the file is complete. This data is unrecoverable after termination</td></tr>
+<tr><td>2</td><td>Select ESP</td><td>Critical path — everything below waits on it</td></tr>
+<tr><td>3</td><td>Import suppression list into ESP <b>and</b> into <code>consentRecord</code></td><td>Both. The ESP enforces at send; Twenty is the auditable record</td></tr>
+<tr><td>4</td><td>Configure sending domain, DKIM, SPF, DMARC</td><td>DNS changes; coordinate with whoever owns DNS</td></tr>
+<tr><td>5</td><td><b>Begin domain warm-up</b></td><td><b>2–6 weeks.</b> Gradual volume ramp. Cannot be compressed</td></tr>
+<tr><td>6</td><td>Rebuild templates</td><td>GoHighLevel's <code>editorData</code> cannot be read back via API — only exported HTML. Budget real rebuild time; this is routinely underestimated</td></tr>
+<tr><td>7</td><td>Build the <code>[VEND] Send Email</code> sub-workflow</td><td>Can run in parallel with warm-up</td></tr>
+<tr><td>8</td><td>Wire bounce / complaint / unsubscribe webhooks</td><td>Before first production send, not after</td></tr>
+<tr><td>9</td><td>Send a low-volume real campaign</td><td>Verify deliverability with real recipients before committing</td></tr>
+<tr><td>10</td><td>Cut over</td><td>Only once 1–9 are demonstrably complete</td></tr>
+</table>
+
+<h3>18.4 Trigger links and click tracking <span class="pill t-n8n">N8N</span></h3>
+
+<p>Fully replaceable with no vendor. n8n serves the redirect:</p>
+
+<pre>
+[MSG] Tracked Link Redirect
+
+1  Webhook  GET /t/:slug        (Respond: Using Respond to Webhook node)
+2  HTTP Request → Twenty: GET trackedLink where slug = :slug
+3  IF not found → Respond 404
+4  PATCH trackedLink { clickCount: +1 }
+5  IF a person id is present in the query string
+     → POST messageLog { status:"Clicked" }
+     → PATCH person { lastEngagedAt: now }
+6  Respond to Webhook: 302 → destinationUrl
+</pre>
+
+<p>Keep the redirect fast — do the Twenty writes after responding where the platform allows, or the click feels sluggish and some clients time out.</p>
+
+<h3>18.5 Email verification <span class="pill t-n8n">N8N</span></h3>
+
+<p>n8n plus a verification API, called at ingest in the lead workflow rather than in bulk later. Verifying before the first send protects sender reputation; verifying afterwards protects nothing.</p>
+
+<h2>19. SMS, WhatsApp and messaging channels</h2>
+
+<h3>19.1 SMS <span class="pill t-vendor">VENDOR</span></h3>
+
+<p><b>What GoHighLevel does.</b> SMS from a provisioned number, two-way threading in the inbox, templates, workflow sending, automatic STOP handling, A2P registration managed within the platform.</p>
+
+<p><b>Replacement.</b> A CPaaS provider driven by n8n. n8n has a Twilio node covering SMS, MMS and WhatsApp; any other provider works through HTTP Request.</p>
+
+<pre>
+[VEND] Send SMS — Sub-workflow
+  Input: { personId, templateKey, mergeData }
+
+1  GET person + consentRecords from Twenty
+2  IF consent(channel="SMS") ≠ "Opted In"
+     → return { sent:false, reason:"no_consent" }        ← hard stop
+3  IF no mobile in E.164 format
+     → return { sent:false, reason:"no_valid_number" }
+4  Render template with mergeData
+5  Twilio node (or HTTP Request) → send
+6  POST messageLog { channel:"SMS", direction:"Outbound",
+                     status:"Sent", vendorMessageId }
+7  return { sent:true, vendorMessageId }
+</pre>
+
+<h3>19.2 The three things that are not build tasks</h3>
+
+<table>
+<tr><th style="width:26%">Item</th><th style="width:16%">Lead time</th><th>Why it cannot be compressed</th></tr>
+<tr><td><b>A2P 10DLC registration</b></td><td>Weeks</td><td>Carrier-side regulatory review of brand and campaign. Unregistered traffic is filtered or blocked outright. Cannot begin until the CPaaS vendor is chosen</td></tr>
+<tr><td><b>Number porting</b></td><td>Days–weeks</td><td>Numbers can be unreachable during the porting window, and it is not quickly reversible. Any number printed on the website, in email signatures, on contracts or in Google Business is a live business dependency</td></tr>
+<tr><td><b>WhatsApp template approval</b></td><td>Days</td><td>Meta reviews each message template before it can be sent outside a 24-hour session window</td></tr>
+</table>
+
+<h3>19.3 Inbound SMS and STOP handling</h3>
+
+<p>Covered by recipe §15.6. The STOP branch is a carrier requirement, not a feature. It ships with the first SMS send.</p>
+
+<h3>19.4 Other messaging channels</h3>
+
+<table>
+<tr><th style="width:26%">Channel</th><th style="width:14%">Replacement</th><th>Notes</th></tr>
+<tr><td>WhatsApp</td><td><span class="pill t-vendor">VENDOR</span></td><td>CPaaS WhatsApp Business API. Session-window rules apply — outside 24 hours only approved templates send</td></tr>
+<tr><td>Facebook Messenger / Instagram DM</td><td><span class="pill t-vendor">VENDOR</span></td><td>Meta APIs via n8n. <b>Verify usage.</b> A B2B compliance firm rarely closes deals in Instagram DMs</td></tr>
+<tr><td>Google Business Messages</td><td><span class="pill t-vendor">VENDOR</span></td><td>Google Business Profile API</td></tr>
+<tr><td>Live chat widget</td><td><span class="pill t-vendor">VENDOR</span></td><td>Chat vendor; n8n mirrors transcripts into <code>messageLog</code></td></tr>
+<tr><td>Slack</td><td><span class="pill t-n8n">N8N</span></td><td>Native n8n node. No gap</td></tr>
+</table>
+
+<h2>20. Voice, IVR and telephony</h2>
+
+<h3>20.1 What has to be replaced</h3>
+
+<table>
+<tr><th style="width:30%">GoHighLevel capability</th><th>CPaaS equivalent</th></tr>
+<tr><td>Provisioned phone numbers</td><td>Numbers purchased or ported into the CPaaS account</td></tr>
+<tr><td>Outbound calling / click-to-dial</td><td>CPaaS voice API plus a softphone or browser SDK</td></tr>
+<tr><td>Inbound routing / IVR</td><td>Call-flow definition (TwiML or vendor equivalent), with n8n supplying dynamic decisions over HTTP</td></tr>
+<tr><td>Call recording</td><td>CPaaS recording. <b>Storage, retention and consent notices become Aspire's responsibility</b></td></tr>
+<tr><td>Voicemail drop</td><td>CPaaS answering-machine detection plus pre-recorded audio</td></tr>
+<tr><td>Missed-call text-back</td><td>Call-status webhook → n8n → SMS sub-workflow</td></tr>
+<tr><td>Call reporting</td><td><code>callLog</code> records in Twenty; reporting from Twenty views</td></tr>
+</table>
+
+<h3>20.2 IVR as a call flow</h3>
+
+<p>GoHighLevel's IVR actions — Gather Input on Call, Play Message, Connect to Call, End Call, Record Voicemail — are call-control primitives. They are rebuilt in the CPaaS, not in n8n. n8n's role is to answer questions the call flow asks:</p>
+
+<pre>
+Inbound call
+  → CPaaS call flow: "Press 1 for support, 2 for sales"
+  → Gather digit
+  → CPaaS webhook → n8n:
+        look up caller in Twenty by E.164 number
+        return the routing target for that account's owner
+  → CPaaS connects to the returned number
+  → Call-status webhook → n8n → POST callLog
+</pre>
+
+<div class="callout warn">
+<span class="lbl">Call recording carries obligations the CRM migration does not</span>
+<p>Recording consent requirements vary by jurisdiction, and Aspire operates from New York with clients in the US defence supply chain. Retention periods, storage location and access control for recordings are a compliance decision, not an engineering default. Confirm the current GoHighLevel settings during the manual sweep and carry the same or stricter rules forward — do not let them lapse silently at cutover.</p>
+</div>
+
+<h2>21. Consent and suppression — the enforcement layer</h2>
+
+<div class="callout danger">
+<span class="lbl">The highest-severity item in the entire migration</span>
+<p>Consent state currently lives in GoHighLevel and was <b>deliberately</b> made authoritative there. Removing GoHighLevel removes consent's home, and nothing else in the plan replaces it by default. If the account closes before the suppression list is exported and loaded, previously-unsubscribed people will be contacted again. For a company that sells compliance services, that is not an inconvenience — it is a demonstrable failure of the control Aspire advises clients to implement.</p>
+</div>
+
+<h3>21.1 The design</h3>
+
+<p><code>consentRecord</code> is per person, per channel, with a status, a source, a timestamp and a proof reference. Not a boolean on the contact — a boolean cannot answer "when, on what basis, and can we evidence it?", which is the only question that matters when someone complains.</p>
+
+<table>
+<tr><th style="width:22%">Field</th><th>Purpose</th></tr>
+<tr><td><code>channel</code></td><td>Email · SMS · Voice · WhatsApp · Postal · All</td></tr>
+<tr><td><code>status</code></td><td>Opted In · Opted Out · Pending · Bounced · Complained</td></tr>
+<tr><td><code>source</code></td><td>Form Submission · Manual · Imported from GHL · Unsubscribe Link · Reply STOP · Vendor Webhook</td></tr>
+<tr><td><code>effectiveAt</code></td><td>When it took effect — the field that settles disputes</td></tr>
+<tr><td><code>proof</code></td><td>Form submission id, IP, or reference to the evidence</td></tr>
+<tr><td><code>vendorReference</code></td><td>ESP suppression-list entry id, for reconciliation</td></tr>
+</table>
+
+<h3>21.2 The three rules</h3>
+
+<ol>
+<li><b>Populate before termination.</b> Export the GoHighLevel suppression list and DND flags, load into both <code>consentRecord</code> and the ESP suppression list. Verify counts match on both sides. This happens before any termination date is agreed, not before go-live.</li>
+<li><b>Every send checks it.</b> Enforced structurally by putting the check inside the <code>[VEND] Send *</code> sub-workflows (§14.4), so a workflow author cannot forget it — they never call the sending API directly. <b>A consent record that nothing consults provides no protection and false assurance, which is worse than none.</b></li>
+<li><b>Vendor events write back.</b> ESP unsubscribes, hard bounces, spam complaints and SMS STOP replies all create <code>consentRecord</code> rows through n8n. Without this the record drifts within weeks and the CRM confidently reports consent that no longer exists.</li>
+</ol>
+
+<h3>21.3 Reconciliation</h3>
+
+<p>Two systems hold consent — Twenty as the auditable record, the ESP as the send-time enforcer. They will drift. A weekly reconciliation workflow is not optional:</p>
+
+<pre>
+[SYS] Consent Reconciliation — Schedule, weekly
+
+1  GET all consentRecord where status = "Opted Out"
+2  GET ESP suppression list via API
+3  Code: diff the two sets
+4  IF opted out in Twenty but absent from ESP  → add to ESP  (urgent)
+5  IF suppressed in ESP but absent from Twenty → create consentRecord
+6  Slack → #compliance: counts on both sides, and any discrepancy
+7  POST automationRun
+</pre>
+
+<p>Direction 4 is the one that causes harm — someone who unsubscribed but is still reachable by the ESP. Alert on it separately rather than folding it into a summary.</p>

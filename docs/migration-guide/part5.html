@@ -1,0 +1,371 @@
+<h2>14. The n8n foundation</h2>
+
+<p>Five things must exist before the first business workflow is built. Retrofitting any of them across fifty workflows is painful enough that teams skip it and live with the consequences.</p>
+
+<h3>14.1 Webhook signature verification</h3>
+
+<p>Twenty signs every webhook with HMAC SHA256 over <code>${timestamp}:${payload}</code>, delivered in the <code>x-twenty-webhook-timestamp</code> and <code>x-twenty-webhook-signature</code> headers. An n8n webhook URL is a public endpoint; without verification anyone who learns the URL can inject records.</p>
+
+<pre>
+// Code node, immediately after the Webhook node
+const crypto = require('crypto');
+
+const secret    = $env.TWENTY_WEBHOOK_SECRET;
+const timestamp = $input.first().json.headers['x-twenty-webhook-timestamp'];
+const signature = $input.first().json.headers['x-twenty-webhook-signature'];
+const payload   = JSON.stringify($input.first().json.body);
+
+const expected = crypto
+  .createHmac('sha256', secret)
+  .update(`${timestamp}:${payload}`)
+  .digest('hex');
+
+// Constant-time compare — a plain === leaks timing information
+const ok = crypto.timingSafeEqual(
+  Buffer.from(expected), Buffer.from(signature));
+
+if (!ok) throw new Error('Invalid webhook signature');
+
+// Reject replays: refuse anything older than five minutes
+if (Math.abs(Date.now() - Number(timestamp)) > 300000) {
+  throw new Error('Webhook timestamp outside tolerance');
+}
+
+return $input.all();
+</pre>
+
+<h3>14.2 The error workflow</h3>
+
+<p>n8n provides three layered mechanisms. Use all three; they solve different failures.</p>
+
+<table>
+<tr><th style="width:24%">Mechanism</th><th style="width:24%">Setting</th><th>Use for</th></tr>
+<tr><td><b>Retry on Fail</b></td><td>Node → Settings → Retry On Fail, with attempts and wait</td><td>Transient failures: timeouts, 429s, brief vendor outages. Two to three retries is standard.</td></tr>
+<tr><td><b>On Error → Continue</b></td><td>Node → Settings → On Error</td><td>Non-critical steps that must not block the run. Options are Stop Workflow (default), Continue, and Continue using error output.</td></tr>
+<tr><td><b>Error Trigger workflow</b></td><td>A separate workflow starting with the Error Trigger node, set as the error workflow on every production workflow</td><td>Workflow-level catch-all. Fires after the whole workflow fails.</td></tr>
+</table>
+
+<p><b>Build the error handler once:</b></p>
+
+<pre>
+[SYS] Error Handler — Error Trigger
+
+Error Trigger
+   ↓
+Code: extract workflow name, execution id, node, message, contact id
+   ↓
+HTTP Request → Twenty: create automationRun
+   { workflowName, status: "FAILED", errorMessage,
+     n8nExecutionId, startedAt }
+   ↓
+IF: is this a repeat failure of the same workflow within 1 hour?
+   ├─ yes → NoOp        (suppress alert storms)
+   └─ no  → Slack: post to #crm-alerts with a link to the execution
+</pre>
+
+<div class="callout danger">
+<span class="lbl">A silent failure is worse than an outage</span>
+<p>An outage is noticed. A workflow that quietly stopped enrolling leads is discovered when someone asks why the pipeline is thin, typically three weeks later. GoHighLevel gave no visibility into this at all. n8n does — but only if the error workflow is wired to every production workflow from the beginning.</p>
+</div>
+
+<h3>14.3 Idempotency and loop prevention</h3>
+
+<p>Two failure modes will corrupt data if not designed for up front.</p>
+
+<p><b>Idempotency.</b> Webhooks retry. A vendor that does not get a 200 quickly will send the same event again, and a workflow that blindly creates records will produce duplicates. Always search-then-upsert on a deterministic external key:</p>
+
+<pre>
+1. HTTP Request → Twenty: GET /rest/people?filter[emails][eq]=&lt;email&gt;
+2. IF found:  PATCH /rest/people/&lt;id&gt;
+   ELSE:      POST  /rest/people
+</pre>
+
+<p>Where the object carries an external id — <code>ghlContactId</code>, <code>vendorEventId</code>, <code>n8nExecutionId</code> — filter on that instead of email. It is stable; email is not.</p>
+
+<p><b>Loop prevention.</b> A Twenty record-updated webhook triggers n8n, n8n writes back to Twenty, the write fires the webhook again. Left unguarded this exhausts the 100-request-per-minute ceiling within minutes and can corrupt records on both sides.</p>
+
+<table>
+<tr><th style="width:30%">Guard</th><th>Implementation</th></tr>
+<tr><td>Field-scoped triggers</td><td><b>Strongest guard.</b> Scope the Twenty trigger to fields the workflow never writes. If the workflow writes <code>score</code>, do not trigger on <code>score</code>.</td></tr>
+<tr><td><code>lastSyncedAt</code> check</td><td>n8n sets it on write; the workflow exits early if the record changed within a few seconds of that timestamp.</td></tr>
+<tr><td><code>sourceSystem</code> field</td><td>n8n stamps its own writes and skips events carrying its own stamp.</td></tr>
+<tr><td>Execution ceiling</td><td>An alert when one workflow exceeds an expected executions-per-hour threshold. The last line of defence, and the one that catches the case nobody predicted.</td></tr>
+</table>
+
+<h3>14.4 Sub-workflows — the structural decision that pays for itself</h3>
+
+<p>Every vendor call goes in a sub-workflow with a stable input contract. Business workflows call the sub-workflow; they never call the vendor directly.</p>
+
+<pre>
+[VEND] Send Email — Sub-workflow
+  Input contract:
+    { personId, templateKey, mergeData, channel: "email" }
+
+  1. HTTP Request → Twenty: fetch person + consentRecords
+  2. IF consent for channel is not "Opted In"  → return { sent:false,
+                                                 reason:"no_consent" }
+  3. HTTP Request → Twenty: fetch mergeVariable values
+  4. HTTP Request → ESP: send with merged template
+  5. HTTP Request → Twenty: create messageLog
+  6. return { sent:true, vendorMessageId }
+</pre>
+
+<p>Three things follow from this, and all three matter:</p>
+<ul>
+<li><b>Consent is enforced in exactly one place.</b> A workflow author cannot forget the check, because they never touch the sending API.</li>
+<li><b>Swapping the ESP touches one workflow</b>, not fifty. Given that vendor selection is happening in parallel with the build, this is not hypothetical.</li>
+<li><b>Every send is logged identically</b>, so <code>messageLog</code> is a complete record rather than a partial one.</li>
+</ul>
+
+<h3>14.5 Rate limiting against Twenty</h3>
+
+<p>Twenty allows <b>100 requests per minute</b> and batches of <b>60 records</b>. A migration or nightly job that loops one record at a time will hit the ceiling immediately.</p>
+
+<table>
+<tr><th style="width:34%">Pattern</th><th>Use</th></tr>
+<tr><td><b>Loop Over Items</b>, batch size 50, Wait 1 s between batches</td><td>Any bulk operation. Keeps well inside the ceiling with headroom.</td></tr>
+<tr><td>Batch create/update, 60 records per call</td><td>Migration loads and nightly syncs.</td></tr>
+<tr><td>GraphQL batch upsert</td><td>Create-or-update in one call — the most efficient migration path.</td></tr>
+<tr><td>Retry On Fail with backoff on 429</td><td>Every node touching Twenty.</td></tr>
+</table>
+
+<h2>15. Worked recipes</h2>
+
+<p>Six automations built end to end. Between them they exercise every pattern in §12–13; most GoHighLevel workflows are a variation on one of these.</p>
+
+<h3>15.1 Inbound lead → qualified, assigned, acknowledged</h3>
+
+<p><b>GoHighLevel equivalent:</b> Form Submitted → Create Contact → Add Tag → Assign to User → Send Email → Send Internal Notification.</p>
+
+<pre>
+[LEAD] Create Person — Web Form
+
+ 1  Webhook (POST from form vendor)
+ 2  Code: verify vendor signature
+ 3  Set: normalise — lowercase email, E.164 phone, trim
+ 4  HTTP Request → Twenty: GET /rest/people?filter[emails][eq]={{email}}
+ 5  IF exists
+      ├ yes → PATCH person (fill blanks only, never overwrite)
+      └ no  → POST person
+ 6  IF company domain present
+      → search Company by domain; upsert; link person
+ 7  POST formSubmission  { payload, sourceUrl, consentGiven }
+ 8  IF consentGiven
+      → POST consentRecord { channel:"Email", status:"Opted In",
+                             source:"Form Submission", effectiveAt:now }
+ 9  Code: score the lead
+      +30 corporate domain · +20 CMMC/SOC in message
+      +25 employees > 50   · −40 free email domain
+10  PATCH person { leadScore }
+11  Switch on score
+      ├ ≥60 → assign to senior rep   (round-robin, §below)
+      ├ 30–59 → assign to SDR queue
+      └ <30 → tag nurture, no assignment
+12  POST Task { assignee, "Call new lead", due +1 business day }
+13  Execute Sub-workflow [VEND] Send Email
+      { templateKey:"lead_ack", personId, mergeData }
+14  Slack → #sales: name, company, score, link to Twenty record
+15  POST automationRun { status:"Success" }
+</pre>
+
+<p><b>Round-robin assignment</b> has no native equivalent in either tool. Deterministic and stateless:</p>
+
+<pre>
+// Code node — no counter to store, no drift
+const reps = ['rep-uuid-1','rep-uuid-2','rep-uuid-3'];
+const key  = $json.personId;                    // stable per person
+const hash = [...key].reduce((a,c) => a + c.charCodeAt(0), 0);
+return [{ json: { assigneeId: reps[hash % reps.length] } }];
+</pre>
+
+<p>Hashing the person id rather than incrementing a counter means the same person always routes to the same rep on re-runs, and no state has to live in n8n.</p>
+
+<h3>15.2 Multi-step nurture sequence with exit conditions</h3>
+
+<p><b>GoHighLevel equivalent:</b> Wait → Send Email → If/Else → Goal Event → Drip Mode.</p>
+
+<p>GoHighLevel's Goal Event silently removes a contact when a condition is met. n8n has no equivalent, so the exit check is written explicitly before each send. More verbose, and considerably easier to reason about — the exit condition is visible rather than implied by a setting on another node.</p>
+
+<pre>
+[LEAD] Nurture Sequence — 5 touches over 21 days
+
+Trigger: Twenty webhook — person.updated where tag = "nurture"
+
+ 1  Verify signature · filter event · loop guard
+ 2  Sub-workflow [VEND] Send Email  { templateKey:"nurture_1" }
+ 3  Wait 3 days
+ 4  ── EXIT CHECK (repeat before every subsequent send) ──
+    GET person + opportunities + appointments
+    IF   opportunity created
+      OR appointment booked
+      OR consentRecord status = "Opted Out"
+      OR tag "nurture" removed
+      → PATCH person { nurtureStatus: "Exited" }
+        POST automationRun { status:"Success", note:"goal met" }
+        Stop and Error (explicit end)
+ 5  Sub-workflow [VEND] Send Email  { templateKey:"nurture_2" }
+ 6  Wait 5 days → EXIT CHECK → touch 3
+ 7  Wait 7 days → EXIT CHECK → touch 4
+ 8  Wait 6 days → EXIT CHECK → touch 5
+ 9  PATCH person { nurtureStatus:"Completed" }
+</pre>
+
+<div class="callout warn">
+<span class="lbl">Long waits and workflow edits</span>
+<p>A 21-day sequence means executions sit waiting for three weeks. Editing the workflow while executions are in flight produces undefined behaviour on resume. For sequences longer than a few days, prefer a <b>scheduled state-machine</b>: store <code>nurtureStep</code> and <code>nextTouchAt</code> on the person, and run a daily workflow that processes whoever is due. It survives edits, restarts and redeploys — none of which a long Wait does.</p>
+</div>
+
+<h3>15.3 Appointment reminder with reschedule</h3>
+
+<p><b>GoHighLevel equivalent:</b> Customer Booked Appointment → Wait → Send SMS → Send Email.</p>
+
+<pre>
+[MSG] Appointment Reminders — Schedule
+
+Trigger: Schedule, hourly
+
+1  GET appointments where scheduledAt in next 24–25 h
+                     AND status = "Booked"
+                     AND reminder24hSent = false
+2  Loop Over Items (batch 50, wait 1 s)
+3    Sub-workflow [VEND] Send Email { templateKey:"appt_reminder_24h" }
+4    IF person has mobile AND SMS consent = Opted In
+        → Sub-workflow [VEND] Send SMS { templateKey:"appt_sms_24h" }
+5    PATCH appointment { reminder24hSent: true }
+
+Second schedule at 2 h uses the same shape with reminder2hSent.
+</pre>
+
+<p>The <code>reminderSent</code> boolean is what makes the hourly schedule safe to re-run. Without it, a retry sends the reminder twice.</p>
+
+<h3>15.4 Renewal escalation — the highest-value automation for Aspire</h3>
+
+<p>No GoHighLevel equivalent, because GoHighLevel has no subscription object. This is the automation the new data model makes possible.</p>
+
+<pre>
+[SUB] Renewal Escalation — Schedule
+
+Trigger: Schedule, daily 06:00 UTC
+
+1  GET serviceSubscription where status = "Active"
+       AND renewalDate within next 90 days
+2  Switch on days-until-renewal
+   ├ 90 → PATCH status "Renewal Due"
+   │      POST Task to owner: "Begin renewal conversation"
+   │      Slack → #renewals
+   ├ 60 → Sub-workflow [VEND] Send Email { "renewal_60d" }
+   │      POST Task: "Confirm renewal intent"
+   ├ 30 → IF no opportunity linked to this subscription
+   │        → POST Opportunity { stage:"Renewal", amount: mrr × term }
+   │        → Slack → #renewals ESCALATION
+   └  7 → IF still no opportunity
+            → Slack → #sales-leadership URGENT
+            → POST Task to manager
+3  POST automationRun
+</pre>
+
+<p>This is worth building first. It is pure business value, touches no vendor, needs no channel beyond internal Slack, and can be built and proven <b>before any vendor decision is made</b> — which makes it the ideal first workflow to demonstrate the new stack.</p>
+
+<h3>15.5 Human approval gate</h3>
+
+<p>No GoHighLevel equivalent at all. n8n's Wait node exposes <code>$execution.resumeUrl</code>, generated at runtime, which turns any workflow into an approval flow.</p>
+
+<pre>
+[MSG] Campaign Approval
+
+1  Schedule or manual trigger
+2  Build the campaign segment from Twenty
+3  Code: build approve / reject URLs from $execution.resumeUrl
+4  Slack: post summary + recipient count + Approve / Reject buttons
+5  Wait — On Webhook Call  (resumes when a button is clicked)
+6  IF approved
+     ├ yes → Loop batches → [VEND] Send Email → POST campaign record
+     └ no  → Slack: "Campaign rejected by {{user}}" → end
+</pre>
+
+<p>Use this for anything with blast radius: bulk sends, card charges, bulk record updates, anything that touches more than a handful of contacts.</p>
+
+<h3>15.6 Inbound reply handling and consent</h3>
+
+<p><b>GoHighLevel equivalent:</b> Customer Replied trigger.</p>
+
+<pre>
+[MSG] Inbound Reply Handler
+
+1  Webhook (ESP or CPaaS inbound)
+2  Verify signature
+3  Match sender → Twenty person (email or E.164 phone)
+4  POST messageLog { direction:"Inbound", status:"Replied", channel }
+5  Switch on channel + content
+   ├ SMS body matches /^(STOP|UNSUBSCRIBE|CANCEL|QUIT)$/i
+   │   → POST consentRecord { channel:"SMS", status:"Opted Out",
+   │                          source:"Reply STOP", effectiveAt:now }
+   │   → Slack → #compliance
+   ├ Email is an auto-reply / OOO  → NoOp
+   └ genuine reply
+       → PATCH person { lastRepliedAt: now }
+       → POST Task to owner: "Reply received — respond"
+       → Slack → owner's DM
+</pre>
+
+<div class="callout danger">
+<span class="lbl">The STOP branch is a legal requirement</span>
+<p>Carrier rules require honouring an SMS opt-out immediately. This branch is not an enhancement to add later — if SMS is in scope, it ships with the first SMS send or the SMS programme should not launch.</p>
+</div>
+
+<h2>16. Workflow migration procedure</h2>
+
+<p>Because GoHighLevel's API does not expose workflow internals, the inventory is manual. Structure it so it is done once, correctly.</p>
+
+<h3>16.1 Per-workflow record</h3>
+
+<p>For every GoHighLevel workflow, capture:</p>
+
+<table>
+<tr><th style="width:30%">Field</th><th>Notes</th></tr>
+<tr><td>Name, id, status</td><td>From <code>GET /workflows/</code> — the one thing the API does provide</td></tr>
+<tr><td>Trigger(s)</td><td>Map to §12</td></tr>
+<tr><td>Step sequence</td><td>Every action in order, with its settings — wait durations, template ids, conditions</td></tr>
+<tr><td>Enrolment volume</td><td><b>Not available via API.</b> Read from the execution-log view in the UI</td></tr>
+<tr><td>Last execution</td><td>Same source</td></tr>
+<tr><td>Decision</td><td>Rebuild · Merge into another · Drop</td></tr>
+<tr><td>Rebuilt as</td><td>n8n workflow name once built</td></tr>
+</table>
+
+<h3>16.2 The discard pass</h3>
+
+<p>Run this <b>before</b> capturing step detail. It typically removes a third to a half of the workflows, and each removed workflow is one nobody has to read, rebuild, test or explain.</p>
+
+<ul>
+<li>Draft and never published → drop</li>
+<li>Zero enrolments in 90 days → drop candidate</li>
+<li>Duplicates of another workflow → merge</li>
+<li>Depends only on a feature already classified DROP → drop</li>
+</ul>
+
+<div class="callout warn">
+<span class="lbl">Use a 365-day window for anything annual</span>
+<p>Aspire sells annual compliance engagements and yearly training renewals. A workflow named <i>CMMC Annual Review</i> or <i>Renewal 90d Notice</i> will show zero enrolments in a 90-day window and look dead. Re-check anything named like a renewal, review, annual or compliance cycle at 365 days before dropping it. This is the most likely way a genuinely important automation gets deleted.</p>
+</div>
+
+<h3>16.3 Rebuild order</h3>
+
+<table>
+<tr><th style="width:10%">Order</th><th style="width:32%">Category</th><th>Why</th></tr>
+<tr><td><b>1</b></td><td>Internal-only <span class="small">(Slack, tasks, field updates)</span></td><td>No vendor dependency. Build and prove the stack while vendor selection is still running. §15.4 is the model.</td></tr>
+<tr><td><b>2</b></td><td>Twenty-internal record automations</td><td>Native Twenty workflows. Fast.</td></tr>
+<tr><td>3</td><td>Inbound capture <span class="small">(forms, webhooks)</span></td><td>Needs the form vendor, but not the ESP.</td></tr>
+<tr><td>4</td><td>Email-dependent</td><td>Blocked on ESP selection and domain warm-up.</td></tr>
+<tr><td>5</td><td>SMS / voice-dependent</td><td>Blocked on CPaaS, A2P registration and number porting — the longest lead times.</td></tr>
+</table>
+
+<h3>16.4 Verification before cutover</h3>
+
+<p>For each rebuilt workflow, prove three things and record the evidence:</p>
+<ol>
+<li><b>It fires</b> — trigger the condition on a test record and confirm the execution.</li>
+<li><b>It does the same thing</b> — compare output against the GoHighLevel workflow's behaviour on the same input, field by field.</li>
+<li><b>It fails safely</b> — force an error and confirm the error workflow catches it, the alert arrives, and an <code>automationRun</code> record is written.</li>
+</ol>
+
+<p>Then spot-check five rebuilt workflows by hand against the original GoHighLevel definitions. If all five match, trust the rest. If any is wrong, fix the method and re-verify the batch — a classification that is 90% right is indistinguishable from one that is 100% right until go-live day.</p>

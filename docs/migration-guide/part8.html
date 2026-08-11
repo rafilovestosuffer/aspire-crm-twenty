@@ -1,0 +1,133 @@
+<h1 class="newpage">Part VIII · Reporting and delivery</h1>
+
+<h2>29. Reporting, dashboards and attribution</h2>
+
+<table class="wide">
+<tr><th style="width:24%">GoHighLevel capability</th><th style="width:14%">Replacement</th><th>Build</th></tr>
+<tr><td>Pipeline reporting</td><td><span class="pill t-twenty">TWENTY</span></td><td>Twenty views grouped by stage, owner or service line. Direct equivalent for day-to-day sales reporting</td></tr>
+<tr><td>Custom dashboards</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Twenty dashboards are less mature than GoHighLevel's. <b>Confirm what is actually watched</b> — a dashboard nobody has opened in 90 days is a DROP, not a requirement</td></tr>
+<tr><td>Call reporting</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Views over <code>callLog</code>. Arguably better than GoHighLevel's, because it sits beside the account record</td></tr>
+<tr><td>Appointment reporting</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Views over <code>appointment</code>, including a no-show rate the scheduling vendor will not calculate</td></tr>
+<tr><td>Email / campaign reporting</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>ESP webhooks update <code>campaign</code> aggregates; report from Twenty</td></tr>
+<tr><td>Agent / user performance</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Views grouped by owner across opportunities, tasks and <code>messageLog</code></td></tr>
+<tr><td>Attribution reporting</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Source captured at ingest and carried on the Person. <b>Cross-system attribution needs a warehouse</b>, not Twenty views — that is a separate project, not part of this migration</td></tr>
+</table>
+
+<div class="callout ok">
+<span class="lbl">One report GoHighLevel could never produce</span>
+<p><code>automationRun</code> makes automation health a CRM report: which workflows ran, how often, how many failed, and where. GoHighLevel does not expose execution history through its API at all — a limitation that materially obstructed this project's own audit. Building the write-back from day one means the next person to review this stack answers in one query what took weeks here.</p>
+</div>
+
+<h2>30. Migration sequencing and cutover runbook</h2>
+
+<h3>30.1 Phases</h3>
+
+<table class="wide">
+<tr><th style="width:8%">Phase</th><th style="width:24%">Work</th><th style="width:20%">Gate to exit</th><th>Runs in parallel with</th></tr>
+<tr><td><b>0</b></td><td><b>Decide vendors A and B</b>. Export the suppression list. Export AI prompts. Inventory phone numbers and live URLs</td><td>ESP and CPaaS contracted; suppression export verified complete</td><td>Nothing — this gates the schedule</td></tr>
+<tr><td><b>1</b></td><td>Provision Twenty object model. Build the n8n foundation: error workflow, sub-workflow skeletons, credentials, naming</td><td>Foundation proven with one end-to-end test</td><td>Phase 0</td></tr>
+<tr><td><b>2</b></td><td>Start email domain warm-up. A2P registration. Begin number porting</td><td>Warm-up underway; A2P submitted</td><td>Phases 3–4 — this is elapsed time, not effort</td></tr>
+<tr><td><b>3</b></td><td>Migrate data: contacts, companies, opportunities, custom fields, tags. Load <code>consentRecord</code></td><td>Record counts reconciled; consent counts match on both sides</td><td>Phase 2</td></tr>
+<tr><td><b>4</b></td><td>Rebuild internal-only automations (§16.3 order 1–2)</td><td>Verified per §16.4</td><td>Phase 2</td></tr>
+<tr><td><b>5</b></td><td>Stand up forms and scheduling vendors. Rebuild capture automations. Redirect live URLs</td><td>Test submission and booking flow end to end</td><td>Phase 2</td></tr>
+<tr><td><b>6</b></td><td>Rebuild email automations. Low-volume real campaign</td><td>Deliverability verified with real recipients</td><td>—</td></tr>
+<tr><td><b>7</b></td><td>Rebuild SMS and voice. Complete number porting</td><td>STOP handling proven; numbers answering</td><td>—</td></tr>
+<tr><td><b>8</b></td><td>Parallel run. Reconcile daily</td><td>Exit criteria below</td><td>—</td></tr>
+<tr><td><b>9</b></td><td>Cutover. Decommission GoHighLevel</td><td>—</td><td>—</td></tr>
+</table>
+
+<h3>30.2 Parallel-run exit criteria</h3>
+
+<p>A parallel run without measurable exit criteria drifts permanently into two systems of record with two sets of numbers that disagree. Set these before the window opens:</p>
+
+<table>
+<tr><th style="width:44%">Criterion</th><th>Target</th></tr>
+<tr><td>New records originating in Twenty</td><td>≥ 90%</td></tr>
+<tr><td>Data parity — source records correctly mapped</td><td>≥ 99%</td></tr>
+<tr><td>Reporting parity against current numbers</td><td>within 2% variance</td></tr>
+<tr><td>Consent record count vs GoHighLevel suppression count</td><td><b>exact match</b></td></tr>
+<tr><td>Automation failure rate over 7 days</td><td>&lt; 1% of executions</td></tr>
+</table>
+
+<h3>30.3 Pre-cutover checklist</h3>
+
+<p>Every item verified, dated and initialled. Not asserted — verified.</p>
+
+<table class="wide">
+<tr><th style="width:26%">Area</th><th>Checks</th></tr>
+<tr><td><b>Consent</b></td><td>Suppression list exported · loaded into <code>consentRecord</code> · loaded into ESP · counts reconciled on both sides · every send path proven to check consent · STOP handling tested with a real number</td></tr>
+<tr><td><b>Email</b></td><td>Domain warmed · DKIM/SPF/DMARC verified · bounce, complaint and unsubscribe webhooks live · templates rebuilt and rendered on real clients · real low-volume campaign delivered to inbox not spam</td></tr>
+<tr><td><b>Telephony</b></td><td>A2P approved · numbers ported and answering · IVR flows tested · recording consent notices in place · call webhooks writing <code>callLog</code></td></tr>
+<tr><td><b>Capture</b></td><td>Every live form URL inventoried and redirected · every booking link inventoried and redirected · test submission and booking arrive in Twenty</td></tr>
+<tr><td><b>Automation</b></td><td>Every rebuilt workflow verified per §16.4 · error workflow wired to all · alerting confirmed to a monitored channel · no workflow left referencing a GoHighLevel endpoint</td></tr>
+<tr><td><b>Integrations</b></td><td>Every inbound webhook <i>into</i> GoHighLevel repointed · Zapier and Make connections migrated or retired · pixels and conversion APIs firing</td></tr>
+<tr><td><b>Data</b></td><td>Record counts reconciled · custom fields populated · relations intact · backup taken and <b>restore tested</b></td></tr>
+<tr><td><b>People</b></td><td>Users trained · runbook written · named owner for each vendor relationship · someone other than the builder can operate it</td></tr>
+</table>
+
+<div class="callout danger">
+<span class="lbl">Do not terminate the GoHighLevel account on cutover day</span>
+<p>Keep it in read-only for a defined period — 30 to 60 days. The cost is trivial against the cost of discovering, in week three, that a form nobody inventoried was still feeding leads, or that a suppression entry was missed. <b>Termination is irreversible and the data is not recoverable.</b> Set the termination date separately from the cutover date, and only after a clean reconciliation.</p>
+</div>
+
+<h2>31. Risk register</h2>
+
+<table class="wide">
+<tr><th style="width:22%">Risk</th><th style="width:8%">Severity</th><th style="width:28%">Impact</th><th>Mitigation</th></tr>
+<tr><td><b>Consent data lost at termination</b></td><td><b>Critical</b></td><td>Unsubscribed people contacted again. Compliance breach at a company selling compliance</td><td>Export and reconcile before any termination date is agreed. §21</td></tr>
+<tr><td><b>Cutover before domain warm-up</b></td><td><b>Critical</b></td><td>Campaigns land in spam; sender reputation damaged for months</td><td>Warm-up begins in Phase 2 and gates Phase 6</td></tr>
+<tr><td><b>A2P not registered before SMS launch</b></td><td>High</td><td>Messages filtered or blocked by carriers</td><td>Submit in Phase 2; gate Phase 7</td></tr>
+<tr><td><b>Number porting during business hours</b></td><td>High</td><td>Inbound calls unreachable</td><td>Schedule the porting window; publish a fallback number</td></tr>
+<tr><td><b>Workflow missed in inventory</b></td><td>High</td><td>Automation dies silently; noticed weeks later</td><td>Manual inventory per §16; 365-day window on annual workflows; spot-check five</td></tr>
+<tr><td><b>Live form or booking URL not redirected</b></td><td>High</td><td>Leads stop arriving from a page nobody remembered</td><td>URL inventory in the pre-cutover checklist</td></tr>
+<tr><td><b>Sync or agent loop</b></td><td>High</td><td>API quota exhausted; records corrupted; unbounded LLM spend</td><td>Field-scoped triggers, <code>sourceSystem</code> stamps, execution ceilings. §14.3, §26.1</td></tr>
+<tr><td><b>Twenty rate limit hit during migration</b></td><td>Medium</td><td>Migration stalls or partially completes</td><td>Batch 60, Loop Over Items, backoff on 429. §14.5</td></tr>
+<tr><td><b>Hidden automation in personal Zapier/Make</b></td><td>Medium</td><td>Breaks at cutover; owner may have left</td><td>Ask teammates directly — absence of evidence is not evidence of absence</td></tr>
+<tr><td><b>Inbox loss rejected by users</b></td><td>Medium</td><td>Adoption failure regardless of technical success</td><td>Decide §17 from the channel histogram before cutover, not after complaints</td></tr>
+<tr><td><b>Vendor selection delays everything</b></td><td>Medium</td><td>Schedule slips by the longest lead time</td><td>Phase 0 gates the plan explicitly</td></tr>
+<tr><td>Single-person knowledge concentration</td><td>Medium</td><td>Nothing operable if one person is unavailable</td><td>Runbook, workflows in Git, named second owner</td></tr>
+<tr><td>Email template rebuild underestimated</td><td>Low</td><td>Phase 6 overruns</td><td><code>editorData</code> is not readable back — budget real rebuild time from the start</td></tr>
+</table>
+
+<h2>32. Cost model</h2>
+
+<p>Open source removes licence cost, not operational cost. Both belong in the number given to management.</p>
+
+<table>
+<tr><th style="width:34%">Item</th><th style="width:24%">Basis</th><th>Note</th></tr>
+<tr><td>Twenty licence</td><td>—</td><td>Self-hosted, no licence cost</td></tr>
+<tr><td>n8n licence</td><td>—</td><td>Self-hosted community edition</td></tr>
+<tr><td>Infrastructure</td><td>Per month</td><td>VPS for Twenty (4 GB+) and n8n, plus backup storage</td></tr>
+<tr><td><b>ESP</b></td><td>Per volume</td><td>Priced on monthly send volume — from the audit, not estimated</td></tr>
+<tr><td><b>CPaaS</b></td><td>Per number + per message/minute</td><td>Plus A2P registration fees</td></tr>
+<tr><td>Scheduling</td><td>Per seat</td><td>Only seats that actually take bookings</td></tr>
+<tr><td>Forms</td><td>Per volume</td><td>Often the cheapest cluster</td></tr>
+<tr><td>Commerce / e-sign</td><td>Per document or seat</td><td>May be zero if finance already owns it</td></tr>
+<tr><td>LLM usage</td><td>Per token</td><td>Measure during pilot; hard caps at the gateway</td></tr>
+<tr><td><b>Operational load</b></td><td>Hours per month</td><td>Updates, backups, patching, vendor management, workflow maintenance. <b>Assign to a named owner</b>, do not absorb informally</td></tr>
+<tr><td><b>Migration effort</b></td><td>One-off</td><td>Audit, rebuild, verification, parallel run</td></tr>
+</table>
+
+<div class="callout warn">
+<span class="lbl">Compare like with like</span>
+<p>The honest comparison is <b>one GoHighLevel subscription</b> against <b>infrastructure + four to six vendor subscriptions + operational hours</b>. The migration may still be correct — better data model, better automation, no per-seat CRM cost, no platform lock-in — but presenting only the removed licence cost is not a fair comparison and will not survive the first finance review.</p>
+</div>
+
+<h2>33. What this plan does not solve</h2>
+
+<p>Stated plainly here so it is not discovered later.</p>
+
+<ul>
+<li><b>The unified inbox does not come back.</b> Option B in §17 approximates it with another vendor. Options A and C do not. This is a real reduction in day-to-day convenience for reps and should be communicated before cutover, not defended after it.</li>
+<li><b>Twenty's reporting is less mature</b> than GoHighLevel's dashboards. Adequate for pipeline and record reporting; weaker for marketing analytics. Cross-system attribution needs a warehouse, which is a separate project.</li>
+<li><b>No native mobile app.</b> Twenty's web UI is responsive but not field-optimised. If anyone genuinely works from the GoHighLevel mobile app, this is a real gap with no clean answer.</li>
+<li><b>Performance at Aspire's real data volume is unproven.</b> Local Docker testing cannot establish it. Neither can it establish backup and restore behaviour under load, or TLS and reverse-proxy behaviour in production.</li>
+<li><b>More systems means more failure modes.</b> One vendor relationship becomes four to six, each with its own outages, billing and support. The operational surface grows even as the licence cost falls.</li>
+<li><b>Deliverability becomes Aspire's responsibility.</b> GoHighLevel managed sending reputation invisibly. Someone must now own it by name.</li>
+<li><b>This document assumes the audit's findings.</b> It describes how to replace capabilities. It does not know which ones Aspire uses. Building from it without the audit would replace things nobody needs — and the audit typically removes a third to a half of the surface.</li>
+</ul>
+
+<div class="callout">
+<span class="lbl">The fair summary</span>
+<p>Twenty and n8n replace GoHighLevel's CRM and automation completely, and improve on both. They replace none of its communication infrastructure, which must be bought. The migration is sound, the data model is a genuine upgrade, and the automation layer is materially more capable — but it is an <b>unbundling exercise with a procurement dependency</b>, not a like-for-like swap, and the schedule is set by vendor lead times rather than by engineering effort.</p>
+</div>

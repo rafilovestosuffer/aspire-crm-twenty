@@ -1,0 +1,242 @@
+<h1 class="newpage">Part III · Automation</h1>
+
+<p>This part carries the migration. Everything else is data structure or a vendor contract; this is where the business logic lives, and where the risk of silent loss is highest.</p>
+
+<div class="callout danger">
+<span class="lbl">Automation logic does not migrate automatically</span>
+<p>No tool migrates workflows between CRM platforms. Every GoHighLevel workflow must be read, understood and rebuilt individually. Worse, <b>GoHighLevel's public API exposes workflow metadata only</b> — id, name, status, dates. Step and action internals are not available on any documented endpoint, a limitation confirmed by a feature request that has sat unresolved since 2022. The inventory must therefore be built by reading each workflow, and anything missed dies silently at cutover and is noticed weeks later.</p>
+</div>
+
+<h2>11. Automation architecture: Twenty workflows vs n8n</h2>
+
+<p>Both engines are available. Using the wrong one produces either an unmaintainable Twenty workflow or a trivial n8n workflow that adds a network hop to a field update.</p>
+
+<h3>11.1 The decision rule</h3>
+
+<table>
+<tr><th style="width:44%">Use Twenty workflows when</th><th>Use n8n when</th></tr>
+<tr><td>
+Everything happens inside Twenty<br>
+One or two steps<br>
+Simple field update on record change<br>
+Creating a related record<br>
+A manual action a user launches from a record<br>
+A simple scheduled tidy-up
+</td><td>
+Anything external is touched — a vendor, an API, a file<br>
+More than two conditional branches<br>
+Loops or batching<br>
+Retry, error handling or a dead-letter path matters<br>
+The logic will change often<br>
+Human approval is needed mid-flow<br>
+An LLM is involved<br>
+Data must be transformed, not just copied
+</td></tr>
+</table>
+
+<div class="callout">
+<span class="lbl">Default to n8n when genuinely unsure</span>
+<p>n8n workflows are versioned in Git, testable in isolation, observable per execution and recoverable on failure. Twenty workflows are none of those things. The cost of an unnecessary n8n workflow is one network call; the cost of business logic trapped in an unversioned, unobservable Twenty workflow is discovered during the next migration.</p>
+</div>
+
+<h3>11.2 The pattern that covers most cases</h3>
+
+<pre>
+Twenty record changes
+    │
+    ▼  webhook (HMAC-signed)
+n8n Webhook node
+    │
+    ▼  verify signature — reject if invalid
+Code node: HMAC SHA256 over "${timestamp}:${payload}"
+    │
+    ▼  filter early and exit cheaply
+IF node: is this the event we care about?  ── no ──▶  NoOp (end)
+    │ yes
+    ▼  loop guard
+IF node: was this change made by us?       ── yes ─▶  NoOp (end)
+    │ no
+    ▼
+[ business logic ]
+    │
+    ▼  write results back
+HTTP Request → Twenty Core API
+    │
+    ▼  observability
+HTTP Request → create automationRun record
+</pre>
+
+<p>Twenty does not filter webhook events at source — every event type reaches a subscribed endpoint. The early filter is not an optimisation; without it every workflow wakes for every change in the workspace and the 100-requests-per-minute API ceiling arrives quickly.</p>
+
+<h2>12. Complete trigger mapping</h2>
+
+<p>Every GoHighLevel workflow trigger, with its replacement. Sourced from HighLevel's published trigger list plus the 2026 additions.</p>
+
+<h3>12.1 Contact triggers</h3>
+
+<table class="wide">
+<tr><th style="width:24%">GoHighLevel trigger</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>Contact Created</td><td><span class="pill t-twenty">TWENTY</span></td><td>Twenty <b>Record is created</b> on Person. For externally-sourced contacts, n8n creates the record so the trigger fires downstream of ingest.</td></tr>
+<tr><td>Contact Changed</td><td><span class="pill t-twenty">TWENTY</span></td><td>Twenty <b>Record is updated</b>. <b>Scope it to specific fields</b> or it fires on every edit including the workflow's own writes.</td></tr>
+<tr><td>Contact Tag <span class="small">(added/removed)</span></td><td><span class="pill t-twenty">TWENTY</span></td><td>If tags became a MULTI_SELECT field: Record is updated scoped to that field. If tags are <code>crmTag</code> relation records: Record is created/deleted on the join.</td></tr>
+<tr><td>Birthday Reminder</td><td><span class="pill t-n8n">N8N</span></td><td>Schedule Trigger daily → query Twenty for people whose birthday month/day matches today → loop. A date-match query, not an event.</td></tr>
+<tr><td>Custom Date Reminder</td><td><span class="pill t-n8n">N8N</span></td><td>Same pattern against any DATE field — renewal, audit date, next review. This single workflow, parameterised by field name, replaces every GoHighLevel date reminder.</td></tr>
+<tr><td>Note Added / Note Changed</td><td><span class="pill t-twenty">TWENTY</span></td><td>Record is created / updated on Note.</td></tr>
+<tr><td>Task Added</td><td><span class="pill t-twenty">TWENTY</span></td><td>Record is created on Task.</td></tr>
+<tr><td>Task Reminder</td><td><span class="pill t-n8n">N8N</span></td><td>Scheduled query for tasks due within the window. Absence-and-time conditions are always scheduled queries.</td></tr>
+</table>
+
+<h3>12.2 Contact action triggers</h3>
+
+<table class="wide">
+<tr><th style="width:24%">GoHighLevel trigger</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>Form Submitted</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>Form vendor posts to an n8n Webhook node. n8n validates, dedupes, upserts the Person, writes <code>formSubmission</code>, and creates a <code>consentRecord</code> if consent was captured.</td></tr>
+<tr><td>Survey Submitted</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>Identical to Form Submitted.</td></tr>
+<tr><td>Order Form Submission</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>Commerce vendor webhook → create <code>payment</code> and <code>invoice</code> records.</td></tr>
+<tr><td>Customer Replied</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>ESP or CPaaS inbound webhook → n8n writes a <code>messageLog</code> with direction Inbound and status Replied. <b>An SMS reply of STOP must also write an opt-out <code>consentRecord</code></b> — this is a legal obligation, not a nicety.</td></tr>
+<tr><td>Trigger Link Clicked</td><td><span class="pill t-n8n">N8N</span></td><td>n8n Webhook node serves the short URL, records the click on <code>trackedLink</code>, then responds with a 302 via Respond to Webhook. Fully replaceable with no vendor.</td></tr>
+<tr><td>Twilio Validation Error</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>CPaaS error webhook → error workflow → dead-letter record.</td></tr>
+</table>
+
+<h3>12.3 Appointment, opportunity and event triggers</h3>
+
+<table class="wide">
+<tr><th style="width:24%">GoHighLevel trigger</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>Customer Booked Appointment</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>Scheduling vendor webhook → n8n creates an <code>appointment</code> record → Twenty Record-created trigger fires downstream logic.</td></tr>
+<tr><td>Appointment Status <span class="small">(confirmed, cancelled, showed)</span></td><td><span class="pill t-twenty">TWENTY</span></td><td>Once the <code>appointment</code> record exists, status changes are a Twenty Record-is-updated trigger scoped to <code>status</code>.</td></tr>
+<tr><td>Appointment No-Show <span class="small">(2026)</span></td><td><span class="pill t-n8n">N8N</span></td><td>Scheduled query: appointments where <code>scheduledAt</code> is past and status is still Booked. A no-show is an absence — no vendor emits it reliably.</td></tr>
+<tr><td>Opportunity Status Changed</td><td><span class="pill t-twenty">TWENTY</span></td><td>Record is updated on Opportunity, scoped to status.</td></tr>
+<tr><td>Pipeline Stage Changed</td><td><span class="pill t-twenty">TWENTY</span></td><td>Record is updated, scoped to stage.</td></tr>
+<tr><td>Stale Opportunities</td><td><span class="pill t-n8n">N8N</span></td><td>Scheduled query on <code>updatedAt</code> older than threshold (§8.4).</td></tr>
+<tr><td>Call Status</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>CPaaS webhook → <code>callLog</code> record with outcome and duration.</td></tr>
+<tr><td>Email Events <span class="small">(open, click, bounce, complaint)</span></td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>ESP webhook → update <code>messageLog</code> status. <b>Bounce and complaint must also write a <code>consentRecord</code></b>, or hard-bounced addresses are retried forever and reputation degrades.</td></tr>
+</table>
+
+<h3>12.4 Commerce, membership and web triggers</h3>
+
+<table class="wide">
+<tr><th style="width:24%">GoHighLevel trigger</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>Invoice <span class="small">(sent / paid / overdue)</span></td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>Finance system webhook → update the Twenty <code>invoice</code> record. <i>Overdue</i> is an absence: scheduled query on <code>dueDate</code> past with status not Paid.</td></tr>
+<tr><td>Subscription <span class="small">(created / trial→active / cancelled, 2026)</span></td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Billing webhook → update <code>serviceSubscription.status</code> → Twenty Record-updated trigger drives downstream logic. This is the highest-value trigger for Aspire's recurring-revenue model.</td></tr>
+<tr><td>Membership New Signup</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>LMS webhook → <code>membershipEnrollment</code> record. Likely aspireelearning.com.</td></tr>
+<tr><td>Offer / Product Access Granted or Removed</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>LMS webhook → update enrolment status.</td></tr>
+<tr><td>Product Completed / Category Completed</td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>LMS completion webhook → update <code>progressPercent</code>, issue certificate.</td></tr>
+<tr><td>User Login</td><td><span class="pill t-vendor">VENDOR</span></td><td>LMS event. Verify anyone automates on this before rebuilding it.</td></tr>
+<tr><td>Facebook Lead Form Submitted</td><td><span class="pill t-n8n">N8N</span></td><td>n8n has a Facebook Lead Ads trigger; otherwise webhook via the Meta API.</td></tr>
+<tr><td>Website Visit <span class="small">(page, time on site, scroll depth — 2026)</span></td><td><span class="pill t-vendor">VENDOR</span> → <span class="pill t-n8n">N8N</span></td><td>Requires site-side tracking. Analytics vendor or a script posting to an n8n webhook. <b>Check actual usage first</b> — this is frequently enabled and rarely automated on.</td></tr>
+<tr><td>Shopify: Abandoned Checkout / Order Placed / Order Fulfilled</td><td><span class="pill t-n8n">N8N</span></td><td>n8n has a Shopify node with these triggers. Direct replacement if Aspire uses Shopify at all.</td></tr>
+</table>
+
+<div class="callout ok">
+<span class="lbl">The pattern behind the whole table</span>
+<p>Three rules cover every trigger without exception. <b>(1)</b> If the event happens inside Twenty, use a Twenty record trigger, always field-scoped. <b>(2)</b> If it happens in a vendor, the vendor's webhook hits n8n, n8n writes a Twenty record, and a Twenty trigger fires downstream. <b>(3)</b> If the "event" is really an absence or an elapsed time — stale, overdue, no-show, birthday, reminder — it is a <b>scheduled query</b>, because nothing emits an event for something that did not happen.</p>
+</div>
+
+<h2>13. Complete action mapping</h2>
+
+<p>All fourteen GoHighLevel workflow action categories, every action, with its replacement. This is the checklist that proves nothing was skipped.</p>
+
+<h3>13.1 Contact Actions</h3>
+
+<table class="wide">
+<tr><th style="width:26%">GoHighLevel action</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>Create Contact</td><td><span class="pill t-twenty">TWENTY</span></td><td>Twenty <b>Create Record</b>, or n8n <code>POST /rest/people</code>.</td></tr>
+<tr><td>Find Contact</td><td><span class="pill t-twenty">TWENTY</span></td><td>Twenty <b>Search Records</b> (200-result cap), or n8n GET with a filter.</td></tr>
+<tr><td>Update Contact Field</td><td><span class="pill t-twenty">TWENTY</span></td><td>Twenty <b>Update Record</b>.</td></tr>
+<tr><td>Add / Remove Contact Tag</td><td><span class="pill t-twenty">TWENTY</span></td><td>Update the MULTI_SELECT field, or create/delete the <code>crmTag</code> relation.</td></tr>
+<tr><td>Assign to User / Remove Assigned User</td><td><span class="pill t-twenty">TWENTY</span></td><td>Update the owner relation. Round-robin assignment logic lives in n8n (§15.1).</td></tr>
+<tr><td>Add Note</td><td><span class="pill t-twenty">TWENTY</span></td><td>Create a Note record linked to the target.</td></tr>
+<tr><td>Add Task</td><td><span class="pill t-twenty">TWENTY</span></td><td>Create a Task with assignee and due date.</td></tr>
+<tr><td>Copy Contact</td><td><span class="pill t-n8n">N8N</span></td><td>GET then POST with modified fields. Rare — confirm it is used.</td></tr>
+<tr><td>Delete Contact</td><td><span class="pill t-twenty">TWENTY</span></td><td>Twenty <b>Delete Record</b>. Prefer a soft-delete field for anything auditable.</td></tr>
+<tr><td>Disable / Enable DND</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Create a <code>consentRecord</code> with the appropriate status. <b>Not a boolean flag</b> — per-channel state with a source and timestamp is what makes it defensible (§21).</td></tr>
+<tr><td>Edit Conversation</td><td><span class="pill t-drop">DROP</span></td><td>Tied to the GoHighLevel inbox. No equivalent and no replacement needed once the inbox architecture is settled (§17).</td></tr>
+<tr><td>Modify Contact Engagement Score</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Update a NUMBER field. Prefer recomputing on a schedule over incrementing in-flight — incremental scores drift and cannot be reconstructed.</td></tr>
+<tr><td>Add / Remove Contact Followers</td><td><span class="pill t-twenty">TWENTY</span></td><td>A relation to workspace members, or a MULTI_SELECT.</td></tr>
+</table>
+
+<h3>13.2 Communication Actions</h3>
+
+<p>This is the category that generates most of the vendor requirement. Every action here needs a channel Twenty does not have.</p>
+
+<table class="wide">
+<tr><th style="width:26%">GoHighLevel action</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>Send Email <span class="small">(1:1, transactional)</span></td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Twenty <b>Send Email</b> works for genuine one-to-one from a synced mailbox. Prefer routing through the ESP sub-workflow anyway, so all sending is consent-checked and logged in one place.</td></tr>
+<tr><td>Send Email <span class="small">(templated / at volume)</span></td><td><span class="pill t-vendor">VENDOR</span></td><td>ESP via n8n. Consent check → merge fields → send → log <code>messageLog</code>. See §18.</td></tr>
+<tr><td>Send SMS</td><td><span class="pill t-vendor">VENDOR</span></td><td>CPaaS via n8n (Twilio node or HTTP Request). §19.</td></tr>
+<tr><td>WhatsApp</td><td><span class="pill t-vendor">VENDOR</span></td><td>CPaaS WhatsApp Business API. The n8n Twilio node has a WhatsApp toggle. Template pre-approval is required by Meta — a lead time, not a build task.</td></tr>
+<tr><td>Call <span class="small">(auto-dial / connect)</span></td><td><span class="pill t-vendor">VENDOR</span></td><td>CPaaS voice API. §20.</td></tr>
+<tr><td>Messenger / Instagram DM</td><td><span class="pill t-vendor">VENDOR</span></td><td>Meta APIs via n8n HTTP Request. Confirm real usage before building — B2B security firms rarely sell through Instagram DM.</td></tr>
+<tr><td>Facebook / Instagram Interactive Messenger</td><td><span class="pill t-vendor">VENDOR</span></td><td>As above, with quick-reply payloads.</td></tr>
+<tr><td>Reply in Comments</td><td><span class="pill t-vendor">VENDOR</span></td><td>Meta Graph API. Usually droppable.</td></tr>
+<tr><td>GMB Messaging</td><td><span class="pill t-vendor">VENDOR</span></td><td>Google Business Profile API.</td></tr>
+<tr><td>Send Live Chat Message</td><td><span class="pill t-vendor">VENDOR</span></td><td>Requires a chat widget vendor.</td></tr>
+<tr><td>Send Slack Message</td><td><span class="pill t-n8n">N8N</span></td><td>n8n Slack node. <b>Direct replacement, no vendor gap</b> — Slack is already in use.</td></tr>
+<tr><td>Send Internal Notification</td><td><span class="pill t-n8n">N8N</span></td><td>Slack node or SMTP. Internal notification never needs the marketing ESP.</td></tr>
+<tr><td>Manual Action <span class="small">(queue a call/SMS task)</span></td><td><span class="pill t-twenty">TWENTY</span></td><td>Create a Twenty Task assigned to the rep.</td></tr>
+<tr><td>Send Review Request</td><td><span class="pill t-vendor">VENDOR</span></td><td>Templated email or SMS with a review link, via the ESP/CPaaS sub-workflow. §27.</td></tr>
+<tr><td>Conversation AI</td><td><span class="pill t-n8n">N8N</span></td><td>n8n AI Agent node with tools, routed through the LLM gateway. Needs a channel to speak on. §26.</td></tr>
+</table>
+
+<h3>13.3 Internal Tools Actions</h3>
+
+<p>This category is where n8n is not merely equivalent but materially better.</p>
+
+<table class="wide">
+<tr><th style="width:26%">GoHighLevel action</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>If / Else</td><td><span class="pill t-n8n">N8N</span></td><td>n8n <b>IF</b> (two branches) or <b>Switch</b> (many). Twenty's Filter handles only simple cases. n8n supports arbitrary expressions.</td></tr>
+<tr><td>Wait Step</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Twenty <b>Delay</b> for simple waits; n8n <b>Wait</b> for duration, specific time, or <b>until a webhook is called</b> — the last has no GoHighLevel equivalent and enables true approval gates.</td></tr>
+<tr><td>Goal Event</td><td><span class="pill t-n8n">N8N</span></td><td>No native equivalent in either tool. Rebuild as an explicit check before each step: query current state, exit if the goal is met. More verbose than GoHighLevel, and more legible — the exit condition is visible rather than implied.</td></tr>
+<tr><td>Split <span class="small">(A/B percentage)</span></td><td><span class="pill t-n8n">N8N</span></td><td>Code node emitting a random bucket → Switch. Deterministic hashing on contact ID is better than random if the same contact must stay in the same bucket across runs.</td></tr>
+<tr><td>Go To</td><td><span class="pill t-n8n">N8N</span></td><td>n8n has no arbitrary jump. Restructure into sub-workflows called by name — which is what a Go To was standing in for.</td></tr>
+<tr><td>Remove from Workflow</td><td><span class="pill t-n8n">N8N</span></td><td>NoOp on a branch, or <b>Stop and Error</b> for an explicit abort.</td></tr>
+<tr><td>Arrays</td><td><span class="pill t-n8n">N8N</span></td><td>Native. <b>Item Lists</b>, <b>Split Out</b>, <b>Aggregate</b>, <b>Loop Over Items</b>, or a Code node.</td></tr>
+<tr><td>Drip Mode <span class="small">(throttled release)</span></td><td><span class="pill t-n8n">N8N</span></td><td><b>Loop Over Items</b> with a batch size plus a Wait between batches. Also the correct tool for staying inside Twenty's 100-requests-per-minute ceiling.</td></tr>
+<tr><td>Text Formatter</td><td><span class="pill t-n8n">N8N</span></td><td>Expressions or a Code node. Full JavaScript string handling rather than a fixed formatter list.</td></tr>
+<tr><td>Custom Code</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>n8n <b>Code</b> node (JavaScript or Python); Twenty's <b>Code</b> action for in-CRM logic. Both exceed GoHighLevel's sandbox.</td></tr>
+<tr><td>Update Custom Value</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Update the <code>mergeVariable</code> record via the Core API.</td></tr>
+<tr><td>Math Operation</td><td><span class="pill t-n8n">N8N</span></td><td>Expression or Code node.</td></tr>
+</table>
+
+<h3>13.4 Send Data, Appointments, Opportunities</h3>
+
+<table class="wide">
+<tr><th style="width:26%">GoHighLevel action</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>Webhook / Custom Webhook</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Twenty <b>HTTP Request</b> action, or n8n HTTP Request with retry and error routing. Prefer n8n where the target is unreliable.</td></tr>
+<tr><td>Google Sheets</td><td><span class="pill t-n8n">N8N</span></td><td>n8n Google Sheets node. Direct replacement. <b>Worth auditing what those sheets do</b> — a Sheets step often marks a process that should have been a CRM object.</td></tr>
+<tr><td>Update Appointment Status</td><td><span class="pill t-twenty">TWENTY</span></td><td>Update Record on <code>appointment</code>. Push back to the scheduling vendor if it is the source of truth for the slot.</td></tr>
+<tr><td>Generate One Time Booking Link</td><td><span class="pill t-vendor">VENDOR</span></td><td>Scheduling vendor API returns a single-use link; n8n injects it into the message.</td></tr>
+<tr><td>Create / Update Opportunity</td><td><span class="pill t-twenty">TWENTY</span></td><td>Create or Update Record. Use <b>Upsert</b> where a duplicate is possible.</td></tr>
+<tr><td>Remove Opportunity</td><td><span class="pill t-twenty">TWENTY</span></td><td>Delete Record, or set a closed status — usually preferable for reporting continuity.</td></tr>
+</table>
+
+<h3>13.5 Payments, Marketing, Affiliate, Courses, Communities</h3>
+
+<table class="wide">
+<tr><th style="width:26%">GoHighLevel action</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>Stripe One-Time Charge</td><td><span class="pill t-vendor">VENDOR</span></td><td>Payment processor API via n8n → write a <code>payment</code> record. <b>Charging a card from a workflow deserves an approval gate</b>, not a silent automation.</td></tr>
+<tr><td>Send Invoice</td><td><span class="pill t-vendor">VENDOR</span></td><td>Finance system API → <code>invoice</code> record in Twenty.</td></tr>
+<tr><td>Send Documents and Contracts</td><td><span class="pill t-vendor">VENDOR</span></td><td>E-sign vendor API → <code>quote</code> record with <code>documentUrl</code>; completion webhook updates status.</td></tr>
+<tr><td>Add to Google Analytics</td><td><span class="pill t-n8n">N8N</span></td><td>GA4 Measurement Protocol via HTTP Request.</td></tr>
+<tr><td>Add to Google AdWords</td><td><span class="pill t-n8n">N8N</span></td><td>Google Ads API — offline conversion import.</td></tr>
+<tr><td>Add / Remove Custom Audience (Facebook)</td><td><span class="pill t-n8n">N8N</span></td><td>Meta Marketing API. <b>Hash email addresses before upload</b> as the API requires.</td></tr>
+<tr><td>Facebook Conversion API</td><td><span class="pill t-n8n">N8N</span></td><td>Meta CAPI via HTTP Request. Server-side conversion tracking survives the migration unchanged.</td></tr>
+<tr><td>Add to Affiliate Manager · Update Affiliate · Add/Remove from Affiliate Campaign</td><td><span class="pill t-vendor">VENDOR</span> / <span class="pill t-drop">DROP</span></td><td>No Twenty equivalent. <b>Check whether Aspire runs an affiliate programme at all</b> — for a B2B compliance firm this is usually an unused GoHighLevel module, and the honest disposition is DROP.</td></tr>
+<tr><td>Course Grant Offer / Revoke Offer</td><td><span class="pill t-vendor">VENDOR</span></td><td>LMS API via n8n → update <code>membershipEnrollment</code>. Likely aspireelearning.com.</td></tr>
+<tr><td>Grant / Revoke Group Access</td><td><span class="pill t-vendor">VENDOR</span> / <span class="pill t-drop">DROP</span></td><td>Communities module. Verify usage — frequently enabled, rarely used.</td></tr>
+</table>
+
+<h3>13.6 IVR, AI and Eliza actions</h3>
+
+<table class="wide">
+<tr><th style="width:26%">GoHighLevel action</th><th style="width:13%">Replacement</th><th>Build</th></tr>
+<tr><td>Gather Input on Call · Play Message · Connect to Call · End Call · Record Voicemail</td><td><span class="pill t-vendor">VENDOR</span></td><td>The whole IVR category is CPaaS call-control. Rebuilt as a call-flow definition in the CPaaS (TwiML or equivalent) with n8n providing dynamic decisions over HTTP. §20.</td></tr>
+<tr><td>AI Prompt <span class="small">(Workflow AI)</span></td><td><span class="pill t-n8n">N8N</span></td><td>n8n <b>Basic LLM Chain</b> for deterministic single-prompt tasks; <b>AI Agent</b> where runtime tool use is genuinely needed. Route through the LLM gateway for cost caps and audit. §26.</td></tr>
+<tr><td>Eliza AI Appointment Booking</td><td><span class="pill t-n8n">N8N</span> + <span class="pill t-vendor">VENDOR</span></td><td>AI agent with scheduling-vendor tools. Substantial build — size it honestly rather than assuming parity.</td></tr>
+<tr><td>Send to Eliza Agent Platform</td><td><span class="pill t-n8n">N8N</span></td><td>Hand off to an n8n AI agent workflow.</td></tr>
+</table>
+
+<div class="callout warn">
+<span class="lbl">Export every AI prompt before the account closes</span>
+<p>Voice AI and Conversation AI prompts are written assets that took real iteration to get right. They are not recoverable after termination and no export exists. <b>Copy them verbatim during the manual sweep</b>, regardless of whether those features are being rebuilt — the prompt is worth keeping even if the platform is not.</p>
+</div>

@@ -1,0 +1,146 @@
+<h1 class="newpage">Part II · Core CRM</h1>
+
+<p>This is the part of the migration that works cleanly. Every capability in Part II is either native to Twenty or a short n8n workflow. If the project stopped here it would already have a functioning CRM — it would simply have no way to contact anyone.</p>
+
+<h2>7. Contacts, companies and the data model</h2>
+
+<h3>7.1 Contacts → Twenty People <span class="pill t-twenty">TWENTY</span></h3>
+
+<p><b>What GoHighLevel does.</b> Stores contacts with standard fields, unlimited custom fields, tags, DND flags, assigned user, source attribution, and full interaction history.</p>
+
+<p><b>How to build it.</b></p>
+<ol>
+<li>Map GoHighLevel standard fields to Twenty <code>Person</code>: name → <code>name</code> (full name), email → <code>emails</code>, phone → <code>phones</code>, company → relation to <code>Company</code>.</li>
+<li>Create custom fields via the Metadata API, scripted and committed — not clicked through the UI. The workspace must rebuild in one command, because the local instance will be reset more than once.</li>
+<li>Add <code>ghlContactId</code> (TEXT) to every migrated object. This is the idempotency key for the entire migration and for any later reconciliation.</li>
+<li>Add <code>sourceSystem</code> and <code>lastSyncedAt</code> if any parallel-run period is planned.</li>
+</ol>
+
+<pre>
+POST /rest/metadata/fields
+Authorization: Bearer &lt;TWENTY_API_KEY&gt;
+
+{ "objectMetadataId": "&lt;person-object-id&gt;",
+  "name": "ghlContactId", "label": "GHL Contact ID",
+  "type": "TEXT", "icon": "IconHash" }
+</pre>
+
+<p><b>Gotchas.</b></p>
+<ul>
+<li><b>Custom field fill rate should be measured before migrating.</b> A field populated on 2% of contacts is a field to drop, not port. Measuring it requires reading contact records, which the audit's no-PII rule forbids — so use the structural proxy instead: a field referenced by no workflow, no form and no template is a drop candidate on those grounds alone.</li>
+<li><b>DND flags do not migrate as flags.</b> They become <code>consentRecord</code> rows, because a boolean on a contact cannot express per-channel consent with a source and a timestamp. See §21.</li>
+<li>Twenty's <code>emails</code> and <code>phones</code> fields hold a primary plus additional values. Do not create separate custom fields for secondary contacts.</li>
+</ul>
+
+<h3>7.2 Companies / Businesses → Twenty Companies <span class="pill t-twenty">TWENTY</span></h3>
+
+<p>Direct mapping. Twenty <code>Company</code> covers name, domain, employees, address and arbitrary custom fields. Add <code>brand</code> as a SELECT (Aspire TSS / Aspire eLearning) — both brands share one workspace separated by this field, not two deployments. A client buying SOC services is a natural security-awareness-training prospect, and separate instances would hide exactly that.</p>
+
+<h3>7.3 Custom fields → Twenty fields <span class="pill t-twenty">TWENTY</span></h3>
+
+<table>
+<tr><th style="width:34%">GoHighLevel field type</th><th style="width:30%">Twenty type</th><th>Notes</th></tr>
+<tr><td>Single line text</td><td><code>TEXT</code></td><td>—</td></tr>
+<tr><td>Multi line text</td><td><code>TEXT</code></td><td>Twenty has long-text rendering; no separate API type needed for most uses</td></tr>
+<tr><td>Numerical</td><td><code>NUMBER</code></td><td>—</td></tr>
+<tr><td>Monetary</td><td><code>CURRENCY</code></td><td>Twenty stores amount + currency code</td></tr>
+<tr><td>Date</td><td><code>DATE</code> / <code>DATE_TIME</code></td><td>Choose deliberately — reminders need time, renewals do not</td></tr>
+<tr><td>Dropdown (single)</td><td><code>SELECT</code></td><td>Options need <code>label</code>, <code>value</code>, <code>position</code>, <code>color</code></td></tr>
+<tr><td>Multiple options / checkbox group</td><td><code>MULTI_SELECT</code></td><td>—</td></tr>
+<tr><td>Checkbox (single)</td><td><code>BOOLEAN</code></td><td>—</td></tr>
+<tr><td>Radio</td><td><code>SELECT</code></td><td>—</td></tr>
+<tr><td>File upload</td><td>Attachment</td><td>Twenty attachments; the file itself may stay with the form vendor</td></tr>
+<tr><td>Phone / Email</td><td><code>PHONES</code> / <code>EMAILS</code></td><td>Use the structured types, not TEXT</td></tr>
+<tr><td>Signature</td><td>Attachment + <code>LINKS</code></td><td>Real signatures belong with the e-sign vendor</td></tr>
+</table>
+
+<h3>7.4 Custom values → <code>mergeVariable</code> object <span class="pill t-both">TWENTY+N8N</span></h3>
+
+<p><b>What GoHighLevel does.</b> Account-level variables (business name, booking link, support email) available as merge tags across templates and workflows.</p>
+
+<p><b>Gap.</b> Twenty has no account-level variable store.</p>
+
+<p><b>How to build it.</b> Create a <code>mergeVariable</code> object with <code>key</code>, <code>value</code> and <code>scope</code> (Global / Aspire TSS / Aspire eLearning). n8n reads it once per execution and caches for the run. Keep it in Twenty rather than n8n environment variables so a non-engineer can change the support email without a deployment.</p>
+
+<h3>7.5 Tags → <code>crmTag</code> object <span class="pill t-twenty">TWENTY</span></h3>
+
+<p>A GoHighLevel tag list is rarely just a vocabulary. In practice it accumulates three distinct things, and migrating them identically is a mistake:</p>
+
+<table>
+<tr><th style="width:26%">What the tag really is</th><th style="width:24%">Example</th><th>Migrate as</th></tr>
+<tr><td>A descriptive attribute</td><td><code>cmmc-interested</code></td><td>Keep as a tag record or a MULTI_SELECT field</td></tr>
+<tr><td><b>Workflow state</b></td><td><code>nurture-step-3</code>, <code>waiting-for-reply</code></td><td><b>A field.</b> State encoded as tags is invisible, unqueryable and drifts. Convert it.</td></tr>
+<tr><td>Dead weight</td><td><code>webinar-nov-2023</code></td><td>Drop</td></tr>
+</table>
+
+<p>The <code>crmTag.migrationAction</code> field exists to force this decision per tag: <i>Keep as Tag</i>, <i>Convert to Field</i>, or <i>Drop</i>. Do not migrate the tag list wholesale.</p>
+
+<h3>7.6 Custom objects → Twenty custom objects <span class="pill t-twenty">TWENTY</span></h3>
+
+<p>A clear upgrade. Twenty's custom objects are first-class: full REST/GraphQL endpoints, relations, views, permissions and workflow triggers, identical to standard objects. Aspire's model adds four business objects that GoHighLevel could only approximate with custom fields on deals:</p>
+
+<table>
+<tr><th style="width:26%">Object</th><th style="width:32%">Why it exists</th><th>Key fields</th></tr>
+<tr><td><code>serviceSubscription</code></td><td>SOCaaS/SECaaS are subscriptions, not one-off deals. Without this, renewal exposure and MRR are invisible.</td><td>serviceLine, status, startDate, renewalDate, mrr, termMonths, autoRenew</td></tr>
+<tr><td><code>complianceEngagement</code></td><td>CMMC has defined levels and FCI/CUI scope. A text field loses the ability to filter, report or trigger renewal work.</td><td>framework, cmmcLevel, dataScope, status, auditDate, nextReviewDate</td></tr>
+<tr><td><code>trainingAccount</code></td><td>A-SAT is priced per seat; consumption is the upsell signal and cannot live on a Person.</td><td>seatsPurchased, seatsConsumed, deploymentType, renewalDate</td></tr>
+<tr><td><code>phishingBaseline</code></td><td>Phish-prone score becomes an account-health signal driving renewal conversations.</td><td>testDate, phishPronePercent, deltaVsPrevious, usersTested</td></tr>
+</table>
+
+<h2>8. Opportunities and pipelines</h2>
+
+<h3>8.1 Pipelines and stages <span class="pill t-twenty">TWENTY</span></h3>
+
+<p>Direct mapping to Twenty <code>Opportunity</code> with a stage field. Build one pipeline at a time and confirm stage semantics with whoever runs the pipeline — GoHighLevel pipelines accumulate stages that mean nothing to anyone still employed.</p>
+
+<p><b>Migration note.</b> GoHighLevel supports multiple pipelines with independent stage sets. Twenty models stage as a SELECT on Opportunity, so multiple pipelines with genuinely different stages need either a <code>pipeline</code> SELECT plus a superset of stages, or separate objects. Prefer the former unless the pipelines share no vocabulary at all.</p>
+
+<h3>8.2 Opportunity value and forecasting <span class="pill t-both">TWENTY+N8N</span></h3>
+
+<p>Twenty holds amount, close date, stage and probability if added as a field. Its forecasting is weaker than GoHighLevel's and considerably weaker than Salesforce's.</p>
+
+<div class="callout warn">
+<span class="lbl">Confirm before calling this a gap</span>
+<p>Weighted-pipeline forecasting is frequently listed as a missing feature and rarely used in practice. Check whether anyone actually opens the GoHighLevel forecast view before building a replacement. If the real requirement is "MRR by service line next quarter", that is a Twenty view over <code>serviceSubscription</code>, not a forecasting engine.</p>
+</div>
+
+<h3>8.3 Pipeline automation <span class="pill t-twenty">TWENTY</span></h3>
+
+<p>GoHighLevel's <i>Pipeline Stage Changed</i> and <i>Opportunity Status Changed</i> triggers map directly to Twenty's <b>Record is updated</b> trigger scoped to the stage field. Field-scoping matters: an unscoped update trigger fires on every edit to every opportunity, including edits made by the workflow itself.</p>
+
+<h3>8.4 Stale opportunities <span class="pill t-both">TWENTY+N8N</span></h3>
+
+<p>GoHighLevel has a dedicated <i>Stale Opportunities</i> trigger. Twenty has no equivalent, because "nothing happened for 14 days" is an absence, and absences do not raise events.</p>
+
+<p><b>Build:</b> n8n Schedule Trigger (daily) → HTTP Request to Twenty searching opportunities where <code>stage</code> is open and <code>updatedAt</code> &lt; now − 14 days → Loop Over Items → notify owner → write an <code>automationRun</code> record. This pattern — <b>scheduled query for an absence</b> — replaces every GoHighLevel trigger that is really a time-based condition, and appears repeatedly in §12.</p>
+
+<h2>9. Segmentation, bulk actions, import and export</h2>
+
+<table>
+<tr><th style="width:26%">GoHighLevel</th><th style="width:16%">Replacement</th><th>How</th></tr>
+<tr><td>Smart lists / saved filters</td><td><span class="pill t-twenty">TWENTY</span></td><td>Twenty saved views with filters and sorts, shareable across the workspace. Direct equivalent.</td></tr>
+<tr><td>Bulk edit</td><td><span class="pill t-twenty">TWENTY</span></td><td>Native multi-select and edit in table view.</td></tr>
+<tr><td>Bulk add to workflow</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Twenty's <b>Manual trigger in bulk mode</b> runs a workflow over selected records — the closest equivalent, and better than GoHighLevel's because it is explicit rather than a silent enrolment.</td></tr>
+<tr><td>Bulk SMS / email from a list</td><td><span class="pill t-vendor">VENDOR</span></td><td>Segment exported from Twenty by n8n, handed to the ESP or CPaaS. Consent check is mandatory (§21).</td></tr>
+<tr><td>CSV import</td><td><span class="pill t-twenty">TWENTY</span></td><td>Native import with field mapping.</td></tr>
+<tr><td>CSV export</td><td><span class="pill t-twenty">TWENTY</span></td><td>Native export from any view.</td></tr>
+<tr><td>Duplicate detection / merge</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Twenty has basic duplicate detection. Robust dedup belongs in n8n <b>at ingest</b> — search by email before create, upsert rather than blind create. Cleaning duplicates afterwards is far more expensive than not creating them.</td></tr>
+<tr><td>Manual actions queue</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>Twenty Tasks assigned to a user reproduce the queue. The click-to-dial that made it useful comes from the CPaaS, not the CRM.</td></tr>
+<tr><td>Engagement score</td><td><span class="pill t-both">TWENTY+N8N</span></td><td>A NUMBER field on Person, recalculated by a scheduled n8n workflow from <code>messageLog</code>, <code>appointment</code> and <code>formSubmission</code> counts. More transparent than GoHighLevel's opaque score.</td></tr>
+</table>
+
+<h2>10. Users, roles and permissions</h2>
+
+<table>
+<tr><th style="width:26%">GoHighLevel</th><th style="width:16%">Replacement</th><th>How</th></tr>
+<tr><td>User accounts</td><td><span class="pill t-twenty">TWENTY</span></td><td>Workspace members. Count active seats during the audit — dormant GoHighLevel users are common.</td></tr>
+<tr><td>Roles and permissions</td><td><span class="pill t-twenty">TWENTY</span></td><td>Object-level roles. Field-level restriction is thinner than GoHighLevel's; verify against any genuine need to hide specific fields.</td></tr>
+<tr><td>Teams</td><td><span class="pill t-twenty">TWENTY</span></td><td>Confirm whether teams drive routing logic — if so, that logic moves to n8n and teams become a field.</td></tr>
+<tr><td>SSO</td><td><span class="pill t-vendor">VENDOR</span></td><td>Twenty SSO is an Organization-tier feature. Confirm whether Aspire requires it before treating this as blocking.</td></tr>
+<tr><td>API keys</td><td><span class="pill t-twenty">TWENTY</span></td><td>Settings → API &amp; Webhooks. Scope per role. Rotate on a schedule.</td></tr>
+</table>
+
+<div class="callout">
+<span class="lbl">Permissions deserve a design pass, not a copy</span>
+<p>Aspire holds client security-posture data and sells compliance services. The CRM should meet the standard Aspire advises clients to meet. Migrate roles as a deliberate design — least privilege, field-level restriction on anything sensitive, admin actions logged — rather than replicating whatever accumulated in GoHighLevel.</p>
+</div>

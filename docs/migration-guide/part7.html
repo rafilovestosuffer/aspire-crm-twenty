@@ -1,0 +1,209 @@
+<h1 class="newpage">Part V · Capture, scheduling and web</h1>
+
+<h2>22. Forms and surveys</h2>
+
+<p><b>What GoHighLevel does.</b> Hosted forms and surveys with a drag-and-drop builder, conditional logic, file upload, embedding on funnels or external sites, submissions landing directly on the contact record, and workflow triggering on submit.</p>
+
+<p><b>The gap.</b> Twenty has no public forms. Its <code>Form</code> workflow action collects input from a logged-in user during a manual workflow run — useful for internal data entry, but it is not a web form and cannot be exposed to a prospect.</p>
+
+<h3>22.1 Architecture</h3>
+
+<pre>
+Prospect fills form (vendor-hosted or embedded)
+   → Form vendor POSTs to n8n Webhook
+   → n8n: verify signature · normalise · dedupe
+   → Upsert Person + Company in Twenty
+   → Create formSubmission record  (payload as RAW_JSON)
+   → IF consent checkbox ticked → create consentRecord
+   → Downstream: score, assign, task, acknowledge  (§15.1)
+</pre>
+
+<h3>22.2 Vendor requirements</h3>
+
+<table>
+<tr><th style="width:32%">Requirement</th><th>Why</th></tr>
+<tr><td>Webhook delivery with signature</td><td>The integration point. Unsigned webhooks are an open write endpoint into the CRM</td></tr>
+<tr><td>Conditional logic</td><td>GoHighLevel forms commonly use it; check which of Aspire's actually do before paying for it</td></tr>
+<tr><td>File upload</td><td>Relevant if any form collects documents</td></tr>
+<tr><td>Spam protection</td><td>Otherwise n8n and Twenty absorb junk records</td></tr>
+<tr><td>Embed on external site</td><td>Must sit on whatever hosts the web presence</td></tr>
+<tr><td>Consent checkbox with proof</td><td>Feeds <code>consentRecord.proof</code>. Capture submission id and IP</td></tr>
+</table>
+
+<h3>22.3 Migration notes</h3>
+
+<ul>
+<li><b>Rebuild only forms with submissions.</b> The audit's per-form submission counts make this a data question, not a debate.</li>
+<li><b>Every live form is a URL somewhere.</b> Embedded on the site, linked in an email signature, printed in a PDF, referenced in an ad. Inventory where each is referenced <b>before</b> switching, or leads silently stop arriving from a page nobody remembered.</li>
+<li>Keep the old form live and forwarding for a grace period after cutover where possible.</li>
+<li>Surveys and quizzes are the same architecture. If GoHighLevel surveys are unused — common — this is a DROP, not a vendor requirement.</li>
+</ul>
+
+<h2>23. Calendars and booking</h2>
+
+<p><b>What GoHighLevel does.</b> Public booking pages, availability from connected calendars, buffers and minimum notice, round-robin and collective calendars, class and service booking, rooms and equipment, reminders, reschedule and cancel links, and appointment records on the contact.</p>
+
+<p><b>The gap.</b> Twenty has no booking engine, no availability calculation and no public booking surface. This is frequently the most-missed capability at cutover because it is customer-facing and breaks visibly.</p>
+
+<h3>23.1 Architecture</h3>
+
+<pre>
+Prospect books via vendor booking page
+   → Vendor webhook → n8n
+   → Upsert Person
+   → Create appointment record in Twenty
+        { status:"Booked", appointmentType, scheduledAt,
+          durationMinutes, meetingUrl, vendorEventId }
+   → Twenty Record-created trigger → downstream logic
+   → Reminders: scheduled n8n workflow  (§15.3)
+   → Status changes: vendor webhook → PATCH appointment
+   → No-show: scheduled query, past + still Booked  (§12.3)
+</pre>
+
+<h3>23.2 Vendor requirements</h3>
+
+<table>
+<tr><th style="width:32%">Requirement</th><th>Why</th></tr>
+<tr><td>Availability from connected calendars</td><td>Double-booking a client is a visible failure</td></tr>
+<tr><td>Round-robin / team distribution</td><td>Only if GoHighLevel's is genuinely in use — check <code>calendar_groups</code></td></tr>
+<tr><td>Webhooks on book, reschedule, cancel</td><td>Without all three the Twenty record drifts from reality</td></tr>
+<tr><td>Reschedule and cancel links</td><td>Reduces no-shows more than reminders do</td></tr>
+<tr><td>API to generate single-use booking links</td><td>Replaces GoHighLevel's <i>Generate One Time Booking Link</i> action</td></tr>
+<tr><td>Buffers, minimum notice, timezone handling</td><td>Timezone bugs in booking are unusually damaging to trust</td></tr>
+</table>
+
+<div class="callout warn">
+<span class="lbl">Booking links are printed in places you do not control</span>
+<p>Existing GoHighLevel booking URLs appear in email signatures, on the website, in proposals, in calendar invitations already sent, and in ads. Inventory and redirect them. A dead booking link on a demo request page is a lead that never arrives and never complains.</p>
+</div>
+
+<h2>24. Funnels, websites, blogs and tracked links</h2>
+
+<p><b>What GoHighLevel does.</b> Funnel and website builder, hosting, custom domains, blogs, order forms and upsells, tracking codes, and page-level analytics.</p>
+
+<p><b>The gap.</b> Twenty has no page builder or hosting and never will — this is not a CRM function.</p>
+
+<div class="callout">
+<span class="lbl">Check this before scoping any of it</span>
+<p><b>Is aspiretss.com actually served from GoHighLevel, or only funnel subdomains?</b> Aspire has operated since 2011 and almost certainly runs a real website on a real CMS. If GoHighLevel hosts only a handful of campaign funnels, this entire cluster shrinks from "replace a website platform" to "rebuild three landing pages on the existing CMS" — a difference of weeks. It is the single highest-leverage question in the manual sweep.</p>
+</div>
+
+<h3>24.1 Replacement</h3>
+
+<table>
+<tr><th style="width:26%">Capability</th><th style="width:14%">Replacement</th><th>Notes</th></tr>
+<tr><td>Landing pages / funnels</td><td><span class="pill t-vendor">VENDOR</span></td><td>Existing CMS if there is one; otherwise a page builder. Registered in Twenty as <code>landingPage</code> records with visits and conversions</td></tr>
+<tr><td>Websites</td><td><span class="pill t-vendor">VENDOR</span></td><td>Verify first — likely already elsewhere</td></tr>
+<tr><td>Blogs</td><td><span class="pill t-vendor">VENDOR</span></td><td>CMS. n8n can publish programmatically, which supports the automated content pipeline in the wider automation plan</td></tr>
+<tr><td>Order forms / upsells</td><td><span class="pill t-vendor">VENDOR</span></td><td>Commerce surface — see §25</td></tr>
+<tr><td>Custom domains / DNS</td><td><span class="pill t-vendor">VENDOR</span></td><td><b>Sequencing risk.</b> DNS changes propagate for hours and must be choreographed with the page migration</td></tr>
+<tr><td>URL redirects</td><td><span class="pill t-vendor">VENDOR</span></td><td>Move with hosting. Inventory every existing redirect — they exist because something linked to the old URL</td></tr>
+<tr><td>Tracking codes / pixels</td><td><span class="pill t-vendor">VENDOR</span></td><td>GA4, Meta, LinkedIn. Re-install on the replacement pages and verify events fire</td></tr>
+<tr><td>Tracked / trigger links</td><td><span class="pill t-n8n">N8N</span></td><td><b>No vendor needed</b> — n8n serves the redirect (§18.4)</td></tr>
+</table>
+
+<h1 class="newpage">Part VI · Commerce</h1>
+
+<h2>25. Products, quoting, invoicing, payments and contracts</h2>
+
+<p><b>What GoHighLevel does.</b> Products and prices, invoices and recurring invoices, estimates and proposals, payment links, orders, coupons, subscriptions, documents and contracts with e-signature, and Stripe/PayPal/Authorize.net connections.</p>
+
+<p><b>The gap.</b> Twenty has no billing engine, no document generation and no payment processing. It records commercial state; it does not execute commerce.</p>
+
+<h3>25.1 The split</h3>
+
+<table class="wide">
+<tr><th style="width:24%">Capability</th><th style="width:14%">Replacement</th><th>Twenty object</th><th>Executed by</th></tr>
+<tr><td>Products and prices</td><td><span class="pill t-twenty">TWENTY</span></td><td><code>product</code></td><td>Native — catalogue only</td></tr>
+<tr><td>Quotes / estimates (CPQ)</td><td><span class="pill t-vendor">VENDOR</span></td><td><code>quote</code>, <code>quoteLineItem</code></td><td>Document generation + e-sign vendor</td></tr>
+<tr><td>Invoices</td><td><span class="pill t-vendor">VENDOR</span></td><td><code>invoice</code></td><td>Finance system</td></tr>
+<tr><td>Payments / orders</td><td><span class="pill t-vendor">VENDOR</span></td><td><code>payment</code></td><td>Processor</td></tr>
+<tr><td>Subscriptions / recurring billing</td><td><span class="pill t-vendor">VENDOR</span></td><td><code>serviceSubscription</code></td><td>Twenty <b>records</b> the subscription; the biller <b>charges</b> it</td></tr>
+<tr><td>Coupons</td><td><span class="pill t-vendor">VENDOR</span></td><td>—</td><td>Commerce surface</td></tr>
+<tr><td>Documents and contracts</td><td><span class="pill t-vendor">VENDOR</span></td><td><code>quote.documentUrl</code></td><td>E-sign vendor</td></tr>
+</table>
+
+<h3>25.2 Quoting — the CPQ gap</h3>
+
+<p>Twenty has no configure-price-quote capability. This maps to known gaps in the wider automation plan and is a genuine loss if quoting currently happens in GoHighLevel.</p>
+
+<pre>
+[BILL] Generate Quote — Manual trigger from Opportunity
+
+1  Twenty manual trigger on an Opportunity
+2  n8n: fetch opportunity + company + linked products
+3  Code: calculate line totals, discounts, term value
+4  POST quote + quoteLineItem records to Twenty
+5  HTTP Request → document vendor: render from template
+6  HTTP Request → e-sign vendor: send for signature
+7  PATCH quote { status:"Sent", documentUrl }
+8  Webhook on signature → PATCH quote { status:"Accepted" }
+   → PATCH opportunity { stage:"Closed Won" }
+   → POST serviceSubscription from the accepted line items
+</pre>
+
+<p>Step 8 is where the model earns its keep: an accepted quote becomes a subscription record automatically, which then drives the renewal escalation in §15.4. In GoHighLevel that chain does not exist because the subscription object does not exist.</p>
+
+<h3>25.3 Verify before building</h3>
+
+<div class="callout warn">
+<span class="lbl">Finance may already own all of this</span>
+<p>Aspire is a fourteen-year-old company selling subscription services to defence-sector clients. It has a finance function, and that function is unlikely to be invoicing from a marketing platform. <b>Confirm what actually issues Aspire's invoices before scoping cluster F.</b> If finance already uses an accounting system, the work here reduces to a read-only sync into Twenty so sales can see payment status — a fraction of the effort.</p>
+</div>
+
+<h1 class="newpage">Part VII · Content, AI, reputation and community</h1>
+
+<h2>26. AI features</h2>
+
+<table class="wide">
+<tr><th style="width:22%">GoHighLevel feature</th><th style="width:14%">Replacement</th><th>Build</th></tr>
+<tr><td>Workflow AI <span class="small">(AI Prompt action)</span></td><td><span class="pill t-n8n">N8N</span></td><td>Basic LLM Chain for single-prompt deterministic tasks — summarise, classify, draft. Direct replacement, with a better model than GoHighLevel's</td></tr>
+<tr><td>Conversation AI <span class="small">(chat bot)</span></td><td><span class="pill t-n8n">N8N</span> + <span class="pill t-vendor">VENDOR</span></td><td>n8n AI Agent node with tools that read and write Twenty. Needs a channel to speak on — the bot is buildable, the channel is a vendor</td></tr>
+<tr><td>Voice AI agents</td><td><span class="pill t-vendor">VENDOR</span></td><td>Voice AI is a specialist capability. n8n orchestrates but does not synthesise or transcribe in real time. <b>Export the prompts regardless</b></td></tr>
+<tr><td>Content AI</td><td><span class="pill t-n8n">N8N</span></td><td>LLM chain producing drafts into the CMS or an approval queue</td></tr>
+<tr><td>Reviews AI</td><td><span class="pill t-n8n">N8N</span></td><td>LLM drafts a review response; a human approves via the gate in §15.5</td></tr>
+<tr><td>Workflow AI assistant <span class="small">(builder aid)</span></td><td><span class="pill t-drop">DROP</span></td><td>An authoring convenience, not a running feature. Nothing to migrate</td></tr>
+</table>
+
+<h3>26.1 Route every AI call through a gateway</h3>
+
+<p>Not per-workflow API keys. A single self-hosted gateway gives spend tracking per workflow, hard budget caps with automatic cut-off, one place to switch models, a request audit log, and redaction before data leaves the network.</p>
+
+<div class="callout danger">
+<span class="lbl">Two AI-specific failure modes</span>
+<p><b>The agent self-trigger loop.</b> An agent triggered on record-update that then writes to the same record re-triggers itself, and unlike a sync loop this one costs money per iteration. Scope triggers to fields the agent never writes.</p>
+<p><b>Failure by billing condition.</b> An agent call can fail because credits are exhausted, returning a failure result rather than a normal error. The error workflow must treat that as a distinct alertable condition, or the failure looks like an ordinary transient error and gets retried into a larger bill.</p>
+</div>
+
+<h3>26.2 Data egress</h3>
+
+<p>Aspire's CRM holds prospect PII and client security-posture data. Before any of it reaches a third-party model, decide explicitly: which provider, whether data may leave the network at all, and what the gateway redacts. This is a governance decision with the same weight as the consent design, and it is currently unresolved.</p>
+
+<h2>27. Reputation, social and advertising</h2>
+
+<table class="wide">
+<tr><th style="width:24%">GoHighLevel feature</th><th style="width:14%">Replacement</th><th>Build</th></tr>
+<tr><td>Review requests</td><td><span class="pill t-vendor">VENDOR</span></td><td>Templated email or SMS with a review link, via the send sub-workflows. Trigger: <code>appointment.status</code> → Completed, or subscription milestone</td></tr>
+<tr><td>Review monitoring</td><td><span class="pill t-n8n">N8N</span></td><td>Scheduled polling of platform APIs → <code>review</code> records → Slack alert on anything below 4 stars</td></tr>
+<tr><td>Review widgets on site</td><td><span class="pill t-vendor">VENDOR</span></td><td>Moves with the web presence</td></tr>
+<tr><td>Social planner</td><td><span class="pill t-n8n">N8N</span> or <span class="pill t-vendor">VENDOR</span></td><td>n8n plus platform APIs works but is fiddly to operate for a marketer. A dedicated scheduling tool is usually better value; either way <code>socialPost</code> records the result</td></tr>
+<tr><td>Connected social accounts</td><td><span class="pill t-vendor">VENDOR</span></td><td>Reconnection effort at cutover — OAuth per platform</td></tr>
+<tr><td>Ad manager (Google / Facebook)</td><td><span class="pill t-n8n">N8N</span></td><td><b>Confirm whether ads are actually run from GoHighLevel</b> or natively in Ads Manager. Usually the latter, making this a DROP</td></tr>
+<tr><td>Custom audiences / conversion API</td><td><span class="pill t-n8n">N8N</span></td><td>Meta Marketing API and CAPI, GA4 Measurement Protocol, Google Ads offline conversions. All survive unchanged (§13.5)</td></tr>
+</table>
+
+<h2>28. Memberships, courses, communities and affiliates</h2>
+
+<table class="wide">
+<tr><th style="width:24%">GoHighLevel feature</th><th style="width:14%">Replacement</th><th>Build</th></tr>
+<tr><td>Courses / memberships</td><td><span class="pill t-vendor">VENDOR</span> / <span class="pill t-drop">DROP</span></td><td><b>Check aspireelearning.com first.</b> Aspire operates a dedicated security-awareness-training brand with its own portals. GoHighLevel memberships are far more likely a duplicate than a dependency</td></tr>
+<tr><td>Client portal</td><td><span class="pill t-vendor">VENDOR</span></td><td>Same question. If clients already log into an Aspire portal, this is DROP</td></tr>
+<tr><td>Communities / groups</td><td><span class="pill t-drop">DROP</span></td><td>Frequently enabled, rarely used. Verify member counts before treating it as a requirement</td></tr>
+<tr><td>Certificates</td><td><span class="pill t-vendor">VENDOR</span></td><td>Relevant to A-SAT delivery; almost certainly already handled by the e-learning platform</td></tr>
+<tr><td>Affiliate manager</td><td><span class="pill t-vendor">VENDOR</span> / <span class="pill t-drop">DROP</span></td><td>No Twenty equivalent. <b>Does Aspire run an affiliate programme at all?</b> For a B2B compliance firm this is usually an unused module and the honest answer is DROP</td></tr>
+</table>
+
+<div class="callout ok">
+<span class="lbl">This is where the vendor count falls</span>
+<p>Clusters G and H exist in the catalogue because GoHighLevel ships these modules, not because Aspire uses them. Confirming that with evidence removes two of the eight vendor decisions outright and is a morning's work in the manual sweep. Do it early — it materially changes the number reported to management.</p>
+</div>

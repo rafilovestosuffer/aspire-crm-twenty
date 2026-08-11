@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GoHighLevel to Twenty + n8n — Complete Replacement Guide</title>
+<style>
+@page {
+  size: A4; margin: 20mm 17mm 18mm 17mm;
+  @top-center { content: "GoHighLevel → Twenty + n8n · Complete Replacement Guide"; font-size: 7.5pt; color: #8a94a6; padding-bottom: 3mm; }
+  @bottom-right { content: counter(page); font-size: 8.5pt; color: #5a6478; }
+  @bottom-left { content: "Aspire Tech · Confidential — Internal"; font-size: 7.5pt; color: #8a94a6; }
+}
+@page :first { @top-center { content: ""; } @bottom-left { content: ""; } @bottom-right { content: ""; } }
+
+body { font-family: "DejaVu Sans", "Liberation Sans", sans-serif; font-size: 9.4pt; line-height: 1.5; color: #1c2430; margin: 0; }
+h1 { bookmark-level: 1; bookmark-label: content(); font-size: 19pt; color: #12325a; margin: 0 0 3mm 0; line-height: 1.2; page-break-after: avoid; }
+h2 { bookmark-level: 2; bookmark-label: content(); font-size: 13.5pt; color: #12325a; margin: 8mm 0 2.5mm 0; padding-bottom: 1.5mm; border-bottom: 1.6pt solid #12325a; page-break-after: avoid; }
+h3 { font-size: 11pt; color: #1c4a80; margin: 6mm 0 2mm 0; page-break-after: avoid; }
+h4 { font-size: 9.8pt; color: #24344a; margin: 4.5mm 0 1.5mm 0; page-break-after: avoid; }
+p { margin: 0 0 2.5mm 0; text-align: justify; }
+ul, ol { margin: 0 0 2.5mm 0; padding-left: 5.5mm; }
+li { margin-bottom: 1.2mm; }
+code { font-family: "DejaVu Sans Mono", monospace; font-size: 8.2pt; background: #eef2f7; padding: 0.3mm 1mm; border-radius: 1.5px; color: #0f3d6e; }
+pre { font-family: "DejaVu Sans Mono", monospace; font-size: 7.8pt; background: #f5f8fb; border-left: 2.5pt solid #2d6cb5; padding: 2.5mm 3mm; margin: 2.5mm 0; white-space: pre-wrap; line-height: 1.35; page-break-inside: avoid; }
+table { border-collapse: collapse; width: 100%; margin: 2.5mm 0 4mm 0; font-size: 8.3pt; page-break-inside: avoid; }
+th { background: #12325a; color: #fff; text-align: left; padding: 1.8mm 2mm; font-weight: bold; font-size: 8.2pt; }
+td { border-bottom: 0.5pt solid #d5dde8; padding: 1.6mm 2mm; vertical-align: top; }
+tr:nth-child(even) td { background: #f7fafd; }
+.wide { page-break-inside: auto; }
+.wide tr { page-break-inside: avoid; }
+
+.cover { text-align: left; padding-top: 38mm; page-break-after: always; }
+.cover .eyebrow { font-size: 10pt; color: #2d6cb5; letter-spacing: 2.5pt; text-transform: uppercase; margin-bottom: 6mm; }
+.cover h1 { bookmark-level: none; font-size: 32pt; line-height: 1.12; margin-bottom: 5mm; border: none; }
+.cover .sub { font-size: 13pt; color: #48566c; margin-bottom: 22mm; line-height: 1.45; }
+.cover .rule { height: 3pt; background: #2d6cb5; width: 52mm; margin-bottom: 8mm; }
+.cover .meta { font-size: 9pt; color: #48566c; line-height: 1.85; border-top: 0.5pt solid #c8d2e0; padding-top: 5mm; }
+.cover .meta b { color: #12325a; }
+
+.callout { border-left: 3pt solid #2d6cb5; background: #f0f5fb; padding: 3mm 3.5mm; margin: 3.5mm 0; page-break-inside: avoid; }
+.callout.warn { border-left-color: #b8860b; background: #fdf8ec; }
+.callout.danger { border-left-color: #a02c2c; background: #fbf0f0; }
+.callout.ok { border-left-color: #1e7a4a; background: #eefaf3; }
+.callout .lbl { font-weight: bold; font-size: 8.4pt; text-transform: uppercase; letter-spacing: 0.7pt; color: #2d6cb5; display: block; margin-bottom: 1.5mm; }
+.callout.warn .lbl { color: #8a6508; }
+.callout.danger .lbl { color: #a02c2c; }
+.callout.ok .lbl { color: #1e7a4a; }
+.callout p:last-child { margin-bottom: 0; }
+
+.pill { display: inline-block; padding: 0.4mm 1.6mm; border-radius: 2px; font-size: 7.3pt; font-weight: bold; letter-spacing: 0.3pt; }
+.t-twenty { background: #d9ead8; color: #1d5c2e; }
+.t-n8n { background: #dde5f6; color: #23407d; }
+.t-both { background: #e2ddf0; color: #4b2f7a; }
+.t-vendor { background: #fae3cd; color: #8a4b06; }
+.t-drop { background: #e6e8ec; color: #4a5364; }
+
+.toc { page-break-after: always; }
+.toc h1 { border: none; font-size: 17pt; margin-bottom: 2mm; }
+.toc-part { font-weight: bold; color: #12325a; margin-top: 2.6mm; margin-bottom: 1mm; font-size: 9.2pt; border-bottom: 0.5pt solid #c8d2e0; padding-bottom: 0.7mm; }
+.toc-row { display: flex; justify-content: space-between; font-size: 8.2pt; margin-bottom: 0.25mm; }
+.toc-row span:first-child { color: #24344a; }
+.toc-row span:last-child { color: #8a94a6; }
+.newpage { page-break-before: always; }
+.small { font-size: 8.2pt; color: #5a6478; }
+.legend { font-size: 8pt; margin: 2mm 0 4mm 0; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="eyebrow">Aspire Tech · CRM Migration Programme</div>
+  <div class="rule"></div>
+  <h1>Replacing GoHighLevel<br>with Twenty&nbsp;+&nbsp;n8n</h1>
+  <div class="sub">A complete, feature-by-feature replacement guide.<br>Every GoHighLevel capability, what replaces it, and how to build it.</div>
+  <div class="meta">
+    <b>Prepared for:</b> Aspire Tech / Aspire TSS — CRM Migration, Phase 1<br>
+    <b>Scope:</b> Full GoHighLevel decommission. Twenty (self-hosted) as system of record, n8n as orchestration.<br>
+    <b>Covers:</b> 14 workflow action categories · 35+ workflow triggers · 23 feature areas · 111 catalogued features<br>
+    <b>Status:</b> Design reference — precedes the usage audit, does not replace it<br>
+    <b>Date:</b> 11 August 2026 &nbsp;·&nbsp; <b>Revision:</b> 1.0
+  </div>
+</div>
+
+<!--TOC-->
+
+<h1>Part I · Foundations</h1>
+
+<h2>1. Executive summary</h2>
+
+<p>Aspire Tech is decommissioning GoHighLevel and moving to a self-hosted Twenty CRM with n8n as the automation layer. This document specifies how every GoHighLevel capability is replaced, in enough detail to build from.</p>
+
+<p>The central finding is simple and needs stating before anything else:</p>
+
+<div class="callout danger">
+<span class="lbl">The one conclusion that shapes everything</span>
+<p><b>Twenty and n8n together replace GoHighLevel's system-of-record and automation layers completely. They do not replace its communication infrastructure at all.</b> Twenty cannot send bulk email, SMS or voice; it cannot host forms, landing pages or booking pages. n8n orchestrates sending but is not itself a sender. Roughly one third of GoHighLevel's surface therefore requires a third-party service — not because of a configuration gap, but because those capabilities do not exist in either tool at any setting.</p>
+</div>
+
+<p>This is not a reason to abandon the migration. It is a reason to budget for it correctly. GoHighLevel bundles a CRM, a marketing automation platform, an email service provider, a telephony carrier reseller, a website builder, a scheduling tool, a course platform and a payments front-end into one subscription. Unbundling that stack means replacing each part explicitly.</p>
+
+<h3>What the replacement looks like</h3>
+
+<table>
+<tr><th style="width:26%">Layer</th><th style="width:26%">Replaced by</th><th>Coverage</th></tr>
+<tr><td><b>System of record</b><br><span class="small">Contacts, companies, deals, subscriptions, custom objects</span></td><td>Twenty (self-hosted)</td><td>Complete. Twenty's custom object model is stronger than GoHighLevel's — this part of the migration is an upgrade, not a compromise.</td></tr>
+<tr><td><b>Automation and orchestration</b><br><span class="small">Workflows, triggers, conditions, routing</span></td><td>Twenty workflows + n8n</td><td>Complete for logic. Every GoHighLevel trigger and action has a mapping in §12–13. Simple record automations stay in Twenty; anything multi-step, external or conditional moves to n8n, which is considerably more capable than GoHighLevel's builder.</td></tr>
+<tr><td><b>Communication execution</b><br><span class="small">Email, SMS, voice, chat</span></td><td>Third-party vendors, driven by n8n</td><td><b>Not covered by Twenty or n8n.</b> Requires an email service provider and a communications platform. See §5.</td></tr>
+<tr><td><b>Web presence and capture</b><br><span class="small">Forms, funnels, sites, booking</span></td><td>Third-party vendors, integrated via n8n</td><td><b>Not covered.</b> Requires a form tool, a scheduling tool, and a CMS — unless already owned elsewhere, which is likely for at least the website.</td></tr>
+<tr><td><b>Commerce</b><br><span class="small">Invoices, payments, quotes</span></td><td>Finance system + Twenty records</td><td>Records live in Twenty; billing execution stays with the finance stack.</td></tr>
+</table>
+
+<h3>The numbers</h3>
+
+<p>Against a 111-feature catalogue covering 23 GoHighLevel areas:</p>
+
+<table>
+<tr><th style="width:18%">Disposition</th><th style="width:12%">Count</th><th>Meaning</th></tr>
+<tr><td><span class="pill t-twenty">TWENTY</span></td><td>15</td><td>Native Twenty capability. Configuration only, no build.</td></tr>
+<tr><td><span class="pill t-n8n">N8N</span></td><td>13</td><td>n8n reproduces it without Twenty involvement.</td></tr>
+<tr><td><span class="pill t-both">TWENTY+N8N</span></td><td>20</td><td>Record in Twenty, logic in n8n.</td></tr>
+<tr><td><span class="pill t-vendor">VENDOR</span></td><td>52</td><td>Needs a third-party service. Consolidates into <b>eight vendor decisions</b>, of which four plausibly disappear once usage evidence arrives.</td></tr>
+<tr><td><span class="pill t-drop">DROP</span></td><td>11</td><td>Not in use, or duplicated elsewhere in Aspire's stack.</td></tr>
+</table>
+
+<div class="callout warn">
+<span class="lbl">Read this number correctly</span>
+<p>52 vendor-dependent features is an <b>upper bound taken before the usage audit</b>. It counts every GoHighLevel capability that exists, not every capability Aspire uses. Four of the eight vendor clusters — web presence, commerce, memberships, reputation — are likely to collapse substantially once measured, because Aspire already runs a website, a finance system and a dedicated e-learning platform outside GoHighLevel. The realistic landing point is <b>three to five genuine vendor decisions</b>. That must be demonstrated by evidence, not asserted here.</p>
+</div>
+
+<h3>What is genuinely better after the migration</h3>
+
+<ul>
+<li><b>Automation capability increases.</b> n8n's branching, error handling, sub-workflows, code execution and retry semantics exceed GoHighLevel's workflow builder by a wide margin. Automations that were awkward or impossible in GoHighLevel become routine.</li>
+<li><b>The data model fits the business.</b> GoHighLevel forces recurring services into a deal-shaped hole. Twenty's custom objects model subscriptions, compliance engagements, training seats and phishing baselines as first-class records.</li>
+<li><b>Automation becomes observable.</b> GoHighLevel does not expose workflow execution history through its API — a fact that materially obstructed this very audit. n8n exposes everything, and writing runs back into Twenty makes automation health a CRM report.</li>
+<li><b>No per-seat pricing on the CRM.</b> Self-hosted Twenty removes licence cost, though not operational cost.</li>
+</ul>
+
+<h3>What gets harder</h3>
+
+<ul>
+<li><b>More systems to operate.</b> One vendor becomes four to six. Each has its own credentials, failure modes, billing and support relationship.</li>
+<li><b>Deliverability becomes Aspire's problem.</b> GoHighLevel managed sending reputation invisibly. That responsibility now sits with a named owner.</li>
+<li><b>The unified inbox does not survive intact.</b> This is the single most-felt day-to-day loss for sales users. §17 addresses it directly rather than pretending otherwise.</li>
+<li><b>Nothing is bundled.</b> Every integration between layers is a workflow someone maintains.</li>
+</ul>
+
+<h2>2. How to read this document</h2>
+
+<p>Each feature section follows the same structure, so a reader can go straight to the capability they care about:</p>
+
+<table>
+<tr><th style="width:22%">Heading</th><th>Contains</th></tr>
+<tr><td><b>What GoHighLevel does</b></td><td>The capability as it exists today, in operational terms.</td></tr>
+<tr><td><b>Replacement</b></td><td>The disposition tag and the specific components involved.</td></tr>
+<tr><td><b>How to build it</b></td><td>Step-by-step construction — Twenty configuration, n8n node sequence, API calls.</td></tr>
+<tr><td><b>Gotchas</b></td><td>What breaks, what is lost, what to verify before trusting it.</td></tr>
+</table>
+
+<h3>Disposition tags</h3>
+
+<div class="legend">
+<span class="pill t-twenty">TWENTY</span> Native Twenty. &nbsp;
+<span class="pill t-n8n">N8N</span> n8n alone. &nbsp;
+<span class="pill t-both">TWENTY+N8N</span> Record in Twenty, logic in n8n. &nbsp;
+<span class="pill t-vendor">VENDOR</span> Third-party service required. &nbsp;
+<span class="pill t-drop">DROP</span> Retire.
+</div>
+
+<p><span class="pill t-vendor">VENDOR</span> always names the <i>category</i> of service and what it must do, never a single product. Product selection requires pricing against Aspire's real volumes, and those volumes come from the usage audit. Recommending a specific tool before the volume data exists would be a guess, and the guess would be wrong in whichever direction costs most.</p>
+
+<h3>Relationship to the usage audit</h3>
+
+<p>This document is the <b>design reference</b>: it describes how each capability is replaced, assuming Aspire uses it. The companion usage audit determines which capabilities Aspire actually uses. Both are needed, and in this order of application:</p>
+
+<ol>
+<li>The audit produces evidence of what is in use.</li>
+<li>Features with no usage evidence are dropped — no build required.</li>
+<li>This document supplies the build specification for everything that survives.</li>
+</ol>
+
+<div class="callout">
+<span class="lbl">Do not build from this document alone</span>
+<p>Building every section here would replace capabilities nobody uses. The audit typically removes a third to a half of the surface. Use the audit to decide <i>what</i> to build; use this document to decide <i>how</i>.</p>
+</div>
+
+<h3>Verification status of claims</h3>
+
+<p>Statements about GoHighLevel's API and Twenty's capabilities were verified against primary documentation during preparation. Where a claim could not be verified, the text says so. The complete GoHighLevel trigger and action inventories in §12–13 come from HighLevel's own support documentation, not from recollection. Sources are listed in Appendix D.</p>
+
+</body>
+</html>

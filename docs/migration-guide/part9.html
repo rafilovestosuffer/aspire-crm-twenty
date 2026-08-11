@@ -1,0 +1,159 @@
+<h2 class="newpage">Appendix B · n8n node reference for this build</h2>
+
+<p>The nodes this migration actually uses. Not the full catalogue — the working set.</p>
+
+<h3>Core flow</h3>
+<table>
+<tr><th style="width:26%">Node</th><th>Use in this build</th></tr>
+<tr><td><b>Webhook</b></td><td>Entry point for every vendor and Twenty event. Captures method, headers, query and body</td></tr>
+<tr><td><b>Respond to Webhook</b></td><td>Controls the response. Required for the tracked-link 302 redirect and for fast webhook acknowledgement</td></tr>
+<tr><td><b>Schedule Trigger</b></td><td>Every "absence or elapsed time" pattern: stale, overdue, no-show, birthday, renewal, reminder</td></tr>
+<tr><td><b>Error Trigger</b></td><td>First node of the workspace error workflow. Fires after a workflow fails</td></tr>
+<tr><td><b>HTTP Request</b></td><td>All Twenty Core and Metadata API calls, and any vendor without a dedicated node</td></tr>
+<tr><td><b>Code</b></td><td>HMAC verification, scoring, deterministic round-robin, payload shaping. JavaScript or Python</td></tr>
+<tr><td><b>IF</b> / <b>Switch</b></td><td>Two-branch and multi-branch logic. Replaces GoHighLevel If/Else</td></tr>
+<tr><td><b>Filter</b></td><td>Drop items that should not continue — cheaper than an IF with an empty branch</td></tr>
+<tr><td><b>Merge</b></td><td>Recombine branches; join data from two sources</td></tr>
+<tr><td><b>Wait</b></td><td>Duration, specific time, or <b>On Webhook Call</b> using <code>$execution.resumeUrl</code> — the approval gate</td></tr>
+<tr><td><b>Loop Over Items</b></td><td>Batching for Twenty's 100-per-minute limit; replaces GoHighLevel Drip Mode</td></tr>
+<tr><td><b>Split Out</b> / <b>Aggregate</b></td><td>Array handling; replaces GoHighLevel Arrays</td></tr>
+<tr><td><b>Set</b> / <b>Edit Fields</b></td><td>Normalisation — lowercase email, E.164 phone, trim</td></tr>
+<tr><td><b>Execute Sub-workflow</b></td><td>Calls <code>[VEND] Send *</code>. The structural backbone of §14.4</td></tr>
+<tr><td><b>Stop and Error</b></td><td>Explicit abort that reaches the error workflow. Replaces Remove from Workflow</td></tr>
+<tr><td><b>NoOp</b></td><td>Clean branch termination</td></tr>
+</table>
+
+<h3>Application nodes</h3>
+<table>
+<tr><th style="width:26%">Node</th><th>Use</th></tr>
+<tr><td><b>Slack</b></td><td>Internal notifications, alerts, approval prompts. Direct replacement for GoHighLevel's Slack action</td></tr>
+<tr><td><b>Twilio</b></td><td>SMS, MMS and WhatsApp — the WhatsApp toggle routes through the Business API</td></tr>
+<tr><td><b>Google Sheets</b></td><td>Direct replacement for GoHighLevel's Sheets action</td></tr>
+<tr><td><b>Facebook Lead Ads</b></td><td>Replaces the Facebook Lead Form Submitted trigger</td></tr>
+<tr><td><b>Shopify</b></td><td>Abandoned checkout, order placed, order fulfilled — if Shopify is in use at all</td></tr>
+<tr><td><b>Basic LLM Chain</b></td><td>Single-prompt deterministic AI: summarise, classify, draft. Replaces Workflow AI</td></tr>
+<tr><td><b>AI Agent</b></td><td>Tool-using agents. Reserve for tasks that must decide at runtime — it costs more per run</td></tr>
+</table>
+
+<h3>Node settings that matter</h3>
+<table>
+<tr><th style="width:26%">Setting</th><th>Where and why</th></tr>
+<tr><td><b>Retry On Fail</b></td><td>Every node touching an external API. 2–3 attempts with a wait handles transient failures and 429s</td></tr>
+<tr><td><b>On Error</b></td><td>Stop Workflow (default) · Continue · Continue using error output. Use Continue only for genuinely non-critical steps</td></tr>
+<tr><td><b>Error Workflow</b></td><td>Workflow Settings. Set on <b>every</b> production workflow</td></tr>
+<tr><td><b>Always Output Data</b></td><td>Off by default; turning it on hides empty results and masks real failures</td></tr>
+<tr><td><b>Execution order</b></td><td>Set explicitly on workflows with parallel branches where ordering matters</td></tr>
+</table>
+
+<h2 class="newpage">Appendix C · Twenty API reference</h2>
+
+<h3>Endpoints and authentication</h3>
+<table>
+<tr><th style="width:30%">Item</th><th>Value</th></tr>
+<tr><td>Core API</td><td><code>/rest/</code> · <code>/graphql/</code> — CRUD on all objects</td></tr>
+<tr><td>Metadata API</td><td><code>/rest/metadata/</code> · <code>/metadata/</code> — objects, fields, relations</td></tr>
+<tr><td>Base URL (self-hosted)</td><td><code>https://{your-domain}/</code> — must match <code>SERVER_URL</code></td></tr>
+<tr><td>Authentication</td><td><code>Authorization: Bearer &lt;API_KEY&gt;</code></td></tr>
+<tr><td>Key creation</td><td>Settings → API &amp; Webhooks → Create key</td></tr>
+<tr><td>Key scoping</td><td>Settings → Members → Roles → Assignment</td></tr>
+<tr><td>Playground</td><td>Settings → API &amp; Webhooks, once a key exists</td></tr>
+<tr><td><b>Rate limit</b></td><td><b>100 requests per minute</b></td></tr>
+<tr><td><b>Batch size</b></td><td><b>60 records per call</b>; GraphQL also supports batch upsert</td></tr>
+<tr><td>Schema</td><td>Per workspace — a new custom object immediately gets endpoints under its own name</td></tr>
+</table>
+
+<h3>Common calls</h3>
+<pre>
+# Find a person by email  (idempotency check before create)
+GET /rest/people?filter[emails][eq]=someone@example.com
+
+# Create
+POST /rest/people
+{ "name": {"firstName":"A","lastName":"B"},
+  "emails": {"primaryEmail":"a@b.com"},
+  "ghlContactId": "abc123" }
+
+# Update
+PATCH /rest/people/&lt;id&gt;
+{ "leadScore": 72 }
+
+# Custom object — endpoint follows namePlural
+POST /rest/serviceSubscriptions
+{ "serviceLine":"SOCAAS", "status":"ACTIVE",
+  "renewalDate":"2027-03-01", "mrr":{"amountMicros":450000000,
+  "currencyCode":"USD"}, "companyId":"&lt;uuid&gt;" }
+
+# Create a field
+POST /rest/metadata/fields
+{ "objectMetadataId":"&lt;uuid&gt;", "name":"renewalDate",
+  "label":"Renewal Date", "type":"DATE", "icon":"IconCalendar" }
+
+# Create an object
+POST /rest/metadata/objects
+{ "nameSingular":"consentRecord", "namePlural":"consentRecords",
+  "labelSingular":"Consent Record", "labelPlural":"Consent Records",
+  "icon":"IconShieldLock" }
+</pre>
+
+<h3>Webhooks</h3>
+<table>
+<tr><th style="width:30%">Property</th><th>Value</th></tr>
+<tr><td>Direction</td><td>Twenty <b>sends</b> only. There is no inbound webhook handler on objects — all writes go through the Core API</td></tr>
+<tr><td>Events</td><td>Record created, updated, deleted — e.g. <code>person.created</code></td></tr>
+<tr><td>Payload</td><td><code>{ event, data, timestamp }</code></td></tr>
+<tr><td>Signature</td><td>HMAC SHA256 over <code>${timestamp}:${payload}</code></td></tr>
+<tr><td>Headers</td><td><code>x-twenty-webhook-timestamp</code> · <code>x-twenty-webhook-signature</code></td></tr>
+<tr><td><b>Filtering</b></td><td><b>None at source.</b> All event types are delivered — filter early in n8n and exit cheaply</td></tr>
+</table>
+
+<h3>Field types</h3>
+<p><code>TEXT</code> · <code>NUMBER</code> · <code>BOOLEAN</code> · <code>DATE</code> · <code>DATE_TIME</code> · <code>CURRENCY</code> · <code>SELECT</code> · <code>MULTI_SELECT</code> · <code>RELATION</code> · <code>LINKS</code> · <code>EMAILS</code> · <code>PHONES</code> · <code>ADDRESS</code> · <code>RATING</code> · <code>RAW_JSON</code> · <code>ARRAY</code> · long text · domain</p>
+<p class="small">SELECT and MULTI_SELECT options require <code>label</code>, <code>value</code>, <code>position</code> and <code>color</code>. Relation payload shapes vary between Twenty versions — verify against the deployed instance rather than assuming.</p>
+
+<h2 class="newpage">Appendix D · Sources</h2>
+
+<p>Claims about GoHighLevel and Twenty capabilities in this document were verified against these sources during preparation, August 2026. Where a claim could not be verified, the text says so.</p>
+
+<h3>GoHighLevel</h3>
+<ul class="small">
+<li>A List of Workflow Actions — HighLevel Support Portal <span class="small">(complete action inventory used in §13)</span></li>
+<li>List of Workflow Triggers in HighLevel <span class="small">(trigger inventory used in §12)</span></li>
+<li>Get Workflow — HighLevel API documentation <span class="small">(confirms metadata-only response)</span></li>
+<li>API endpoints: POST/PUT/DEL for workflows — HighLevel Ideas <span class="small">("The platform API is read-only for workflows… There are no write endpoints available." Open since 2022)</span></li>
+<li>Get Custom Fields by Object Key — HighLevel API <span class="small">("Only supports Custom Objects and Company (Business) today.")</span></li>
+<li>Private Integration Tokens — HighLevel API <span class="small">(auth, headers, rotation)</span></li>
+<li>API Versioning — HighLevel API <span class="small">(date-based versions and v3)</span></li>
+<li>Snapshots Overview — HighLevel Support Portal</li>
+<li>HighLevel 2026 feature updates <span class="small">(website visit, invoice, no-show and subscription triggers)</span></li>
+</ul>
+
+<h3>Twenty</h3>
+<ul class="small">
+<li>Workflow Actions — Twenty Documentation <span class="small">("only one recipient is possible at the moment")</span></li>
+<li>Workflow Triggers — Twenty Documentation</li>
+<li>Fields — Twenty Documentation <span class="small">(18 field types)</span></li>
+<li>APIs — Twenty Documentation <span class="small">(Core and Metadata APIs, 100 req/min, 60-record batches)</span></li>
+<li>What is Twenty — Twenty Documentation</li>
+<li>Twenty webhook HMAC signature format and headers</li>
+</ul>
+
+<h3>n8n</h3>
+<ul class="small">
+<li>Core nodes — n8n Documentation</li>
+<li>Webhook node, Respond to Webhook node, Wait node <span class="small">(<code>$execution.resumeUrl</code>)</span></li>
+<li>Error Trigger node and error-handling guidance <span class="small">(Retry On Fail, On Error options)</span></li>
+<li>Twilio node <span class="small">(SMS, MMS, WhatsApp toggle)</span></li>
+</ul>
+
+<h3>Internal</h3>
+<ul class="small">
+<li>Aspire CRM Project — Master Context, 8 August 2026</li>
+<li><code>reference/ghl_feature_taxonomy.csv</code> — 111-feature catalogue</li>
+<li><code>reference/twenty_schema.yaml</code> — 25-object parity model</li>
+<li><code>docs/02-ghl-api-findings.md</code> · <code>docs/03-replacement-stack.md</code> · <code>docs/06-twenty-object-model.md</code></li>
+</ul>
+
+<div class="callout">
+<span class="lbl">Verification standard</span>
+<p>Product capabilities change. Every capability claim here should be re-verified against the deployed Twenty instance and the live vendor APIs before being relied upon for a build decision — particularly Twenty's relation-creation payload shape and any GoHighLevel endpoint behaviour, which the audit's discovery run measures directly rather than assuming.</p>
+</div>

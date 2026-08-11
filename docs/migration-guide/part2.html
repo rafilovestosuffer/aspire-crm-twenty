@@ -1,0 +1,272 @@
+<h2>3. The replacement architecture</h2>
+
+<p>Three layers, plus AI as a cross-cutting concern. The layering exists to enforce one rule.</p>
+
+<pre>
+   SOURCES
+   Website forms · Chat · Lead magnets · Ad platforms · Inbound email · RSS
+        │
+        ▼
+   ┌──────────────────────────────────────────────────────────────────┐
+   │  ORCHESTRATION — n8n                                             │
+   │  Ingest · Transform · Deduplicate · Route · Approve · Retry       │
+   │  Moves data between layers. Stores none.                         │
+   └───────┬──────────────────────────────────────────┬───────────────┘
+           │                                          │
+           ▼                                          ▼
+   ┌───────────────────────────┐          ┌───────────────────────────┐
+   │  RECORD — Twenty          │          │  EXECUTION — Vendors      │
+   │  Companies · People       │          │  ESP  → email at volume   │
+   │  Opportunities            │          │  CPaaS → SMS, voice       │
+   │  Service Subscriptions    │          │  Forms → public capture   │
+   │  Compliance Engagements   │          │  Scheduling → booking     │
+   │  Training Accounts        │          │  CMS  → pages, blog       │
+   │  Phishing Baselines       │          │  Finance → invoices       │
+   │  + 20 GHL-parity objects  │          │                           │
+   │                           │          │  SOURCE OF TRUTH:         │
+   │  SOURCE OF TRUTH:         │          │  delivery events only     │
+   │  all business data        │          │                           │
+   └───────────────────────────┘          └───────────────────────────┘
+           │                                          │
+           └──────────────────┬───────────────────────┘
+                              ▼
+              REPORTING — Twenty views + warehouse
+</pre>
+
+<div class="callout">
+<span class="lbl">The rule that governs everything</span>
+<p><b>Each field has exactly one source of truth.</b> Twenty owns business data. Vendors own delivery events. n8n owns nothing — it only moves data. Every sync rule, migration decision and consent design in this document follows from that single constraint. Do not let a later "simplification" put the same field in two places.</p>
+</div>
+
+<h3>Why n8n stores nothing</h3>
+
+<p>It is tempting to let n8n keep state — a lookup table of external IDs, a list of who has been contacted, a counter. Resist it. State in an orchestrator is invisible to the business, unbacked up, and lost when a workflow is rewritten. Anything worth remembering belongs in Twenty as a record, where it is queryable, auditable and included in backups.</p>
+
+<p>The one permitted exception is the external-ID mapping table used for idempotent upserts during migration (§14), and even that is better held as a field on the Twenty record itself.</p>
+
+<h3>Direction of flow</h3>
+
+<table>
+<tr><th style="width:30%">Flow</th><th style="width:22%">Mechanism</th><th>Notes</th></tr>
+<tr><td>Twenty → n8n</td><td>Webhook, HMAC-signed</td><td>Twenty pushes on record create/update/delete. n8n must validate the signature before processing.</td></tr>
+<tr><td>n8n → Twenty</td><td>REST API, Bearer key</td><td>Twenty has no inbound webhook handler. All writes go through the Core API.</td></tr>
+<tr><td>Vendor → n8n</td><td>Vendor webhooks</td><td>Delivery, bounce, unsubscribe, reply, booking, payment events.</td></tr>
+<tr><td>n8n → Vendor</td><td>HTTP Request or dedicated node</td><td>Send, schedule, provision.</td></tr>
+<tr><td>Twenty internal</td><td>Twenty workflows</td><td>Simple field updates and record creation that never leave Twenty.</td></tr>
+</table>
+
+<h3>Two constraints that shape every integration</h3>
+
+<ol>
+<li><b>Twenty does not filter webhook events at source.</b> All event types are delivered to a subscribed endpoint. n8n must filter early and exit cheaply on events it does not care about, or every workflow wakes for every change in the workspace.</li>
+<li><b>Twenty has no inbound webhook receiver on objects.</b> Twenty sends webhooks; it does not receive them. Anything writing into Twenty goes through n8n calling the Core API. There is no way for an external system to push directly into a Twenty record.</li>
+</ol>
+
+<h2>4. The capability boundary — what Twenty and n8n cannot do</h2>
+
+<p>This section is the load-bearing analysis of the document. Everything classified <span class="pill t-vendor">VENDOR</span> later traces back to a line in these tables.</p>
+
+<h3>4.1 Twenty — verified capabilities</h3>
+
+<p>Twenty's automation surface, confirmed against its own documentation:</p>
+
+<table>
+<tr><th style="width:50%">Workflow triggers</th><th>Workflow actions</th></tr>
+<tr><td>
+Record is created<br>
+Record is updated <span class="small">(optionally field-scoped)</span><br>
+Record is created or updated<br>
+Record is deleted<br>
+Manual <span class="small">(Cmd+K or navbar; global, single or bulk)</span><br>
+On a schedule <span class="small">(minutes/hours/days or cron, UTC)</span><br>
+Webhook <span class="small">(inbound GET or POST)</span>
+</td><td>
+Create Record · Update Record · Delete Record<br>
+Search Records <span class="small">(max 200 results)</span><br>
+Upsert Record<br>
+Iterator <span class="small">(loop an array from a prior step)</span><br>
+Filter · Delay<br>
+Send Email <span class="small">(synced mailbox)</span><br>
+Form <span class="small">(collect input mid-workflow; manual triggers only)</span><br>
+Code <span class="small">(JavaScript on server-side logic functions)</span><br>
+HTTP Request<br>
+AI Agent <span class="small">(marked coming soon)</span>
+</td></tr>
+</table>
+
+<p>This is a competent automation engine for record-centric work. It is not a marketing automation platform, and the difference is concentrated in one action.</p>
+
+<div class="callout danger">
+<span class="lbl">The single most consequential limitation</span>
+<p>Twenty's <code>Send Email</code> action sends from a <b>synced mailbox</b>, and the documentation states plainly that <b>only one recipient is possible at the moment</b>. There is no template library, no merge-field engine, no list segmentation at send time, no suppression list, no bounce handling, no open or click tracking, no sending-domain management and no warm-up. It is a transactional send from a person's mailbox, not a campaign engine.</p>
+<p>Every GoHighLevel feature that reaches an audience through a channel inherits this limitation. That single sentence produces most of the vendor requirements in §5.</p>
+</div>
+
+<h3>4.2 Capabilities absent from Twenty at any configuration</h3>
+
+<table class="wide">
+<tr><th style="width:28%">Capability</th><th style="width:36%">Why it cannot be configured in</th><th>Consequence</th></tr>
+<tr><td>Bulk / campaign email</td><td>No campaign engine; send action is one-recipient, mailbox-bound</td><td>ESP required</td></tr>
+<tr><td>Deliverability infrastructure</td><td>No dedicated IP, sending domain management, DKIM/SPF/DMARC tooling, warm-up scheduling or reputation monitoring</td><td>ESP required; 2–6 week lead time</td></tr>
+<tr><td>Suppression / unsubscribe enforcement</td><td>No suppression list, and nothing at send time to consult one</td><td>Consent enforcement moves to n8n (§21)</td></tr>
+<tr><td>SMS / MMS</td><td>No SMS capability of any kind</td><td>CPaaS required</td></tr>
+<tr><td>Voice, IVR, call recording, phone numbers</td><td>No telephony</td><td>CPaaS required; number porting and A2P registration have multi-week lead times</td></tr>
+<tr><td>Public forms</td><td>The <code>Form</code> action collects input from a logged-in user during a manual workflow run; it is not a public web form</td><td>Form vendor required</td></tr>
+<tr><td>Landing pages, funnels, websites</td><td>No page builder or hosting</td><td>CMS required — verify what Aspire already owns</td></tr>
+<tr><td>Booking pages / availability</td><td>No scheduling engine, no availability calculation, no public booking surface</td><td>Scheduling vendor required</td></tr>
+<tr><td>Invoicing, payments, CPQ</td><td>No billing engine, no document generation</td><td>Finance system + e-sign vendor</td></tr>
+<tr><td>Memberships, courses, client portal</td><td>No LMS or portal</td><td>Likely already served by aspireelearning.com</td></tr>
+<tr><td>Unified omnichannel inbox</td><td>Email threads sync to records; no SMS, chat or social inbox</td><td>See §17 — architectural decision required</td></tr>
+<tr><td>Native mobile application</td><td>Web UI is responsive but not field-optimised</td><td>Confirm whether anyone uses the GoHighLevel mobile app before treating this as a gap</td></tr>
+</table>
+
+<h3>4.3 n8n — what it does and does not add</h3>
+
+<p>n8n closes the <i>logic</i> gap comprehensively. It does not close the <i>channel</i> gap at all.</p>
+
+<table>
+<tr><th style="width:50%">n8n covers</th><th>n8n does not cover</th></tr>
+<tr><td>
+Multi-step branching beyond Twenty's Filter<br>
+Loops, batching, rate-limited iteration<br>
+Arbitrary code (JavaScript, Python)<br>
+Scheduled and cron work<br>
+Inbound webhooks from any source<br>
+Retry, error workflows, dead-letter patterns<br>
+Sub-workflows and reusable components<br>
+LLM chains and AI agents<br>
+Any HTTP API on earth<br>
+Human approval gates via Wait + resume URL
+</td><td>
+Being an email sender <span class="small">(it calls one)</span><br>
+Being an SMS or voice carrier<br>
+Hosting a public page or form<br>
+Managing sending reputation<br>
+Storing business data<br>
+Providing an end-user interface<br>
+Regulatory registration (A2P, sender verification)
+</td></tr>
+</table>
+
+<div class="callout ok">
+<span class="lbl">Where the migration gains</span>
+<p>On automation logic specifically, the move is an <b>upgrade</b>. n8n's error handling alone — per-node retry with backoff, continue-on-error branches, and a workspace-wide Error Trigger workflow — has no equivalent in GoHighLevel, where a failed step fails silently and is discovered weeks later. Automations that were fragile in GoHighLevel become observable and recoverable.</p>
+</div>
+
+<h2>5. The vendor layer</h2>
+
+<p>The 52 vendor-dependent features consolidate into eight decisions. Presented as 52 problems this looks like a failed plan; presented as eight decisions, four of which may evaporate, it is a manageable procurement exercise.</p>
+
+<table class="wide">
+<tr><th style="width:4%">#</th><th style="width:19%">Cluster</th><th style="width:31%">What the service must do</th><th style="width:22%">Selection criteria</th><th>Survives audit?</th></tr>
+<tr><td>A</td><td><b>Email service provider</b></td><td>Transactional + bulk send, templates with merge fields, suppression list, DKIM/SPF/DMARC, dedicated sending domain, bounce/complaint webhooks, open/click tracking, API + webhooks</td><td>Monthly volume; suppression import; webhook granularity; warm-up support</td><td><b>Certain.</b> Aspire runs a newsletter and outbound sequences</td></tr>
+<tr><td>B</td><td><b>Communications platform (CPaaS)</b></td><td>Phone numbers, SMS/MMS, voice, IVR, recording, A2P 10DLC registration, inbound webhooks</td><td>Number porting support; A2P handling; per-message cost at volume</td><td><b>Verify.</b> Depends whether sales actually dials from GoHighLevel</td></tr>
+<tr><td>C</td><td><b>Web presence</b></td><td>Landing pages, funnels, blog, hosting, form embedding, analytics</td><td>Whether aspiretss.com is already hosted elsewhere</td><td><b>Likely shrinks sharply</b></td></tr>
+<tr><td>D</td><td><b>Scheduling</b></td><td>Public booking pages, availability from connected calendars, round-robin, reminders, reschedule/cancel links, API + webhooks</td><td>Round-robin support; webhook completeness; calendar integration</td><td><b>Likely yes.</b> Demo booking is core to the sales motion</td></tr>
+<tr><td>E</td><td><b>Forms</b></td><td>Public hosted forms, conditional logic, file upload, spam protection, webhook delivery</td><td>Conditional logic depth; webhook reliability; embedding</td><td><b>Likely yes</b></td></tr>
+<tr><td>F</td><td><b>Commerce and documents</b></td><td>Invoicing, payment collection, subscription billing, quote/proposal documents, e-signature</td><td>Existing finance system boundary</td><td><b>Verify.</b> Finance may already invoice outside GoHighLevel</td></tr>
+<tr><td>G</td><td><b>Learning / portal</b></td><td>Course delivery, enrolment, certificates, client portal</td><td>Overlap with aspireelearning.com</td><td><b>Probably drops</b></td></tr>
+<tr><td>H</td><td><b>Reputation and social</b></td><td>Review request, review monitoring, social scheduling</td><td>Whether marketing already owns tooling</td><td><b>Verify</b></td></tr>
+</table>
+
+<h3>5.1 Selection sequence</h3>
+
+<p>Not all eight are equally urgent. Two are on the critical path and must be decided first, because their lead times run in parallel with nothing else.</p>
+
+<table>
+<tr><th style="width:8%">Order</th><th style="width:24%">Cluster</th><th style="width:20%">Why this order</th><th>Blocks</th></tr>
+<tr><td><b>1</b></td><td>A — Email service provider</td><td>Domain warm-up takes 2–6 weeks and cannot start until the vendor exists</td><td>All email features; the entire cutover date</td></tr>
+<tr><td><b>2</b></td><td>B — CPaaS <span class="small">(if SMS/voice is in use)</span></td><td>A2P 10DLC registration is carrier-side regulatory review, measured in weeks</td><td>All SMS features; number porting</td></tr>
+<tr><td>3</td><td>D — Scheduling</td><td>Short lead time, high daily visibility</td><td>Booking, reminders</td></tr>
+<tr><td>4</td><td>E — Forms</td><td>Short lead time</td><td>Lead capture</td></tr>
+<tr><td>5</td><td>C, F, G, H</td><td>Confirm scope from audit before selecting anything</td><td>—</td></tr>
+</table>
+
+<div class="callout danger">
+<span class="lbl">Vendor selection is the critical path, not the migration</span>
+<p>Every engineering task in this document can be done in parallel with, or after, vendor selection. Neither email warm-up nor A2P registration can. If the cutover date is set from the engineering estimate alone it will be wrong by roughly a month, in the direction that causes campaigns to land in spam and SMS to be filtered by carriers.</p>
+<p><b>Decide clusters A and B before starting the build.</b></p>
+</div>
+
+<h3>5.2 What "integrated via n8n" means concretely</h3>
+
+<p>Every vendor is integrated the same way, which keeps the architecture uniform regardless of which products are chosen:</p>
+
+<ol>
+<li><b>Outbound:</b> n8n calls the vendor API — a dedicated node where one exists, otherwise HTTP Request with a stored credential.</li>
+<li><b>Inbound:</b> the vendor posts events to an n8n Webhook node with a signed or token-protected URL.</li>
+<li><b>Write-back:</b> n8n writes the outcome into Twenty via the Core API — a <code>messageLog</code>, <code>appointment</code>, <code>payment</code> or <code>consentRecord</code> record.</li>
+<li><b>Failure:</b> the node retries; persistent failure routes to the error workflow and a dead-letter record.</li>
+</ol>
+
+<p>Because the pattern is identical for every vendor, swapping one later touches one sub-workflow rather than the whole estate. Build the vendor call as a <b>sub-workflow with a stable input contract</b> from the start — this is the single highest-value structural decision in the build (§14.4).</p>
+
+<h2>6. Prerequisites and environment</h2>
+
+<h3>6.1 Twenty</h3>
+
+<table>
+<tr><th style="width:26%">Item</th><th>Requirement</th></tr>
+<tr><td>Deployment</td><td>Self-hosted, Docker. Postgres + Redis + server + worker, all four healthy — the UI can look correct while the worker is dead, so verify the worker separately.</td></tr>
+<tr><td>Resources</td><td>4 GB RAM minimum. Postgres needs <code>shm_size: 256m</code> and tuned <code>shared_buffers</code> / <code>work_mem</code> before the workspace passes roughly 10,000 records.</td></tr>
+<tr><td><code>ENCRYPTION_KEY</code></td><td>Generate with <code>openssl rand -base64 32</code>, store in a secrets manager. <b>Losing it loses every stored secret including OAuth tokens.</b> Set a dedicated key before upgrading to v2.5, where secrets move to a versioned <code>enc:v2:</code> envelope.</td></tr>
+<tr><td>Postgres password</td><td>Set deliberately at first run. The value is baked into the volume; changing it later without removing the volume breaks authentication.</td></tr>
+<tr><td><code>LOGIC_FUNCTION_TYPE</code></td><td><code>LOCAL</code> or <code>LAMBDA</code>, or the workflow <code>Code</code> action reports "logic function execution is disabled".</td></tr>
+<tr><td><code>FRONT_BASE_URL</code> / <code>SERVER_URL</code></td><td>Must match the access domain including scheme, or login enters a redirect loop.</td></tr>
+<tr><td>API key</td><td>Settings → API &amp; Webhooks → Create key. Scope it via Settings → Members → Roles → Assignment.</td></tr>
+<tr><td>Reverse proxy</td><td>TLS termination, plus stream-response configuration or the AI chat will not respond until refresh.</td></tr>
+</table>
+
+<h3>6.2 Twenty API — the operational limits that shape workflow design</h3>
+
+<table>
+<tr><th style="width:26%">Property</th><th>Value</th></tr>
+<tr><td>Core API</td><td><code>/rest/</code> and <code>/graphql/</code> — CRUD on all objects, standard and custom</td></tr>
+<tr><td>Metadata API</td><td><code>/rest/metadata/</code> and <code>/metadata/</code> — objects, fields, relations</td></tr>
+<tr><td>Authentication</td><td><code>Authorization: Bearer &lt;API_KEY&gt;</code></td></tr>
+<tr><td><b>Rate limit</b></td><td><b>100 requests per minute</b></td></tr>
+<tr><td><b>Batch size</b></td><td><b>60 records per call.</b> GraphQL additionally supports batch upsert</td></tr>
+<tr><td>Schema behaviour</td><td>Per-workspace. A new custom object immediately gets REST and GraphQL endpoints under its own name</td></tr>
+<tr><td>Playground</td><td>Settings → API &amp; Webhooks, after a key exists</td></tr>
+</table>
+
+<div class="callout warn">
+<span class="lbl">100 requests per minute is the number that will bite</span>
+<p>It is far tighter than GoHighLevel's 100 per 10 seconds. Any n8n workflow that loops record-by-record against Twenty will exhaust it. <b>Use batch operations of up to 60 records</b> for migration and nightly jobs, and add <code>Loop Over Items</code> with a batch size and interval for anything iterative. Design for this from the first workflow rather than discovering it during migration load.</p>
+</div>
+
+<h3>6.3 n8n</h3>
+
+<table>
+<tr><th style="width:26%">Item</th><th>Requirement</th></tr>
+<tr><td>Deployment</td><td>Self-hosted alongside Twenty. Queue mode if concurrent executions become significant.</td></tr>
+<tr><td>Credentials</td><td>One credential per vendor, stored in n8n's credential store — never inline in a node, never in workflow JSON.</td></tr>
+<tr><td>Twenty integration</td><td><b>HTTP Request node against the REST API.</b> Do not use a community Twenty node: available ones have very low adoption and single maintainers, and the entire automation estate would depend on one.</td></tr>
+<tr><td>Error workflow</td><td>One workspace-wide workflow beginning with the <code>Error Trigger</code> node, set as the error workflow on every production workflow. Non-negotiable — see §14.2.</td></tr>
+<tr><td>Environments</td><td>Separate n8n instances or at minimum separate credential sets for build and production, so a test run cannot send to a real contact.</td></tr>
+<tr><td>Backups</td><td>Workflow JSON exported to Git. n8n's own database is not a sufficient backup of business logic.</td></tr>
+</table>
+
+<h3>6.4 Naming conventions — adopt before the first workflow</h3>
+
+<p>Two hundred workflows named after what someone was thinking that afternoon is the most common way an n8n estate becomes unmaintainable. Fix it at workflow one.</p>
+
+<pre>
+Workflows    [AREA] Verb Object — Trigger
+             [LEAD] Create Person — Web Form
+             [SUB]  Notify Renewal 90d — Schedule
+             [SYS]  Error Handler — Error Trigger
+             [VEND] Send Email — Sub-workflow
+
+Areas        LEAD · SUB (subscriptions) · COMP (compliance) · TRAIN
+             MSG · BILL · SYS · VEND
+
+Twenty objs  camelCase singular: serviceSubscription, consentRecord
+Twenty flds  camelCase: renewalDate, phishPronePercent
+Credentials  vendor-purpose-env: brevo-transactional-prod
+</pre>
+
+<div class="callout">
+<span class="lbl">Tag every workflow with its GoHighLevel origin</span>
+<p>During migration, put the source GoHighLevel workflow ID in the n8n workflow description and in <code>automationRun.ghlWorkflowId</code>. When someone asks in month four whether the old renewal reminder was ever rebuilt, that field answers it in one query instead of a day of archaeology.</p>
+</div>
