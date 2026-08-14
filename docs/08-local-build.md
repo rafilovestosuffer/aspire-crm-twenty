@@ -41,11 +41,22 @@ unattended image change can run migrations you did not choose.
 
 ## Step 2 — Create the workspace and keys
 
-1. Open **http://localhost:3000** → create the workspace and your admin user
-2. **Settings → API & Webhooks → create key** → paste into `infra/.env` as
-   `TWENTY_API_KEY`
-3. Open **http://localhost:5678** → **Settings → n8n API → create key** → paste
-   as `N8N_API_KEY`
+Both are scripted. Neither needs a browser, so a rebuild is reproducible rather
+than a sequence of remembered clicks:
+
+```bash
+python scripts/bootstrap_workspace.py    # Twenty user, workspace, API key
+python scripts/bootstrap_n8n.py          # n8n owner + API key
+python scripts/n8n_credentials.py        # the two n8n credentials
+```
+
+`n8n_credentials.py` writes the `Twenty API` header-auth credential and an
+`Aspire SMTP` credential. With the SMTP block in `infra/.env` left blank it
+points at Mailpit, so the send path is fully exercisable with no mail account
+and no risk of reaching a real contact.
+
+Each script writes its key back into `infra/.env`. To do it by hand instead:
+Twenty → Settings → API & Webhooks, and n8n → Settings → n8n API.
 
 ```bash
 python scripts/stack_verify.py
@@ -131,39 +142,52 @@ example *Opportunity stage → Proposal* creates a follow-up task.
 ## Step 6 — Deploy the automations
 
 ```bash
-python scripts/build_n8n_workflows.py     # regenerate (already committed)
-python scripts/n8n_deploy.py --dry-run
-python scripts/n8n_deploy.py              # deploys INACTIVE
+python scripts/build_n8n_workflows.py       # regenerate (already committed)
+python scripts/validate_workflow_queries.py # every Twenty call vs live schema
+python scripts/n8n_deploy.py --dev          # --dev adds the local alert sink
+python scripts/prove_workflows.py           # run them and check what happened
 ```
 
-In n8n, create three credentials before activating:
+Three gates, in that order, and they exist for different reasons.
 
-| Credential | Type | Value |
+**`build_n8n_workflows.py` refuses to emit** a workflow containing an
+expression that would fail at runtime — chiefly a nested `}}`, which closes an
+n8n expression early and turns the rest into a syntax error.
+
+**`validate_workflow_queries.py`** checks every Twenty REST call against the
+running instance. This is the important one. Twenty does not reliably reject a
+malformed query: send the `filter[field][eq]=value` shape that n8n users reach
+for first and it **ignores the filter and returns the whole table**. Nothing
+errors. The workflow uses row 0 and carries on. That defect sent a lead
+acknowledgement to an unrelated contact here, and the only visible symptom was
+the wrong first name in the email.
+
+The syntax the API actually wants:
+
+| | Correct | Wrong, and silent |
 |---|---|---|
-| `Twenty API` | Header Auth | Name `Authorization`, Value `Bearer <TWENTY_API_KEY>` |
-| `Aspire SMTP` | Send Email (SMTP) | Host, port 587/465, user, app password |
-| `Aspire Slack` | Slack API | Bot token with `chat:write` |
+| filter | `filter=field[eq]:value` | `filter[field][eq]=value` — returns everything |
+| in | `filter=f[in]:[A,B]` | bare comma list — 400 |
+| order | `order_by=field[DescNullsLast]` | `orderBy=` — ignored |
 
-Then test in this order — each is a gate:
+**`prove_workflows.py`** submits the real form, follows the real redirect,
+triggers the real schedules, and then asks Twenty whether the records exist.
+22 checks. Expect all of them to pass:
 
-1. **`SYS Error Handler`** — break a node deliberately. Confirm the Slack alert
-   *and* the `automationRun` record with status FAILED.
-2. **`VEND Send Email`** — send to yourself. Then set a contact's consent to
-   Opted Out and run again: **it must refuse and log the reason.**
-3. **`LEAD Form Intake`** — activate, open the form URL, submit. Confirm person,
-   company, consent record, score, owner, task, acknowledgement email, Slack ping.
-4. **`MSG Tracked Link Redirect`** — create a `trackedLink`, click it, confirm
-   the redirect and the incremented count.
-5. **`SUB Renewal Escalation`** — run manually. It should find the 8 seeded
-   subscriptions inside 90 days.
-6. **`OPS Scheduled Sweeps`** — run manually, confirm the digest.
+| Proves | Check |
+|---|---|
+| `LEAD Form Intake` | person, company, linked consent, scored task, acknowledgement to the right address |
+| Consent gate | opted-out send **refused**, no mail, refusal logged in `messageLog` |
+| `MSG Tracked Link Redirect` | 307 to the destination, `clickCount` incremented |
+| `SYS Error Handler` | `automationRun` history written, chat alert delivered |
+| `SUB Renewal Escalation`, `OPS Scheduled Sweeps` | run clean against seeded data |
 
 Then `python scripts/n8n_deploy.py --activate`.
 
-**Expect two fixes here.** The form workflow's acknowledgement step references
-the created person id through a node path that needs checking against a real
-execution, and node `typeVersion`s differ between n8n releases. Both are
-one-line edits in `scripts/build_n8n_workflows.py` — regenerate and redeploy.
+> Mailpit (`http://localhost:8025`) and the alert sink are **dev only**. Mailpit
+> sits behind a compose profile the VPS never enables, and `n8n_deploy.py`
+> refuses to deploy the sink without `--dev`, so production alerts can never be
+> swallowed by it.
 
 ---
 
@@ -195,6 +219,10 @@ record appear from a form submission does more than any document.
 | Sluggish past ~10k records | `shm_size` and Postgres tuning are already set; confirm they applied |
 | Twenty API returns 429 | 100 requests/minute. The scripts pace themselves; a custom loop must too |
 | n8n form 404 on the production URL | Workflow must be **saved and active**; check `WEBHOOK_URL` matches `N8N_PUBLIC_URL` |
+| Form submits but every field is null | Fields post as `field-0`, `field-1`… by position, not by label. Only affects scripted posts; a browser gets it right |
+| Form URL is a UUID instead of `/form/aspire-contact` | The path moved into `options` at typeVersion 2.2. The generator sets both, so regenerate rather than editing in the UI |
+| Workflow will not publish: "references workflow X which is not published" | Sub-workflow and error-workflow links resolve by id, not name. `n8n_deploy.py` binds them — deploy through it, not by importing JSON |
+| A query returns far too many rows | Almost certainly the `filter[field][op]=` shape. Run `validate_workflow_queries.py` |
 | n8n can't reach Twenty | Inside Docker the address is `http://server:3000`, not `localhost:3000` |
 
 ---

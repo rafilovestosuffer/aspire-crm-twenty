@@ -197,6 +197,13 @@ services:
       ASPIRE_FROM_EMAIL: ${ASPIRE_FROM_EMAIL:-}
       ASPIRE_REP_IDS: ${ASPIRE_REP_IDS:-}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+
+      # Chat alerts post to an incoming webhook — a plain JSON POST, so the
+      # same node works for Slack, Mattermost, Discord and Google Chat.
+      # Locally this points at the dev alert sink so the path can be proven
+      # before any workspace exists; in production it is the real hook URL.
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-http://localhost:5678/webhook/alert-sink}
+      SALES_WEBHOOK_URL: ${SALES_WEBHOOK_URL:-}
     volumes:
       - n8n-data:/home/node/.n8n
     ports:
@@ -207,6 +214,32 @@ services:
       timeout: 5s
       retries: 12
       start_period: 30s
+
+  # Local SMTP catcher. Accepts mail on :1025 and shows it at :8025 — nothing
+  # is ever delivered outside the host.
+  #
+  # This exists so the send path can be exercised for real: the consent gate,
+  # the template render, the messageLog write and the SMTP transaction all run
+  # exactly as they will in production, without needing a mailbox and without
+  # any risk of a test run reaching a live contact.
+  #
+  # `profiles: [dev]` keeps it out of the VPS deployment, which passes no
+  # profile and therefore never starts it.
+  mailpit:
+    image: axllent/mailpit:v1.21
+    restart: always
+    profiles: ["dev"]
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8025/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   # Nightly dump of both databases, 30-day retention. An untested backup is not
   # a backup — restore one into a scratch database before go-live.

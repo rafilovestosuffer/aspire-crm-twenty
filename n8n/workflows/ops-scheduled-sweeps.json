@@ -12,7 +12,7 @@
           ]
         }
       },
-      "id": "792457795520",
+      "id": "879015193176",
       "name": "Daily 07:00 UTC",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -24,7 +24,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/opportunities?filter[stage][neq]=WON&limit=200",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/opportunities?filter=stage[neq]:CUSTOMER&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -35,7 +35,7 @@
           }
         }
       },
-      "id": "623513691487",
+      "id": "374865151046",
       "name": "Stale opportunities",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -55,7 +55,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/appointments?filter[status][eq]=BOOKED&limit=200",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/appointments?filter=status[eq]:BOOKED&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -66,7 +66,7 @@
           }
         }
       },
-      "id": "889753333184",
+      "id": "281361557479",
       "name": "Possible no-shows",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -86,7 +86,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/invoices?filter[status][in]=SENT,PARTIALLY_PAID&limit=200",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/invoices?filter=status[in]:[SENT,PARTIALLY_PAID]&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -97,7 +97,7 @@
           }
         }
       },
-      "id": "495171976888",
+      "id": "763191264536",
       "name": "Overdue invoices",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -118,7 +118,7 @@
       "parameters": {
         "jsCode": "// Three absence checks in one pass. None of these emit an event anywhere \u2014\n// they are all \"this did not happen by now\", which only a query can find.\nconst now = Date.now();\nconst days = (d) => (now - new Date(d).getTime()) / 86400000;\n\nconst opps    = $('Stale opportunities').first().json.data?.opportunities || [];\nconst appts   = $('Possible no-shows').first().json.data?.appointments || [];\nconst invoices= $('Overdue invoices').first().json.data?.invoices || [];\n\nconst staleOpps = opps.filter(o => days(o.updatedAt) > 14);\nconst noShows   = appts.filter(a => new Date(a.scheduledAt).getTime() < now - 3600_000);\nconst late      = invoices.filter(i => i.dueDate && new Date(i.dueDate).getTime() < now);\n\nreturn [{ json: {\n  staleCount: staleOpps.length, noShowCount: noShows.length, lateCount: late.length,\n  noShowIds: noShows.map(a => a.id),\n  summary: [\n    staleOpps.length ? `${staleOpps.length} opportunity(s) untouched >14 days` : null,\n    noShows.length   ? `${noShows.length} appointment(s) past with status still Booked` : null,\n    late.length      ? `${late.length} invoice(s) overdue` : null,\n  ].filter(Boolean).join('\\n') || 'Nothing outstanding.',\n}}];"
       },
-      "id": "826803194640",
+      "id": "430719254849",
       "name": "Assess",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -148,7 +148,7 @@
         },
         "options": {}
       },
-      "id": "418611827430",
+      "id": "301440011524",
       "name": "Anything to report?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -159,28 +159,29 @@
     },
     {
       "parameters": {
-        "select": "channel",
-        "channelId": "#sales",
-        "text": "=:mag: *Daily sweep*\n{{ $json.summary }}",
-        "otherOptions": {}
+        "method": "POST",
+        "url": "={{ $env.SALES_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"#sales\", \"text\": `:mag: *Daily sweep*\n${$json.summary}` }) }}",
+        "options": {}
       },
-      "id": "702822194007",
+      "id": "318214998296",
       "name": "Daily sweep",
-      "type": "n8n-nodes-base.slack",
-      "typeVersion": 2,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
       "position": [
         1320,
         300
       ],
-      "credentials": {
-        "slackApi": {
-          "name": "Aspire Slack"
-        }
-      }
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {},
-      "id": "085764489848",
+      "id": "614944669533",
       "name": "All clear",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
@@ -204,9 +205,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"OPS Scheduled Sweeps\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id}) }}"
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"OPS Scheduled Sweeps\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
       },
-      "id": "110847902435",
+      "id": "981892415467",
       "name": "Log run",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,

@@ -74,6 +74,43 @@ docs/                                method, findings, open decisions
 - Twenty workflow actions: create / update / delete / search / upsert record,
   iterator, filter, delay, send email, form, code, HTTP request, AI agent (soon).
 
+### Twenty REST query syntax — verified against the live instance
+
+Getting these wrong is usually **silent**, not an error. Enforced by
+`scripts/validate_workflow_queries.py`; run it after touching any workflow.
+
+| Purpose | Correct | Wrong, and what happens |
+|---|---|---|
+| filter | `?filter=field[eq]:value` | `?filter[field][eq]=value` — **ignored, returns the whole table** |
+| multiple | `?filter=a[eq]:1,b[eq]:2` (comma = AND) | — |
+| in | `?filter=status[in]:[A,B]` | bare comma list → 400 |
+| substring | `?filter=domainName.primaryLinkUrl[ilike]:%acme%` | — |
+| order | `?order_by=field[DescNullsLast]` | `orderBy=` — **silently ignored** |
+| relation | `?filter=personId[eq]:<uuid>` | the relation is `person`, the filter key is `personId` |
+
+- `/rest/metadata/*` **rejects every query string**, and `/rest/metadata/objects`
+  embeds only a *slice* of each object's fields — so it is not a complete
+  schema. Merge it with the keys of a real row from `/rest/{object}?limit=1`.
+- Task body is `bodyV2`, a RICH_TEXT composite taking `{"markdown": "..."}`.
+  A bare string is a 400; a plain `body` key is not a field.
+- Default opportunity stages are `NEW, SCREENING, MEETING, PROPOSAL, CUSTOMER`.
+  There is no `WON`.
+
+### n8n facts learned the hard way
+
+- An expression ends at the **first `}}`**. A nested object literal
+  (`{"a": {"b": $x}}`) closes it early and the remainder is a syntax error.
+  Emit `} }`. The generator lints for this and refuses to write.
+- `jsonBody` is only evaluated when the **whole** parameter starts with `=`.
+- Sub-workflow references and `settings.errorWorkflow` resolve by **id, not
+  name**. Named, they dangle silently — every workflow looks like it has error
+  handling and none of it fires. `n8n_deploy.py` binds ids at deploy time.
+- Form Trigger inputs post as `field-0`, `field-1`, … **by position**, not by
+  label. The form path lives in `path` at typeVersion ≤ 2.1 and in
+  `options.path` from 2.2; set both or the URL falls back to a random UUID.
+- Code nodes run in a sandboxed task runner: use `$env`, never `process.env`.
+- A Switch's `fallbackOutput` must be an existing index or `"extra"`.
+
 ## Working style
 Verify empirically before writing logic against it. The GHL docs and the live API
 disagree often enough that a script written blind fails in ten places at once.

@@ -18,22 +18,44 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "n8n" / "workflows"
 
+# Non-greedy so "{{ a }} x {{ b }}" is two placeholders, not one.
+_PLACEHOLDER = re.compile(r"\{\{(.*?)\}\}", re.S)
+
+
+def _stable_id(*parts: str) -> str:
+    """A deterministic 12-digit node id, identical on every run."""
+    h = hashlib.sha1("\x00".join(parts).encode("utf-8")).hexdigest()
+    return f"{int(h[:15], 16) % (10**12):012d}"
+
 # Credential names the workflows expect to exist in n8n. Created once, by hand,
 # in n8n → Credentials. Never inlined into a node.
 CRED_TWENTY = "Twenty API"          # Header Auth: Authorization = Bearer <key>
 CRED_SMTP = "Aspire SMTP"           # Send Email (SMTP)
-CRED_SLACK = "Aspire Slack"         # Slack API
 
 TWENTY = "={{ $env.TWENTY_BASE_URL }}"
+
+# Chat alerts go to an *incoming webhook*, not the Slack API node.
+#
+# The Slack node needs an OAuth app with a bot token, which cannot be created
+# headlessly and cannot be exercised at all without a live workspace — which is
+# exactly why these workflows sat unproven. An incoming webhook is a plain
+# JSON POST, so the same node works against Slack, Mattermost, Discord
+# (`/slack` suffix) and Google Chat, and can be pointed at a local sink to
+# prove the path before any workspace exists.
 ALERT_CHANNEL = "#crm-alerts"
 SALES_CHANNEL = "#sales"
+FORM_PATH = "aspire-contact"          # public form: /form/aspire-contact
+ALERT_HOOK = "={{ $env.ALERT_WEBHOOK_URL }}"
+SALES_HOOK = "={{ $env.SALES_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL }}"
 
 
 # --------------------------------------------------------------------------
@@ -49,17 +71,48 @@ def _js_literal(value) -> str:
     belongs. Emitting real JS and letting JSON.stringify serialise it preserves
     numbers, booleans and nulls.
 
-    An `"={{ expr }}"` value becomes the bare expression; everything else is
-    JSON-encoded as a literal.
+    Three string cases, and getting the third wrong is a silent failure:
+
+    - `"={{ expr }}"`  — the whole string is one expression -> the bare `expr`.
+    - `"text {{ a }} more {{ b }}"` — literal text *interpolated* with
+      expressions. This must become a JS template literal. Left as a JSON
+      string it is emitted inside `JSON.stringify(...)`, where `{{ }}` means
+      nothing, and the braces are delivered verbatim to the recipient.
+    - anything else — a plain literal.
     """
     if isinstance(value, dict):
         inner = ", ".join(f"{json.dumps(k)}: {_js_literal(v)}"
                           for k, v in value.items())
-        return "{" + inner + "}"
+        # The trailing space is load-bearing. n8n ends an expression at the
+        # first `}}`, so a nested literal — `{"phones": {"primary": $x}}` —
+        # terminates it early and the rest, `) }}`, is parsed as code:
+        # "invalid syntax". Twenty's composite fields (name, emails, phones,
+        # links) are all nested, so this would hit most write nodes.
+        # Closing as `} }` keeps the braces from ever being adjacent.
+        return "{" + inner + " }"
     if isinstance(value, list):
         return "[" + ", ".join(_js_literal(v) for v in value) + "]"
-    if isinstance(value, str) and value.startswith("={{") and value.endswith("}}"):
-        return value[3:-2].strip()          # "={{ $json.x }}" -> "$json.x"
+    if isinstance(value, str):
+        expr = value[1:] if value.startswith("=") else value
+        spans = list(_PLACEHOLDER.finditer(expr))
+        if not spans:
+            return json.dumps(value)
+        if len(spans) == 1 and spans[0].span() == (0, len(expr)):
+            return spans[0].group(1).strip()        # "={{ $json.x }}" -> "$json.x"
+        # Interpolated: rebuild as a template literal, escaping only the
+        # literal segments so an expression is never mangled.
+        out: list[str] = []
+        pos = 0
+        for m in spans:
+            lit = expr[pos:m.start()]
+            out.append(lit.replace("\\", "\\\\").replace("`", "\\`")
+                          .replace("${", "\\${"))
+            out.append("${" + m.group(1).strip() + "}")
+            pos = m.end()
+        tail = expr[pos:]
+        out.append(tail.replace("\\", "\\\\").replace("`", "\\`")
+                       .replace("${", "\\${"))
+        return "`" + "".join(out) + "`"
     return json.dumps(value)
 
 
@@ -78,7 +131,11 @@ class Flow:
             creds: dict | None = None, row: int = 0) -> str:
         node = {
             "parameters": params,
-            "id": f"{abs(hash((self.name, name))) % (10**12):012d}",
+            # Stable across processes. Python's hash() is salted per
+            # interpreter (PYTHONHASHSEED), so using it here regenerated a
+            # different id for every node on every run — the committed JSON
+            # churned on each build and real changes were invisible in review.
+            "id": _stable_id(self.name, name),
             "name": name,
             "type": ntype,
             "typeVersion": version,
@@ -151,13 +208,34 @@ class Flow:
             "options": {},
         }, version=2, row=row)
 
-    def slack(self, name: str, channel: str, text: str, *, row: int = 0) -> str:
-        return self.add(name, "n8n-nodes-base.slack", {
-            "select": "channel",
-            "channelId": channel,
-            "text": text,
-            "otherOptions": {},
-        }, version=2, creds={"slackApi": {"name": CRED_SLACK}}, row=row)
+    def notify(self, name: str, channel: str, text: str, *, row: int = 0,
+               hook: str = ALERT_HOOK) -> str:
+        """
+        Post a chat message to an incoming webhook.
+
+        `text` is a Slack-formatted string; `channel` is advisory (Slack honours
+        it only for legacy hooks) but is sent so a sink or a router can tell
+        alerts from sales notifications.
+
+        Alerting must never take the workflow down with it: if the chat vendor
+        is unreachable, the run it was reporting on still has to finish, so
+        this node continues on error rather than raising.
+        """
+        n = self.add(name, "n8n-nodes-base.httpRequest", {
+            "method": "POST",
+            "url": hook,
+            "sendBody": True,
+            "specifyBody": "json",
+            "jsonBody": ("={{ JSON.stringify("
+                         + _js_literal({"channel": channel, "text": text})
+                         + ") }}"),
+            "options": {},
+        }, version=4, row=row)
+        self.nodes[-1]["retryOnFail"] = True
+        self.nodes[-1]["maxTries"] = 3
+        self.nodes[-1]["waitBetweenTries"] = 2000
+        self.nodes[-1]["onError"] = "continueRegularOutput"
+        return n
 
     def noop(self, name: str, *, row: int = 0) -> str:
         return self.add(name, "n8n-nodes-base.noOp", {}, row=row)
@@ -223,8 +301,9 @@ return [{ json: {
     })
 
     recent = f.twenty("Recent failures?", "GET",
-                      "/rest/automationRuns?filter[workflowName][eq]="
-                      "{{ $json.workflowName }}&filter[status][eq]=FAILED&limit=5")
+                      "/rest/automationRuns?filter=workflowName[eq]:"
+                      "{{ $json.workflowName }},status[eq]:FAILED"
+                      "&order_by=startedAt[DescNullsLast]&limit=5")
 
     dedupe = f.code("Suppress alert storm", """
 // One failing workflow can fire hundreds of times. Alert on the first, then
@@ -237,8 +316,8 @@ return [{ json: { ...$('Extract failure').first().json, suppress: priors > 1 } }
 """.strip())
 
     gate = f.iff("Should alert?", "={{ $json.suppress }}", "equals", "false")
-    alert = f.slack("Alert", ALERT_CHANNEL,
-                    "=:rotating_light: *{{ $json.workflowName }}* failed\n"
+    alert = f.notify("Alert", ALERT_CHANNEL,
+                     "=:rotating_light: *{{ $json.workflowName }}* failed\n"
                     "Node: `{{ $json.nodeName }}`\n"
                     "Error: {{ $json.message }}\n"
                     "{{ $json.isBilling ? ':credit_card: *Looks like an AI credit/billing failure — retrying will not help.*' : '' }}\n"
@@ -270,9 +349,10 @@ def wf_send_email() -> Flow:
                       "/rest/people/{{ $json.personId }}")
 
     consent = f.twenty("Get consent", "GET",
-                       "/rest/consentRecords?filter[personId][eq]="
+                       "/rest/consentRecords?filter=personId[eq]:"
                        "{{ $('When called').first().json.personId }}"
-                       "&filter[channel][eq]=EMAIL&orderBy=effectiveAt[DescNullsLast]&limit=1")
+                       ",channel[eq]:EMAIL"
+                       "&order_by=effectiveAt[DescNullsLast]&limit=1")
 
     check = f.code("Consent gate", """
 // The whole point of routing every send through this sub-workflow: a workflow
@@ -376,8 +456,14 @@ def wf_lead_form() -> Flow:
              "person and company, records consent, scores, assigns and "
              "acknowledges. Replaces a GHL form with no third-party tool.")
 
+    # The form path is set in BOTH places on purpose. The node resolves its URL
+    # as `path || options.path || $webhookId`, but the top-level `path` property
+    # only exists at typeVersion <= 2.1; from 2.2 it moved into `options`. Set
+    # just one and the other version silently falls through to $webhookId — the
+    # form still works, at an unguessable UUID URL that no campaign can link to.
+    # Both are the same value, so whichever the running version reads is right.
     trig = f.add("Public form", "n8n-nodes-base.formTrigger", {
-        "path": "aspire-contact",
+        "path": FORM_PATH,
         "formTitle": "Talk to Aspire Tech",
         "formDescription": "Tell us what you need and a security specialist "
                            "will reply within one business day.",
@@ -401,7 +487,7 @@ def wf_lead_form() -> Flow:
              "fieldType": "checkbox", "requiredField": True},
         ]},
         "responseMode": "lastNode",
-        "options": {"appendAttribution": False},
+        "options": {"path": FORM_PATH, "appendAttribution": False},
     }, version=2.2)
 
     norm = f.code("Normalise", """
@@ -424,7 +510,7 @@ return [{ json: {
 """.strip())
 
     find = f.twenty("Find person", "GET",
-                    "/rest/people?filter[emails.primaryEmail][eq]={{ $json.email }}&limit=1")
+                    "/rest/people?filter=emails.primaryEmail[eq]:{{ $json.email }}&limit=1")
 
     exists = f.code("Exists?", """
 // Idempotency: forms get double-submitted and webhooks get retried. Search
@@ -435,6 +521,14 @@ return [{ json: { ...$('Normalise').first().json,
 """.strip())
 
     branch = f.iff("New person?", "={{ $json.existingId }}", "notExists", "")
+
+    # One definition of "the person this run is about", used by every node
+    # downstream. Written out per-node it drifted: the consent record and the
+    # form submission were created with no person at all, so the consent gate
+    # could never find them and every send would have sailed through the check
+    # it exists to fail.
+    person_id = ("={{ $('Exists?').first().json.existingId || "
+                 "$('Create person').first().json.data.createPerson.id }}")
 
     create = f.twenty("Create person", "POST", "/rest/people", {
         "name": {"firstName": "={{ $json.firstName }}",
@@ -448,18 +542,49 @@ return [{ json: { ...$('Normalise').first().json,
     merge = f.add("Merge", "n8n-nodes-base.merge",
                   {"mode": "append", "options": {}}, version=3)
 
+    # Match the company on email domain, not on typed company name: people
+    # write "Meridian", "Meridian Defense" and "meridian defense systems" for
+    # the same account, and each spelling would create another record.
+    find_co = f.twenty("Find company", "GET",
+                       "/rest/companies"
+                       "?filter=domainName.primaryLinkUrl[ilike]:"
+                       "%{{ $('Normalise').first().json.emailDomain }}%&limit=1")
+
+    co_branch = f.code("Company exists?", """
+const found = ($input.first().json.data?.companies || [])[0];
+return [{ json: { ...$('Normalise').first().json, companyId: found?.id || null } }];
+""".strip())
+
+    new_co = f.iff("New company?", "={{ $json.companyId }}", "notExists", "")
+
+    create_co = f.twenty("Create company", "POST", "/rest/companies", {
+        "name": "={{ $json.companyName }}",
+        "domainName": {"primaryLinkUrl": "={{ 'https://' + $json.emailDomain }}"},
+    })
+    co_merge = f.add("Company ready", "n8n-nodes-base.merge",
+                     {"mode": "append", "options": {}}, version=3, row=1)
+
+    company_id = ("={{ $('Company exists?').first().json.companyId || "
+                  "$('Create company').first().json.data.createCompany.id }}")
+
+    link_co = f.twenty("Link person to company", "PATCH",
+                       "/rest/people/" + person_id.replace("={{ ", "{{ "),
+                       {"companyId": company_id})
+
     consent = f.twenty("Record consent", "POST", "/rest/consentRecords", {
         "channel": "EMAIL",
         "status": "={{ $('Normalise').first().json.consent ? 'OPTED_IN' : 'PENDING' }}",
         "source": "FORM_SUBMISSION",
         "effectiveAt": "={{ $now.toISO() }}",
         "proof": "={{ 'n8n form execution ' + $execution.id }}",
+        "personId": person_id,
     })
 
     submission = f.twenty("Log submission", "POST", "/rest/formSubmissions", {
         "submittedAt": "={{ $now.toISO() }}",
         "consentGiven": "={{ $('Normalise').first().json.consent }}",
         "payload": "={{ JSON.stringify($('Normalise').first().json) }}",
+        "personId": person_id,
     })
 
     score = f.code("Score and route", """
@@ -476,7 +601,9 @@ if (d.phone)                                          score += 10;
 
 // Deterministic round-robin: hashing the email keeps a person with the same
 // rep across re-runs, and needs no counter stored anywhere.
-const REPS = (process.env.ASPIRE_REP_IDS || '').split(',').filter(Boolean);
+// $env, not process.env: with N8N_RUNNERS_ENABLED the Code node executes
+// in a sandboxed task runner where `process` does not exist at all.
+const REPS = String($env.ASPIRE_REP_IDS || '').split(',').filter(Boolean);
 const hash = [...d.email].reduce((a, c) => a + c.charCodeAt(0), 0);
 
 return [{ json: { ...d, score,
@@ -489,22 +616,24 @@ return [{ json: { ...d, score,
                  "' (' + $json.band + ', score ' + $json.score + ')' }}",
         "status": "TODO",
         "dueAt": "={{ $now.plus({ days: 1 }).toISO() }}",
-        "body": "={{ $json.interest + '\\n\\n' + $json.message }}",
+        # Twenty's task body is `bodyV2`, a RICH_TEXT composite: it takes
+        # {"markdown": ...} and rejects a bare string with a 400. A plain
+        # `body` key is silently not a field at all.
+        "bodyV2": {"markdown": "={{ $json.interest + '\\n\\n' + $json.message }}"},
     })
 
     ack = f.add("Send acknowledgement", "n8n-nodes-base.executeWorkflow", {
         "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
         "workflowInputs": {"value": {
-            "personId": "={{ $('Exists?').first().json.existingId || "
-                        "$('Create person').first().json.data?.createPerson?.id }}",
+            "personId": person_id,
             "templateKey": "lead_ack",
             "mergeData": "={{ {} }}",
         }},
         "options": {},
     }, version=1.2)
 
-    notify = f.slack("Notify sales", SALES_CHANNEL,
-                     "=:inbox_tray: *New lead — {{ $('Score and route').first().json.band }}* "
+    notify = f.notify("Notify sales", SALES_CHANNEL, hook=SALES_HOOK,
+                      text="=:inbox_tray: *New lead — {{ $('Score and route').first().json.band }}* "
                      "(score {{ $('Score and route').first().json.score }})\n"
                      "*{{ $('Score and route').first().json.firstName }} "
                      "{{ $('Score and route').first().json.lastName }}* — "
@@ -519,7 +648,12 @@ return [{ json: { ...d, score,
     f.connect(branch, update, out=1)
     f.connect(create, merge)
     f.connect(update, merge)
-    f.chain(merge, consent, submission, score, task, ack, notify, log)
+    # Person settled, then company, then everything that references both.
+    f.chain(merge, find_co, co_branch, new_co)
+    f.connect(new_co, create_co, out=0)
+    f.connect(create_co, co_merge)
+    f.connect(new_co, co_merge, out=1)
+    f.chain(co_merge, link_co, consent, submission, score, task, ack, notify, log)
     return f
 
 
@@ -544,7 +678,7 @@ def wf_tracked_link() -> Flow:
     }, version=2)
 
     lookup = f.twenty("Find link", "GET",
-                      "/rest/trackedLinks?filter[slug][eq]={{ $json.query.s }}&limit=1")
+                      "/rest/trackedLinks?filter=slug[eq]:{{ $json.query.s }}&limit=1")
 
     check = f.code("Resolve", """
 const link = ($input.first().json.data?.trackedLinks || [])[0];
@@ -597,7 +731,13 @@ def wf_renewal() -> Flow:
                                          "expression": "0 6 * * *"}]}}, version=1.2)
 
     fetch = f.twenty("Get active subscriptions", "GET",
-                     "/rest/serviceSubscriptions?filter[status][in]=ACTIVE,RENEWAL_DUE&limit=200")
+                     # Bound the window in the query, not in code: the old
+                     # version pulled every subscription and filtered in JS,
+                     # which is a full table scan every morning forever.
+                     "/rest/serviceSubscriptions"
+                     "?filter=status[in]:[ACTIVE,RENEWAL_DUE],"
+                     "renewalDate[lte]:{{ $now.plus({ days: 90 }).toISO() }}"
+                     "&order_by=renewalDate[AscNullsLast]&limit=200")
 
     window = f.code("Days until renewal", """
 const subs = $input.first().json.data?.serviceSubscriptions || [];
@@ -640,7 +780,11 @@ return out;
                                             "operator": {"type": "number", "operation": "equals"}}],
                             "combinator": "and"}, "outputKey": "30 days"},
         ]},
-        "options": {"fallbackOutput": 3},
+        # Three rules give outputs 0-2. The 7-day case is everything that
+        # reaches here, and it needs an output of its own: `fallbackOutput: 3`
+        # names an output that does not exist and the node throws
+        # "The ouput 3 is not allowed" at runtime. "extra" creates it.
+        "options": {"fallbackOutput": "extra"},
     }, version=3)
 
     t90 = f.twenty("Task: begin renewal", "POST", "/rest/tasks", {
@@ -659,8 +803,8 @@ return out;
         "closeDate": "={{ $json.renewalDate }}",
         "companyId": "={{ $json.companyId }}",
     }, row=2)
-    a7 = f.slack("Urgent escalation", ALERT_CHANNEL,
-                 "=:warning: *Renewal in 7 days, still no opportunity*\n"
+    a7 = f.notify("Urgent escalation", ALERT_CHANNEL,
+                  "=:warning: *Renewal in 7 days, still no opportunity*\n"
                  "{{ $json.name }} — {{ $json.serviceLine }}\n"
                  "Renews {{ $json.renewalDate }}", row=3)
 
@@ -693,11 +837,15 @@ def wf_sweeps() -> Flow:
                                          "expression": "0 7 * * *"}]}}, version=1.2)
 
     stale = f.twenty("Stale opportunities", "GET",
-                     "/rest/opportunities?filter[stage][neq]=WON&limit=200")
+                     # Twenty's default pipeline ends at CUSTOMER; there is
+                     # no WON stage, and the wrong enum is a 400 at runtime.
+                     "/rest/opportunities?filter=stage[neq]:CUSTOMER&limit=200")
     noshow = f.twenty("Possible no-shows", "GET",
-                      "/rest/appointments?filter[status][eq]=BOOKED&limit=200", row=1)
+                      "/rest/appointments?filter=status[eq]:BOOKED&limit=200", row=1)
     overdue = f.twenty("Overdue invoices", "GET",
-                       "/rest/invoices?filter[status][in]=SENT,PARTIALLY_PAID&limit=200", row=2)
+                       # `in` takes a bracketed array; a bare comma list 400s.
+                       "/rest/invoices?filter=status[in]:[SENT,PARTIALLY_PAID]"
+                       "&limit=200", row=2)
 
     assess = f.code("Assess", """
 // Three absence checks in one pass. None of these emit an event anywhere —
@@ -726,8 +874,8 @@ return [{ json: {
 
     gate = f.iff("Anything to report?", "={{ $json.summary }}", "notEquals",
                  "Nothing outstanding.")
-    report = f.slack("Daily sweep", SALES_CHANNEL,
-                     "=:mag: *Daily sweep*\n{{ $json.summary }}")
+    report = f.notify("Daily sweep", SALES_CHANNEL, hook=SALES_HOOK,
+                      text="=:mag: *Daily sweep*\n{{ $json.summary }}")
     quiet = f.noop("All clear", row=1)
     log = f.log_run("Log run", "OPS Scheduled Sweeps")
 
@@ -741,8 +889,95 @@ return [{ json: {
 
 # --------------------------------------------------------------------------
 
+def wf_alert_sink() -> Flow:
+    """
+    Dev-only receiver for the chat webhook.
+
+    Alerts are the part of an automation nobody tests, because testing them
+    normally means owning a Slack workspace. This stands in for one: it accepts
+    the same JSON payload Slack's incoming webhooks accept and files it in
+    Twenty as an automationRun, so `ALERT_WEBHOOK_URL` can be pointed here and
+    the whole alert path verified end to end.
+
+    Not deployed to production — `n8n_deploy.py` skips DEV_ONLY unless --dev.
+    """
+    f = Flow("SYS Alert Sink (dev)",
+             "Dev stand-in for Slack. Records anything posted to the chat "
+             "webhook as an automationRun so alerting can be proven locally.",
+             error_workflow=False)
+
+    trig = f.add("Incoming alert", "n8n-nodes-base.webhook", {
+        "path": "alert-sink",
+        "httpMethod": "POST",
+        "responseMode": "lastNode",
+        "options": {},
+    }, version=2)
+
+    shape = f.code("Shape", """
+const b = $input.first().json.body || {};
+return [{ json: {
+  channel: b.channel || '(default)',
+  // Slack accepts `text` or `blocks`; only `text` is used here.
+  text: String(b.text || '').slice(0, 2000),
+}}];
+""".strip())
+
+    record = f.twenty("Record alert", "POST", "/rest/automationRuns", {
+        "workflowName": "={{ 'ALERT ' + $json.channel }}",
+        "status": "SUCCESS",
+        "startedAt": "={{ $now.toISO() }}",
+        "n8nExecutionId": "={{ $execution.id }}",
+        # errorMessage is automationRun's only free-text field; the alert body
+        # goes there rather than adding a column used by one dev-only workflow.
+        "errorMessage": "={{ $json.text }}",
+    })
+
+    f.chain(trig, shape, record)
+    return f
+
+
+# Workflows that exist only to make local verification possible. They are
+# generated and committed so the proof is reproducible, but never deployed to
+# production, where the real chat webhook replaces them.
+DEV_ONLY = {"SYS Alert Sink (dev)"}
+
 BUILDERS = [wf_error_handler, wf_send_email, wf_lead_form,
-            wf_tracked_link, wf_renewal, wf_sweeps]
+            wf_tracked_link, wf_renewal, wf_sweeps, wf_alert_sink]
+
+
+def lint(flow: Flow) -> list[str]:
+    """
+    Static checks for the failure modes that only show up at runtime.
+
+    Every one of these was a live defect first. A generated library is only
+    trustworthy if the generator refuses to emit the shapes that broke before.
+    """
+    problems: list[str] = []
+    for node in flow.nodes:
+        where = f"{flow.name} / {node['name']}"
+        for key, val in (node.get("parameters") or {}).items():
+            if not isinstance(val, str) or "{{" not in val:
+                continue
+            # A string may hold several placeholders — that is ordinary
+            # interpolation. What breaks is a `}}` *inside* one of them: n8n
+            # closes the placeholder there, so the expression it actually
+            # evaluates is truncated. Non-greedy matching sees exactly what
+            # n8n sees, and truncation shows up as leftover open braces.
+            for m in _PLACEHOLDER.finditer(val):
+                seen = m.group(1)
+                if seen.count("{") != seen.count("}"):
+                    problems.append(
+                        f"{where}: `{key}` truncates at a nested `}}}}` — n8n "
+                        f"would evaluate `{seen.strip()[:60]}...`")
+            if val.count("{{") != val.count("}}"):
+                problems.append(f"{where}: `{key}` has unbalanced braces")
+        # A body sent as a plain string never gets evaluated.
+        if node.get("type") == "n8n-nodes-base.httpRequest":
+            body = (node.get("parameters") or {}).get("jsonBody")
+            if isinstance(body, str) and "{{" in body and not body.startswith("="):
+                problems.append(f"{where}: jsonBody has placeholders but is not "
+                                "an expression (missing leading `=`)")
+    return problems
 
 
 def main() -> int:
@@ -757,9 +992,20 @@ def main() -> int:
             print(f"  {fl.name:32} {len(fl.nodes):>2} nodes")
         return 0
 
+    problems = [p for fl in flows for p in lint(fl)]
+    if problems:
+        print("Refusing to write — generated workflows would fail at runtime:\n",
+              file=sys.stderr)
+        for p in problems:
+            print(f"  {p}", file=sys.stderr)
+        return 1
+
     OUT.mkdir(parents=True, exist_ok=True)
     for fl in flows:
-        slug = fl.name.lower().replace(" ", "-")
+        # Punctuation out of filenames: "SYS Alert Sink (dev)" would
+        # otherwise become sys-alert-sink-(dev).json, which needs quoting
+        # in every shell command that touches it.
+        slug = re.sub(r"[^a-z0-9]+", "-", fl.name.lower()).strip("-")
         dest = OUT / f"{slug}.json"
         dest.write_text(json.dumps(fl.to_dict(), indent=2), encoding="utf-8")
         print(f"  {fl.name:32} {len(fl.nodes):>2} nodes → {dest.relative_to(ROOT)}")

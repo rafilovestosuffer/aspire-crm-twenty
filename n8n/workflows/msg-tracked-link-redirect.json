@@ -8,7 +8,7 @@
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "992258397262",
+      "id": "158991815000",
       "name": "Click",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -20,7 +20,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/trackedLinks?filter[slug][eq]={{ $json.query.s }}&limit=1",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/trackedLinks?filter=slug[eq]:{{ $json.query.s }}&limit=1",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -31,7 +31,7 @@
           }
         }
       },
-      "id": "634750069260",
+      "id": "936702637220",
       "name": "Find link",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -52,7 +52,7 @@
       "parameters": {
         "jsCode": "const link = ($input.first().json.data?.trackedLinks || [])[0];\nconst q = $('Click').first().json.query || {};   // ?s=<slug>&p=<personId>\nreturn [{ json: {\n  found: !!link,\n  id: link?.id || null,\n  destination: link?.destinationUrl?.primaryLinkUrl || link?.destinationUrl || '',\n  clickCount: (link?.clickCount || 0) + 1,\n  personId: q.p || null,\n}}];"
       },
-      "id": "198873203664",
+      "id": "758153091599",
       "name": "Resolve",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -82,7 +82,7 @@
         },
         "options": {}
       },
-      "id": "052669200275",
+      "id": "906636671200",
       "name": "Known link?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -106,9 +106,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"clickCount\": $json.clickCount}) }}"
+        "jsonBody": "={{ JSON.stringify({\"clickCount\": $json.clickCount }) }}"
       },
-      "id": "514019840329",
+      "id": "131688089294",
       "name": "Count click",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -131,7 +131,7 @@
         "redirectURL": "={{ $('Resolve').first().json.destination }}",
         "options": {}
       },
-      "id": "218157103208",
+      "id": "342620960541",
       "name": "Redirect",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
@@ -148,7 +148,7 @@
           "responseCode": 404
         }
       },
-      "id": "348385547522",
+      "id": "850157756489",
       "name": "404",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,

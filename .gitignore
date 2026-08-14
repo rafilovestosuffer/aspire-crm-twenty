@@ -226,6 +226,7 @@ snapshots/
 out/*
 !out/.gitkeep
 !out/feature_audit.csv
+!out/implementation_status.md
 !out/*.pdf
 docs/migration-guide/_combined.html
 .session_curl.txt

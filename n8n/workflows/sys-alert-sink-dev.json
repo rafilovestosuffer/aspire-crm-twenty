@@ -1,0 +1,103 @@
+{
+  "name": "SYS Alert Sink (dev)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "alert-sink",
+        "httpMethod": "POST",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "243498760800",
+      "name": "Incoming alert",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || {};\nreturn [{ json: {\n  channel: b.channel || '(default)',\n  // Slack accepts `text` or `blocks`; only `text` is used here.\n  text: String(b.text || '').slice(0, 2000),\n}}];"
+      },
+      "id": "488335423875",
+      "name": "Shape",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": 'ALERT ' + $json.channel, \"status\": \"SUCCESS\", \"startedAt\": $now.toISO(), \"n8nExecutionId\": $execution.id, \"errorMessage\": $json.text }) }}"
+      },
+      "id": "104765219520",
+      "name": "Record alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Incoming alert": {
+      "main": [
+        [
+          {
+            "node": "Shape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape": {
+      "main": [
+        [
+          {
+            "node": "Record alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "description": "Dev stand-in for Slack. Records anything posted to the chat webhook as an automationRun so alerting can be proven locally."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

@@ -66,10 +66,11 @@
         },
         "responseMode": "lastNode",
         "options": {
+          "path": "aspire-contact",
           "appendAttribution": false
         }
       },
-      "id": "991603865883",
+      "id": "368183350305",
       "name": "Public form",
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 2.2,
@@ -82,7 +83,7 @@
       "parameters": {
         "jsCode": "// Normalise at the edge. Everything downstream can then assume clean values.\nconst j = $input.first().json;\nconst email = String(j['Work email'] || '').trim().toLowerCase();\nconst phoneRaw = String(j['Phone'] || '').replace(/[^0-9+]/g, '');\n\nreturn [{ json: {\n  firstName: String(j['First name'] || '').trim(),\n  lastName:  String(j['Last name']  || '').trim(),\n  email,\n  phone: phoneRaw ? (phoneRaw.startsWith('+') ? phoneRaw : '+1' + phoneRaw) : '',\n  companyName: String(j['Company'] || '').trim(),\n  interest: j['What do you need help with?'] || '',\n  message: String(j['Message'] || '').slice(0, 2000),\n  consent: j['I agree to be contacted by Aspire Tech'] === true,\n  emailDomain: email.split('@')[1] || '',\n}}];"
       },
-      "id": "360327421684",
+      "id": "278271306411",
       "name": "Normalise",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -94,7 +95,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people?filter[emails.primaryEmail][eq]={{ $json.email }}&limit=1",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people?filter=emails.primaryEmail[eq]:{{ $json.email }}&limit=1",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -105,7 +106,7 @@
           }
         }
       },
-      "id": "821510248581",
+      "id": "419073206314",
       "name": "Find person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -126,7 +127,7 @@
       "parameters": {
         "jsCode": "// Idempotency: forms get double-submitted and webhooks get retried. Search\n// before create, always \u2014 cleaning duplicates later costs far more.\nconst found = ($input.first().json.data?.people || [])[0];\nreturn [{ json: { ...$('Normalise').first().json,\n                  existingId: found?.id || null } }];"
       },
-      "id": "653263168856",
+      "id": "395947026449",
       "name": "Exists?",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -156,7 +157,7 @@
         },
         "options": {}
       },
-      "id": "465639678031",
+      "id": "080591170723",
       "name": "New person?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -180,9 +181,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"name\": {\"firstName\": $json.firstName, \"lastName\": $json.lastName}, \"emails\": {\"primaryEmail\": $json.email}, \"phones\": {\"primaryPhoneNumber\": $json.phone}}) }}"
+        "jsonBody": "={{ JSON.stringify({\"name\": {\"firstName\": $json.firstName, \"lastName\": $json.lastName }, \"emails\": {\"primaryEmail\": $json.email }, \"phones\": {\"primaryPhoneNumber\": $json.phone } }) }}"
       },
-      "id": "569912543341",
+      "id": "973476293798",
       "name": "Create person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -214,9 +215,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"phones\": {\"primaryPhoneNumber\": $json.phone}}) }}"
+        "jsonBody": "={{ JSON.stringify({\"phones\": {\"primaryPhoneNumber\": $json.phone } }) }}"
       },
-      "id": "631139439493",
+      "id": "414361823989",
       "name": "Update person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -238,7 +239,7 @@
         "mode": "append",
         "options": {}
       },
-      "id": "007071553198",
+      "id": "566771283360",
       "name": "Merge",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
@@ -246,6 +247,162 @@
         1540,
         300
       ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/companies?filter=domainName.primaryLinkUrl[ilike]:%{{ $('Normalise').first().json.emailDomain }}%&limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "300243579894",
+      "name": "Find company",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const found = ($input.first().json.data?.companies || [])[0];\nreturn [{ json: { ...$('Normalise').first().json, companyId: found?.id || null } }];"
+      },
+      "id": "358358435317",
+      "name": "Company exists?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.companyId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "380117175547",
+      "name": "New company?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/companies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"name\": $json.companyName, \"domainName\": {\"primaryLinkUrl\": 'https://' + $json.emailDomain } }) }}"
+      },
+      "id": "128357178102",
+      "name": "Create company",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2420,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "620449195167",
+      "name": "Company ready",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2640,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people/{{ $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"companyId\": $('Company exists?').first().json.companyId || $('Create company').first().json.data.createCompany.id }) }}"
+      },
+      "id": "869453614042",
+      "name": "Link person to company",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2860,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
     },
     {
       "parameters": {
@@ -262,14 +419,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $('Normalise').first().json.consent ? 'OPTED_IN' : 'PENDING', \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": $now.toISO(), \"proof\": 'n8n form execution ' + $execution.id}) }}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $('Normalise').first().json.consent ? 'OPTED_IN' : 'PENDING', \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": $now.toISO(), \"proof\": 'n8n form execution ' + $execution.id, \"personId\": $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
       },
-      "id": "774894214539",
+      "id": "236835264970",
       "name": "Record consent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1760,
+        3080,
         300
       ],
       "credentials": {
@@ -296,14 +453,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"submittedAt\": $now.toISO(), \"consentGiven\": $('Normalise').first().json.consent, \"payload\": JSON.stringify($('Normalise').first().json)}) }}"
+        "jsonBody": "={{ JSON.stringify({\"submittedAt\": $now.toISO(), \"consentGiven\": $('Normalise').first().json.consent, \"payload\": JSON.stringify($('Normalise').first().json), \"personId\": $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
       },
-      "id": "177187483438",
+      "id": "561430842408",
       "name": "Log submission",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1980,
+        3300,
         300
       ],
       "credentials": {
@@ -317,14 +474,14 @@
     },
     {
       "parameters": {
-        "jsCode": "// Transparent scoring \u2014 a rule anyone can read and argue with, unlike GHL's\n// opaque engagement score.\nconst d = $('Normalise').first().json;\nconst FREE = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com'];\n\nlet score = 0;\nif (d.emailDomain && !FREE.includes(d.emailDomain)) score += 30; else score -= 40;\nif (/cmmc|compliance|soc|incident/i.test(d.interest)) score += 25;\nif (/cmmc|cui|fci|dfars|nist/i.test(d.message))       score += 20;\nif (d.phone)                                          score += 10;\n\n// Deterministic round-robin: hashing the email keeps a person with the same\n// rep across re-runs, and needs no counter stored anywhere.\nconst REPS = (process.env.ASPIRE_REP_IDS || '').split(',').filter(Boolean);\nconst hash = [...d.email].reduce((a, c) => a + c.charCodeAt(0), 0);\n\nreturn [{ json: { ...d, score,\n  band: score >= 60 ? 'HOT' : score >= 30 ? 'WARM' : 'COLD',\n  assigneeId: REPS.length ? REPS[hash % REPS.length] : null }}];"
+        "jsCode": "// Transparent scoring \u2014 a rule anyone can read and argue with, unlike GHL's\n// opaque engagement score.\nconst d = $('Normalise').first().json;\nconst FREE = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com'];\n\nlet score = 0;\nif (d.emailDomain && !FREE.includes(d.emailDomain)) score += 30; else score -= 40;\nif (/cmmc|compliance|soc|incident/i.test(d.interest)) score += 25;\nif (/cmmc|cui|fci|dfars|nist/i.test(d.message))       score += 20;\nif (d.phone)                                          score += 10;\n\n// Deterministic round-robin: hashing the email keeps a person with the same\n// rep across re-runs, and needs no counter stored anywhere.\n// $env, not process.env: with N8N_RUNNERS_ENABLED the Code node executes\n// in a sandboxed task runner where `process` does not exist at all.\nconst REPS = String($env.ASPIRE_REP_IDS || '').split(',').filter(Boolean);\nconst hash = [...d.email].reduce((a, c) => a + c.charCodeAt(0), 0);\n\nreturn [{ json: { ...d, score,\n  band: score >= 60 ? 'HOT' : score >= 30 ? 'WARM' : 'COLD',\n  assigneeId: REPS.length ? REPS[hash % REPS.length] : null }}];"
       },
-      "id": "039962834506",
+      "id": "287281425068",
       "name": "Score and route",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2200,
+        3520,
         300
       ]
     },
@@ -343,14 +500,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"title\": 'Follow up: ' + $json.firstName + ' ' + $json.lastName + ' (' + $json.band + ', score ' + $json.score + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 1 }).toISO(), \"body\": $json.interest + '\\n\\n' + $json.message}) }}"
+        "jsonBody": "={{ JSON.stringify({\"title\": 'Follow up: ' + $json.firstName + ' ' + $json.lastName + ' (' + $json.band + ', score ' + $json.score + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 1 }).toISO(), \"bodyV2\": {\"markdown\": $json.interest + '\\n\\n' + $json.message } }) }}"
       },
-      "id": "067706977871",
+      "id": "423306921783",
       "name": "Create task",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2420,
+        3740,
         300
       ],
       "credentials": {
@@ -371,42 +528,43 @@
         },
         "workflowInputs": {
           "value": {
-            "personId": "={{ $('Exists?').first().json.existingId || $('Create person').first().json.data?.createPerson?.id }}",
+            "personId": "={{ $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }}",
             "templateKey": "lead_ack",
             "mergeData": "={{ {} }}"
           }
         },
         "options": {}
       },
-      "id": "463006681766",
+      "id": "533538130758",
       "name": "Send acknowledgement",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        2640,
+        3960,
         300
       ]
     },
     {
       "parameters": {
-        "select": "channel",
-        "channelId": "#sales",
-        "text": "=:inbox_tray: *New lead \u2014 {{ $('Score and route').first().json.band }}* (score {{ $('Score and route').first().json.score }})\n*{{ $('Score and route').first().json.firstName }} {{ $('Score and route').first().json.lastName }}* \u2014 {{ $('Score and route').first().json.companyName }}\nInterest: {{ $('Score and route').first().json.interest }}\n{{ $('Score and route').first().json.email }}",
-        "otherOptions": {}
+        "method": "POST",
+        "url": "={{ $env.SALES_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"#sales\", \"text\": `:inbox_tray: *New lead \u2014 ${$('Score and route').first().json.band}* (score ${$('Score and route').first().json.score})\n*${$('Score and route').first().json.firstName} ${$('Score and route').first().json.lastName}* \u2014 ${$('Score and route').first().json.companyName}\nInterest: ${$('Score and route').first().json.interest}\n${$('Score and route').first().json.email}` }) }}",
+        "options": {}
       },
-      "id": "789868392004",
+      "id": "528275264840",
       "name": "Notify sales",
-      "type": "n8n-nodes-base.slack",
-      "typeVersion": 2,
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
       "position": [
-        2860,
+        4180,
         300
       ],
-      "credentials": {
-        "slackApi": {
-          "name": "Aspire Slack"
-        }
-      }
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
     },
     {
       "parameters": {
@@ -423,14 +581,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"LEAD Form Intake\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id}) }}"
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"LEAD Form Intake\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
       },
-      "id": "896154583704",
+      "id": "953353208521",
       "name": "Log run",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        3080,
+        4400,
         300
       ],
       "credentials": {
@@ -529,6 +687,79 @@
       ]
     },
     "Merge": {
+      "main": [
+        [
+          {
+            "node": "Find company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find company": {
+      "main": [
+        [
+          {
+            "node": "Company exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Company exists?": {
+      "main": [
+        [
+          {
+            "node": "New company?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New company?": {
+      "main": [
+        [
+          {
+            "node": "Create company",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Company ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create company": {
+      "main": [
+        [
+          {
+            "node": "Company ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Company ready": {
+      "main": [
+        [
+          {
+            "node": "Link person to company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Link person to company": {
       "main": [
         [
           {

@@ -34,6 +34,10 @@ FIRST = ["SYS Error Handler", "VEND Send Email"]
 # n8n rejects extra top-level keys on create; only these are accepted.
 ALLOWED = {"name", "nodes", "connections", "settings", "staticData"}
 
+# Local-verification scaffolding. Deployed only with --dev, so a production
+# deploy cannot accidentally stand up the alert sink and swallow real alerts.
+DEV_ONLY = {"SYS Alert Sink (dev)"}
+
 
 def read_env() -> dict[str, str]:
     env: dict[str, str] = {}
@@ -117,11 +121,55 @@ def bind_credentials(flow: dict, by_name: dict[str, str]) -> int:
     return bound
 
 
-def load_workflows(only: str) -> list[dict]:
+def bind_subworkflows(flow: dict, by_name: dict[str, str]) -> list[str]:
+    """
+    Rewrite Execute Workflow references from name to id.
+
+    The generated JSON names its sub-workflows so the library is portable
+    between instances. n8n resolves them by id only: left as a name, the
+    reference dangles, and n8n refuses to publish the parent with
+    "references workflow X which is not published" even when X is active.
+
+    The same applies to `settings.errorWorkflow`: named, it resolves to
+    nothing, and n8n logs `Could not find workflow "SYS Error Handler"` at the
+    moment of failure — so every workflow appeared to have error handling and
+    none of it would ever have fired.
+
+    Returns the names that could not be resolved.
+    """
+    unresolved: list[str] = []
+
+    err = flow.get("settings", {}).get("errorWorkflow")
+    if err:
+        if err in by_name:
+            flow["settings"]["errorWorkflow"] = by_name[err]
+        elif err not in by_name.values():
+            unresolved.append(f"{err} (errorWorkflow)")
+
+    for node in flow.get("nodes", []):
+        if node.get("type") != "n8n-nodes-base.executeWorkflow":
+            continue
+        ref = node.get("parameters", {}).get("workflowId")
+        if not isinstance(ref, dict):
+            continue
+        target = ref.get("cachedResultName") or ref.get("value")
+        if target in by_name:
+            node["parameters"]["workflowId"] = {
+                "__rl": True, "value": by_name[target],
+                "mode": "list", "cachedResultName": target,
+            }
+        elif target not in by_name.values():
+            unresolved.append(str(target))
+    return unresolved
+
+
+def load_workflows(only: str, dev: bool) -> list[dict]:
     if not WORKFLOWS.exists():
         sys.exit(f"{WORKFLOWS} missing. Run scripts/build_n8n_workflows.py first.")
     flows = [json.loads(p.read_text(encoding="utf-8"))
              for p in sorted(WORKFLOWS.glob("*.json"))]
+    if not dev:
+        flows = [f for f in flows if f["name"] not in DEV_ONLY]
     if only:
         wanted = {s.strip() for s in only.split(",") if s.strip()}
         flows = [f for f in flows if f["name"] in wanted]
@@ -137,9 +185,11 @@ def main() -> int:
     ap.add_argument("--activate", action="store_true",
                     help="activate after deploying (leave off until tested)")
     ap.add_argument("--only", default="", help="comma-separated workflow names")
+    ap.add_argument("--dev", action="store_true",
+                    help="also deploy the dev-only verification workflows")
     args = ap.parse_args()
 
-    flows = load_workflows(args.only)
+    flows = load_workflows(args.only, args.dev)
     print(f"{len(flows)} workflow(s) to deploy\n")
 
     if args.dry_run:
@@ -171,9 +221,16 @@ def main() -> int:
         print(f"  !!    not yet created in n8n: {', '.join(sorted(missing))}")
         print("        Those nodes will fail until the credential exists.\n")
 
+    # Grows as workflows are created, so a parent deployed after its
+    # sub-workflow resolves even on a first run into an empty instance. This
+    # is why FIRST puts VEND Send Email ahead of everything that calls it.
+    by_name = dict(present)
+
     failures = 0
     for f in flows:
         bind_credentials(f, creds)
+        for miss in bind_subworkflows(f, by_name):
+            print(f"  !!    {f['name']:32} sub-workflow not found: {miss}")
         payload = {k: v for k, v in f.items() if k in ALLOWED}
         name = f["name"]
 
@@ -185,6 +242,8 @@ def main() -> int:
             status, body, err = api.create(payload)
             wid = (body or {}).get("id", "")
             verb = "created"
+        if wid:
+            by_name[name] = wid
 
         if err or status >= 400:
             failures += 1
