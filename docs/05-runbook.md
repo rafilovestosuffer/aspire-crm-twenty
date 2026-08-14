@@ -9,7 +9,6 @@ Everything runs on your machine. The token never leaves it.
 ```bash
 git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
 cd aspire-crm-twenty
-git checkout claude/ghl-twenty-migration-audit-z4za7f
 
 cp .env.example .env
 ```
