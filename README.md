@@ -3,13 +3,17 @@
 The instrument for auditing which GoHighLevel features Aspire actually uses, and
 whether Twenty (self-hosted) + n8n can replace each one.
 
-This repo is the audit tooling. It is not the Twenty deployment.
+This repo is both the audit tooling and the deployment: the Docker stack, the
+object model, the demo data and the n8n workflow library. Twenty itself is not
+vendored here — `infra/docker-compose.yml` runs the published image. The repo is
+the recipe; Docker runs the kitchen.
 
 ## Read first
 
 | Document | What it answers |
 |---|---|
-| [`docs/05-runbook.md`](docs/05-runbook.md) | **Start here.** Exact commands, in order, and what to send back |
+| [`docs/08-local-build.md`](docs/08-local-build.md) | **Start here to build.** Laptop to demo-ready CRM, step by step |
+| [`docs/05-runbook.md`](docs/05-runbook.md) | The GHL audit runbook — exact commands and what to send back |
 | [`docs/00-audit-method.md`](docs/00-audit-method.md) | How the audit runs — six tiers, disposition rules, what it cannot tell you |
 | [`docs/01-scope-and-questions.md`](docs/01-scope-and-questions.md) | Open decisions still outstanding |
 | [`docs/02-ghl-api-findings.md`](docs/02-ghl-api-findings.md) | Verified API facts with sources — read before writing anything against GHL |
@@ -22,6 +26,14 @@ This repo is the audit tooling. It is not the Twenty deployment.
 ## Quick start
 
 ```bash
+# Build the CRM (see docs/08-local-build.md)
+./infra/up.sh                             # stack up, secrets generated
+python scripts/stack_verify.py            # every layer, worker included
+python scripts/twenty_provision.py        # 25 objects, 132 fields
+python scripts/seed_demo_data.py          # 448 demo records
+python scripts/n8n_deploy.py              # 6 workflows
+
+# Audit GHL
 cp .env.example .env          # fill in GHL_TOKEN, GHL_LOCATION
 pip install -r scripts/requirements.txt   # optional
 
@@ -52,6 +64,9 @@ scripts/build_n8n_workflows.py       generates the n8n workflow library
 scripts/n8n_deploy.py                pushes workflows into n8n (idempotent)
 n8n/workflows/                       6 workflows, 58 nodes — the foundation
 infra/docker-compose.yml             Twenty + n8n + Postgres + Redis + backups
+infra/up.sh                          one-command bring-up, generates secrets
+scripts/stack_verify.py              verifies every layer independently
+scripts/seed_demo_data.py            448 deterministic Aspire demo records
 docs/                                method, findings, open decisions
 raw/  workflows/  .env               company data — gitignored, never committed
 out/feature_audit.csv                the deliverable
