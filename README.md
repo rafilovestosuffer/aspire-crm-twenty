@@ -16,6 +16,7 @@ This repo is the audit tooling. It is not the Twenty deployment.
 | [`docs/03-replacement-stack.md`](docs/03-replacement-stack.md) | What "no GHL in Phase 1" actually requires. 52 ESCALATE rows → 8 vendor decisions |
 | [`docs/04-manual-sweep.md`](docs/04-manual-sweep.md) | Tier 5 checklist for everything no API serves |
 | [`docs/06-twenty-object-model.md`](docs/06-twenty-object-model.md) | The 25-object GHL parity model provisioned into Twenty |
+| [`docs/07-build-plan.md`](docs/07-build-plan.md) | **The build plan.** What Twenty + n8n alone delivers, and the sprint sequence |
 | [`CLAUDE.md`](CLAUDE.md) | Operating rules. Read-only, no PII, rate limits |
 
 ## Quick start
@@ -47,6 +48,10 @@ scripts/ghl_pull.py                  GET-only, throttled, PII-classified puller
 scripts/twenty_probe.py              reads the live Twenty instance's real capability
 scripts/twenty_provision.py          builds the object model via the Metadata API
 scripts/build_audit.py               merges evidence + taxonomy → the report
+scripts/build_n8n_workflows.py       generates the n8n workflow library
+scripts/n8n_deploy.py                pushes workflows into n8n (idempotent)
+n8n/workflows/                       6 workflows, 58 nodes — the foundation
+infra/docker-compose.yml             Twenty + n8n + Postgres + Redis + backups
 docs/                                method, findings, open decisions
 raw/  workflows/  .env               company data — gitignored, never committed
 out/feature_audit.csv                the deliverable

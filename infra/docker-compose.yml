@@ -1,0 +1,195 @@
+# Aspire CRM stack — Twenty + n8n on one host.
+#
+#   docker compose -f infra/docker-compose.yml up -d
+#
+# Both applications share one Postgres instance with separate databases. That
+# keeps one thing to back up and one thing to tune, which matters more at this
+# scale than the isolation two instances would buy.
+#
+# Nothing here is exposed to the internet directly. Put a reverse proxy in
+# front, terminate TLS there, and point FRONT_BASE_URL / SERVER_URL / N8N_HOST
+# at the public names — several Twenty and n8n features require a secure
+# context and will misbehave over plain HTTP.
+
+name: aspire-crm
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+
+  # ---------------------------------------------------------------- database
+  postgres:
+    image: postgres:16
+    <<: *restart
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in infra/.env}
+      POSTGRES_DB: default
+    # Twenty's UI turns sluggish past ~10k records without this.
+    shm_size: 256m
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - max_connections=200
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # No published port. Reach it with `docker compose exec postgres psql`.
+
+  redis:
+    image: redis:7-alpine
+    <<: *restart
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # ------------------------------------------------------------------ twenty
+  twenty-server:
+    image: twentycrm/twenty:${TWENTY_VERSION:-latest}
+    <<: *restart
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    environment:
+      NODE_PORT: 3000
+      PG_DATABASE_URL: postgres://${PG_USER:-postgres}:${PG_PASSWORD}@postgres:5432/twenty
+      REDIS_URL: redis://redis:6379
+      SERVER_URL: ${TWENTY_SERVER_URL:?set TWENTY_SERVER_URL}
+      FRONT_BASE_URL: ${TWENTY_SERVER_URL}
+      APP_SECRET: ${TWENTY_APP_SECRET:?generate with openssl rand -base64 32}
+      # Losing this loses every stored secret, OAuth tokens included.
+      ENCRYPTION_KEY: ${TWENTY_ENCRYPTION_KEY:?generate with openssl rand -base64 32}
+      STORAGE_TYPE: local
+      # Without this the workflow Code action reports "logic function execution
+      # is disabled" and every Code step silently fails.
+      LOGIC_FUNCTION_TYPE: LOCAL
+    volumes:
+      - twentydata:/app/packages/twenty-server/.local-storage
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
+  # The worker runs scheduled workflows and email sync. The UI looks perfectly
+  # healthy while this container is dead, so check it separately.
+  twenty-worker:
+    image: twentycrm/twenty:${TWENTY_VERSION:-latest}
+    <<: *restart
+    command: ["yarn", "worker:prod"]
+    depends_on:
+      twenty-server: {condition: service_healthy}
+    environment:
+      PG_DATABASE_URL: postgres://${PG_USER:-postgres}:${PG_PASSWORD}@postgres:5432/twenty
+      REDIS_URL: redis://redis:6379
+      SERVER_URL: ${TWENTY_SERVER_URL}
+      APP_SECRET: ${TWENTY_APP_SECRET}
+      ENCRYPTION_KEY: ${TWENTY_ENCRYPTION_KEY}
+      STORAGE_TYPE: local
+      LOGIC_FUNCTION_TYPE: LOCAL
+    volumes:
+      - twentydata:/app/packages/twenty-server/.local-storage
+
+  # --------------------------------------------------------------------- n8n
+  n8n:
+    image: n8nio/n8n:${N8N_VERSION:-latest}
+    <<: *restart
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: ${PG_USER:-postgres}
+      DB_POSTGRESDB_PASSWORD: ${PG_PASSWORD}
+
+      N8N_HOST: ${N8N_HOST:?set N8N_HOST}
+      N8N_PROTOCOL: https
+      # Public base for form and webhook URLs. Wrong value here produces forms
+      # that render but submit to nowhere.
+      WEBHOOK_URL: ${N8N_PUBLIC_URL:?set N8N_PUBLIC_URL}
+      N8N_EDITOR_BASE_URL: ${N8N_PUBLIC_URL}
+
+      GENERIC_TIMEZONE: ${TZ:-UTC}
+      TZ: ${TZ:-UTC}
+
+      # Credentials at rest. Losing this key loses every stored credential.
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?generate with openssl rand -base64 32}
+
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:?set N8N_PASSWORD}
+
+      # Executions accumulate fast and are the main growth in the n8n database.
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "336"        # 14 days
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all  # keep until the build is trusted
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_RUNNERS_ENABLED: "true"
+
+      # Read by the workflows themselves — see scripts/build_n8n_workflows.py.
+      TWENTY_BASE_URL: http://twenty-server:3000
+      ASPIRE_FROM_EMAIL: ${ASPIRE_FROM_EMAIL:?set ASPIRE_FROM_EMAIL}
+      ASPIRE_REP_IDS: ${ASPIRE_REP_IDS:-}
+      # Allows the workflows' Code nodes to read the two vars above.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+    volumes:
+      - n8ndata:/home/node/.n8n
+    ports:
+      - "127.0.0.1:5678:5678"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # -------------------------------------------------------------- backups
+  # Nightly dump of both databases. An untested backup is not a backup —
+  # restore-test it quarterly and record the date.
+  backup:
+    image: postgres:16
+    <<: *restart
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      PGPASSWORD: ${PG_PASSWORD}
+    volumes:
+      - ./backups:/backups
+    entrypoint: >
+      bash -c '
+      while true; do
+        ts=$$(date +%Y%m%d-%H%M);
+        for db in twenty n8n; do
+          pg_dump -h postgres -U ${PG_USER:-postgres} -d $$db -Fc
+            -f /backups/$$db-$$ts.dump && echo "backed up $$db at $$ts";
+        done;
+        find /backups -name "*.dump" -mtime +30 -delete;
+        sleep 86400;
+      done'
+
+volumes:
+  pgdata:
+  redisdata:
+  twentydata:
+  n8ndata:

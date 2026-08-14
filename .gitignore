@@ -219,8 +219,8 @@ __marimo__/
 
 # ---- GHL → Twenty audit: company data must never be committed ----
 .env
-raw/
-workflows/
+/raw/
+/workflows/
 snapshots/
 # The finished report IS committed; intermediate outputs are not.
 out/*
@@ -230,3 +230,5 @@ out/*
 docs/migration-guide/_combined.html
 .session_curl.txt
 docs/migration-guide/_combined_bn.html
+infra/.env
+infra/backups/

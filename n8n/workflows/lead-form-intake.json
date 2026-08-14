@@ -1,0 +1,621 @@
+{
+  "name": "LEAD Form Intake",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "aspire-contact",
+        "formTitle": "Talk to Aspire Tech",
+        "formDescription": "Tell us what you need and a security specialist will reply within one business day.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "First name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Last name",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Work email",
+              "fieldType": "email",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Company",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Phone",
+              "fieldType": "text"
+            },
+            {
+              "fieldLabel": "What do you need help with?",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "SOC / managed detection"
+                  },
+                  {
+                    "option": "CMMC or compliance"
+                  },
+                  {
+                    "option": "Security awareness training"
+                  },
+                  {
+                    "option": "Incident response"
+                  },
+                  {
+                    "option": "Something else"
+                  }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Message",
+              "fieldType": "textarea"
+            },
+            {
+              "fieldLabel": "I agree to be contacted by Aspire Tech",
+              "fieldType": "checkbox",
+              "requiredField": true
+            }
+          ]
+        },
+        "responseMode": "lastNode",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "086712467365",
+      "name": "Public form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalise at the edge. Everything downstream can then assume clean values.\nconst j = $input.first().json;\nconst email = String(j['Work email'] || '').trim().toLowerCase();\nconst phoneRaw = String(j['Phone'] || '').replace(/[^0-9+]/g, '');\n\nreturn [{ json: {\n  firstName: String(j['First name'] || '').trim(),\n  lastName:  String(j['Last name']  || '').trim(),\n  email,\n  phone: phoneRaw ? (phoneRaw.startsWith('+') ? phoneRaw : '+1' + phoneRaw) : '',\n  companyName: String(j['Company'] || '').trim(),\n  interest: j['What do you need help with?'] || '',\n  message: String(j['Message'] || '').slice(0, 2000),\n  consent: j['I agree to be contacted by Aspire Tech'] === true,\n  emailDomain: email.split('@')[1] || '',\n}}];"
+      },
+      "id": "222153280723",
+      "name": "Normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people?filter[emails.primaryEmail][eq]={{ $json.email }}&limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "798904101752",
+      "name": "Find person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Idempotency: forms get double-submitted and webhooks get retried. Search\n// before create, always \u2014 cleaning duplicates later costs far more.\nconst found = ($input.first().json.data?.people || [])[0];\nreturn [{ json: { ...$('Normalise').first().json,\n                  existingId: found?.id || null } }];"
+      },
+      "id": "983730470565",
+      "name": "Exists?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.existingId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "012374635079",
+      "name": "New person?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"name\": {\"firstName\": \"={{ $json.firstName }}\", \"lastName\": \"={{ $json.lastName }}\"}, \"emails\": {\"primaryEmail\": \"={{ $json.email }}\"}, \"phones\": {\"primaryPhoneNumber\": \"={{ $json.phone }}\"}}"
+      },
+      "id": "140576742037",
+      "name": "Create person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people/{{ $json.existingId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"phones\": {\"primaryPhoneNumber\": \"={{ $json.phone }}\"}}"
+      },
+      "id": "530780560242",
+      "name": "Update person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1320,
+        480
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "527849615264",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/consentRecords",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"channel\": \"EMAIL\", \"status\": \"={{ $('Normalise').first().json.consent ? 'OPTED_IN' : 'PENDING' }}\", \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": \"={{ $now.toISO() }}\", \"proof\": \"={{ 'n8n form execution ' + $execution.id }}\"}"
+      },
+      "id": "051235327024",
+      "name": "Record consent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/formSubmissions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"submittedAt\": \"={{ $now.toISO() }}\", \"consentGiven\": \"={{ $('Normalise').first().json.consent }}\", \"payload\": \"={{ JSON.stringify($('Normalise').first().json) }}\"}"
+      },
+      "id": "974970720576",
+      "name": "Log submission",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1980,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Transparent scoring \u2014 a rule anyone can read and argue with, unlike GHL's\n// opaque engagement score.\nconst d = $('Normalise').first().json;\nconst FREE = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com'];\n\nlet score = 0;\nif (d.emailDomain && !FREE.includes(d.emailDomain)) score += 30; else score -= 40;\nif (/cmmc|compliance|soc|incident/i.test(d.interest)) score += 25;\nif (/cmmc|cui|fci|dfars|nist/i.test(d.message))       score += 20;\nif (d.phone)                                          score += 10;\n\n// Deterministic round-robin: hashing the email keeps a person with the same\n// rep across re-runs, and needs no counter stored anywhere.\nconst REPS = (process.env.ASPIRE_REP_IDS || '').split(',').filter(Boolean);\nconst hash = [...d.email].reduce((a, c) => a + c.charCodeAt(0), 0);\n\nreturn [{ json: { ...d, score,\n  band: score >= 60 ? 'HOT' : score >= 30 ? 'WARM' : 'COLD',\n  assigneeId: REPS.length ? REPS[hash % REPS.length] : null }}];"
+      },
+      "id": "367665873847",
+      "name": "Score and route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"title\": \"={{ 'Follow up: ' + $json.firstName + ' ' + $json.lastName + ' (' + $json.band + ', score ' + $json.score + ')' }}\", \"status\": \"TODO\", \"dueAt\": \"={{ $now.plus({ days: 1 }).toISO() }}\", \"body\": \"={{ $json.interest + '\\\\n\\\\n' + $json.message }}\"}"
+      },
+      "id": "451674276279",
+      "name": "Create task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2420,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VEND Send Email",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "value": {
+            "personId": "={{ $('Exists?').first().json.existingId || $('Create person').first().json.data?.createPerson?.id }}",
+            "templateKey": "lead_ack",
+            "mergeData": "={{ {} }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "480303243264",
+      "name": "Send acknowledgement",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": "#sales",
+        "text": "=:inbox_tray: *New lead \u2014 {{ $('Score and route').first().json.band }}* (score {{ $('Score and route').first().json.score }})\n*{{ $('Score and route').first().json.firstName }} {{ $('Score and route').first().json.lastName }}* \u2014 {{ $('Score and route').first().json.companyName }}\nInterest: {{ $('Score and route').first().json.interest }}\n{{ $('Score and route').first().json.email }}",
+        "otherOptions": {}
+      },
+      "id": "067932650763",
+      "name": "Notify sales",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "name": "Aspire Slack"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"workflowName\": \"LEAD Form Intake\", \"status\": \"SUCCESS\", \"startedAt\": \"={{ $execution.startedAt }}\", \"n8nExecutionId\": \"={{ $execution.id }}\"}"
+      },
+      "id": "313701121907",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        3080,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Public form": {
+      "main": [
+        [
+          {
+            "node": "Normalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise": {
+      "main": [
+        [
+          {
+            "node": "Find person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find person": {
+      "main": [
+        [
+          {
+            "node": "Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exists?": {
+      "main": [
+        [
+          {
+            "node": "New person?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New person?": {
+      "main": [
+        [
+          {
+            "node": "Create person",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Update person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create person": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update person": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Record consent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record consent": {
+      "main": [
+        [
+          {
+            "node": "Log submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log submission": {
+      "main": [
+        [
+          {
+            "node": "Score and route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score and route": {
+      "main": [
+        [
+          {
+            "node": "Create task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create task": {
+      "main": [
+        [
+          {
+            "node": "Send acknowledgement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send acknowledgement": {
+      "main": [
+        [
+          {
+            "node": "Notify sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify sales": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "n8n Form Trigger hosts a public form. Dedupes, creates the person and company, records consent, scores, assigns and acknowledges. Replaces a GHL form with no third-party tool."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

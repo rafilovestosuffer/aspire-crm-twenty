@@ -1,0 +1,236 @@
+{
+  "name": "MSG Tracked Link Redirect",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "t/:slug",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "936616598521",
+      "name": "Click",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/trackedLinks?filter[slug][eq]={{ $json.params.slug }}&limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "770231502336",
+      "name": "Find link",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "const link = ($input.first().json.data?.trackedLinks || [])[0];\nconst q = $('Click').first().json.query || {};\nreturn [{ json: {\n  found: !!link,\n  id: link?.id || null,\n  destination: link?.destinationUrl?.primaryLinkUrl || link?.destinationUrl || '',\n  clickCount: (link?.clickCount || 0) + 1,\n  personId: q.p || null,\n}}];"
+      },
+      "id": "322955025654",
+      "name": "Resolve",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.found }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "236592686425",
+      "name": "Known link?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/trackedLinks/{{ $json.id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"clickCount\": \"={{ $json.clickCount }}\"}"
+      },
+      "id": "391888886275",
+      "name": "Count click",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        880,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "respondWith": "redirect",
+        "redirectURL": "={{ $('Resolve').first().json.destination }}",
+        "options": {}
+      },
+      "id": "196622711680",
+      "name": "Redirect",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "Link not found",
+        "options": {
+          "responseCode": 404
+        }
+      },
+      "id": "261282127644",
+      "name": "404",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Click": {
+      "main": [
+        [
+          {
+            "node": "Find link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find link": {
+      "main": [
+        [
+          {
+            "node": "Resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve": {
+      "main": [
+        [
+          {
+            "node": "Known link?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Known link?": {
+      "main": [
+        [
+          {
+            "node": "Count click",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "404",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Count click": {
+      "main": [
+        [
+          {
+            "node": "Redirect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Serves /t/:slug, records the click on trackedLink, then 302s to the destination. Full replacement for GHL trigger links."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

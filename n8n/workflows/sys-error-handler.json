@@ -1,0 +1,255 @@
+{
+  "name": "SYS Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "851834258261",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n's error payload varies by failure mode; normalise it once here.\nconst e = $input.first().json;\nconst wf = e.workflow || {};\nconst ex = e.execution || {};\nreturn [{ json: {\n  workflowName: wf.name || 'unknown',\n  executionId:  ex.id || '',\n  nodeName:     ex.lastNodeExecuted || '',\n  message:      (ex.error && ex.error.message) || e.message || 'unknown error',\n  // Credit exhaustion on AI nodes returns a failure result rather than a normal\n  // error. Retrying it just spends more, so flag it as its own condition.\n  isBilling: /credit|quota|billing|insufficient/i.test(\n               (ex.error && ex.error.message) || ''),\n}}];"
+      },
+      "id": "023438327041",
+      "name": "Extract failure",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"workflowName\": \"={{ $json.workflowName }}\", \"status\": \"FAILED\", \"errorMessage\": \"={{ $json.message }}\", \"n8nExecutionId\": \"={{ $json.executionId }}\", \"startedAt\": \"={{ $now.toISO() }}\"}"
+      },
+      "id": "037385051848",
+      "name": "Log failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter[workflowName][eq]={{ $json.workflowName }}&filter[status][eq]=FAILED&limit=5",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "833914474514",
+      "name": "Recent failures?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        660,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// One failing workflow can fire hundreds of times. Alert on the first, then\n// stay quiet for an hour \u2014 an alert nobody can act on trains people to ignore\n// the channel, which is worse than no alert at all.\nconst runs = ($input.first().json.data?.automationRuns) || [];\nconst hourAgo = Date.now() - 3600_000;\nconst priors = runs.filter(r => new Date(r.startedAt).getTime() > hourAgo).length;\nreturn [{ json: { ...$('Extract failure').first().json, suppress: priors > 1 } }];"
+      },
+      "id": "917447299958",
+      "name": "Suppress alert storm",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.suppress }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "566565394715",
+      "name": "Should alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": "#crm-alerts",
+        "text": "=:rotating_light: *{{ $json.workflowName }}* failed\nNode: `{{ $json.nodeName }}`\nError: {{ $json.message }}\n{{ $json.isBilling ? ':credit_card: *Looks like an AI credit/billing failure \u2014 retrying will not help.*' : '' }}\nExecution: {{ $json.executionId }}",
+        "otherOptions": {}
+      },
+      "id": "142169249374",
+      "name": "Alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "name": "Aspire Slack"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "093471931364",
+      "name": "Suppressed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        480
+      ]
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract failure": {
+      "main": [
+        [
+          {
+            "node": "Log failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log failure": {
+      "main": [
+        [
+          {
+            "node": "Recent failures?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recent failures?": {
+      "main": [
+        [
+          {
+            "node": "Suppress alert storm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Suppress alert storm": {
+      "main": [
+        [
+          {
+            "node": "Should alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should alert?": {
+      "main": [
+        [
+          {
+            "node": "Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Suppressed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "description": "Catches any failed workflow. Logs to Twenty automationRun and alerts Slack. Set as the error workflow on every other workflow."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

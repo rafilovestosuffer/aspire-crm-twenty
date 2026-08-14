@@ -1,0 +1,336 @@
+{
+  "name": "OPS Scheduled Sweeps",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "680088488592",
+      "name": "Daily 07:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/opportunities?filter[stage][neq]=WON&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "692203419467",
+      "name": "Stale opportunities",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/appointments?filter[status][eq]=BOOKED&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "985482655348",
+      "name": "Possible no-shows",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        480
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/invoices?filter[status][in]=SENT,PARTIALLY_PAID&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "760823128965",
+      "name": "Overdue invoices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        660,
+        660
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Three absence checks in one pass. None of these emit an event anywhere \u2014\n// they are all \"this did not happen by now\", which only a query can find.\nconst now = Date.now();\nconst days = (d) => (now - new Date(d).getTime()) / 86400000;\n\nconst opps    = $('Stale opportunities').first().json.data?.opportunities || [];\nconst appts   = $('Possible no-shows').first().json.data?.appointments || [];\nconst invoices= $('Overdue invoices').first().json.data?.invoices || [];\n\nconst staleOpps = opps.filter(o => days(o.updatedAt) > 14);\nconst noShows   = appts.filter(a => new Date(a.scheduledAt).getTime() < now - 3600_000);\nconst late      = invoices.filter(i => i.dueDate && new Date(i.dueDate).getTime() < now);\n\nreturn [{ json: {\n  staleCount: staleOpps.length, noShowCount: noShows.length, lateCount: late.length,\n  noShowIds: noShows.map(a => a.id),\n  summary: [\n    staleOpps.length ? `${staleOpps.length} opportunity(s) untouched >14 days` : null,\n    noShows.length   ? `${noShows.length} appointment(s) past with status still Booked` : null,\n    late.length      ? `${late.length} invoice(s) overdue` : null,\n  ].filter(Boolean).join('\\n') || 'Nothing outstanding.',\n}}];"
+      },
+      "id": "652627038123",
+      "name": "Assess",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.summary }}",
+              "rightValue": "Nothing outstanding.",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "599228490212",
+      "name": "Anything to report?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": "#sales",
+        "text": "=:mag: *Daily sweep*\n{{ $json.summary }}",
+        "otherOptions": {}
+      },
+      "id": "651184199358",
+      "name": "Daily sweep",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        300
+      ],
+      "credentials": {
+        "slackApi": {
+          "name": "Aspire Slack"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "657102515082",
+      "name": "All clear",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1540,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"workflowName\": \"OPS Scheduled Sweeps\", \"status\": \"SUCCESS\", \"startedAt\": \"={{ $execution.startedAt }}\", \"n8nExecutionId\": \"={{ $execution.id }}\"}"
+      },
+      "id": "163109642316",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    }
+  ],
+  "connections": {
+    "Daily 07:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Stale opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stale opportunities": {
+      "main": [
+        [
+          {
+            "node": "Possible no-shows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Possible no-shows": {
+      "main": [
+        [
+          {
+            "node": "Overdue invoices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Overdue invoices": {
+      "main": [
+        [
+          {
+            "node": "Assess",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assess": {
+      "main": [
+        [
+          {
+            "node": "Anything to report?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything to report?": {
+      "main": [
+        [
+          {
+            "node": "Daily sweep",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "All clear",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily sweep": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All clear": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Daily. Detects the absences no system emits an event for: stale opportunities, appointment no-shows, overdue invoices. Replaces GHL's Stale Opportunity and No-Show triggers."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}
