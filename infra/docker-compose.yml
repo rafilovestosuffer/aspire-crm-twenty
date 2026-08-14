@@ -68,8 +68,8 @@ services:
       PG_DATABASE_URL: postgres://${PG_DATABASE_USER:-postgres}:${PG_DATABASE_PASSWORD}@${PG_DATABASE_HOST:-db}:${PG_DATABASE_PORT:-5432}/default
       SERVER_URL: ${SERVER_URL}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      DISABLE_DB_MIGRATIONS: ${DISABLE_DB_MIGRATIONS}
-      DISABLE_CRON_JOBS_REGISTRATION: ${DISABLE_CRON_JOBS_REGISTRATION}
+      DISABLE_DB_MIGRATIONS: ${DISABLE_DB_MIGRATIONS:-false}
+      DISABLE_CRON_JOBS_REGISTRATION: ${DISABLE_CRON_JOBS_REGISTRATION:-false}
 
       STORAGE_TYPE: ${STORAGE_TYPE:-local}
 
@@ -83,7 +83,7 @@ services:
 
       # Transactional email out of Twenty itself (invites, password resets, and
       # the Send Email workflow action). Optional — leave unset until SMTP exists.
-      EMAIL_DRIVER: ${EMAIL_DRIVER:-}
+      EMAIL_DRIVER: ${EMAIL_DRIVER:-logger}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-}
       EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
@@ -93,8 +93,8 @@ services:
 
       # Mailbox and calendar sync. Threads and events land on record timelines —
       # this is the closest thing to GHL's inbox and it is native.
-      MESSAGING_PROVIDER_GMAIL_ENABLED: ${MESSAGING_PROVIDER_GMAIL_ENABLED:-}
-      CALENDAR_PROVIDER_GOOGLE_ENABLED: ${CALENDAR_PROVIDER_GOOGLE_ENABLED:-}
+      MESSAGING_PROVIDER_GMAIL_ENABLED: ${MESSAGING_PROVIDER_GMAIL_ENABLED:-false}
+      CALENDAR_PROVIDER_GOOGLE_ENABLED: ${CALENDAR_PROVIDER_GOOGLE_ENABLED:-false}
       AUTH_GOOGLE_CLIENT_ID: ${AUTH_GOOGLE_CLIENT_ID:-}
       AUTH_GOOGLE_CLIENT_SECRET: ${AUTH_GOOGLE_CLIENT_SECRET:-}
       AUTH_GOOGLE_CALLBACK_URL: ${AUTH_GOOGLE_CALLBACK_URL:-}
@@ -131,7 +131,7 @@ services:
       FALLBACK_ENCRYPTION_KEY: ${FALLBACK_ENCRYPTION_KEY:-}
       APP_SECRET: ${APP_SECRET:-}
 
-      EMAIL_DRIVER: ${EMAIL_DRIVER:-}
+      EMAIL_DRIVER: ${EMAIL_DRIVER:-logger}
       EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
       EMAIL_FROM_NAME: ${EMAIL_FROM_NAME:-}
       EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
@@ -139,8 +139,8 @@ services:
       EMAIL_SMTP_USER: ${EMAIL_SMTP_USER:-}
       EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
 
-      MESSAGING_PROVIDER_GMAIL_ENABLED: ${MESSAGING_PROVIDER_GMAIL_ENABLED:-}
-      CALENDAR_PROVIDER_GOOGLE_ENABLED: ${CALENDAR_PROVIDER_GOOGLE_ENABLED:-}
+      MESSAGING_PROVIDER_GMAIL_ENABLED: ${MESSAGING_PROVIDER_GMAIL_ENABLED:-false}
+      CALENDAR_PROVIDER_GOOGLE_ENABLED: ${CALENDAR_PROVIDER_GOOGLE_ENABLED:-false}
       AUTH_GOOGLE_CLIENT_ID: ${AUTH_GOOGLE_CLIENT_ID:-}
       AUTH_GOOGLE_CLIENT_SECRET: ${AUTH_GOOGLE_CLIENT_SECRET:-}
       AUTH_GOOGLE_CALLBACK_URL: ${AUTH_GOOGLE_CALLBACK_URL:-}
@@ -168,6 +168,9 @@ services:
 
       # Public base for form and webhook URLs. Wrong value here produces forms
       # that render but submit nowhere.
+      # n8n binds to :: (IPv6) by default and crash-loops with
+      # "address '::' is not available" on hosts without IPv6.
+      N8N_LISTEN_ADDRESS: ${N8N_LISTEN_ADDRESS:-0.0.0.0}
       N8N_HOST: ${N8N_HOST:-localhost}
       N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
       WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678}

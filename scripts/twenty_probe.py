@@ -50,13 +50,15 @@ WORKFLOW_TRIGGERS = [
 
 def read_env() -> dict[str, str]:
     env: dict[str, str] = {}
-    dotenv = ROOT / ".env"
-    if dotenv.exists():
-        for line in dotenv.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                env[k.strip()] = v.strip().strip("\"'")
+    # infra/.env holds the stack config and the key written by
+    # bootstrap_workspace.py; the repo-root .env holds the GHL audit token.
+    for dotenv in (ROOT / "infra" / ".env", ROOT / ".env"):
+        if dotenv.exists():
+            for line in dotenv.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, _, v = line.partition("=")
+                    env.setdefault(k.strip(), v.strip().strip("\"'"))
     for k in ("TWENTY_BASE_URL", "TWENTY_API_KEY"):
         if os.environ.get(k):
             env[k] = os.environ[k]
@@ -95,7 +97,7 @@ def main() -> int:
     OUT.mkdir(exist_ok=True)
 
     print(f"Probing {base} ...")
-    status, body, err = get(base, "/rest/metadata/objects?limit=200", key)
+    status, body, err = get(base, "/rest/metadata/objects", key)
     if err or status >= 400:
         print(f"ERROR: metadata API unreachable — {err or status}", file=sys.stderr)
         print("Check the instance is up, the key is valid, and TWENTY_BASE_URL "

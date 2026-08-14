@@ -72,7 +72,7 @@ def http(url: str, headers: dict[str, str] | None = None, timeout: int = 15):
         req.add_header(k, v)
     try:
         with request.urlopen(req, timeout=timeout) as r:
-            return r.status, r.read().decode("utf-8", "replace")[:4000], ""
+            return r.status, r.read().decode("utf-8", "replace"), ""
     except error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")[:500], ""
     except Exception as e:  # noqa: BLE001
@@ -155,18 +155,28 @@ def main() -> int:
         rep.add("twenty REST API", WARN,
                 "TWENTY_API_KEY not set — Settings → API & Webhooks")
     else:
-        status, body, err = http(f"{base.rstrip('/')}/rest/metadata/objects?limit=1",
+        # NOTE: the metadata endpoint rejects any query string —
+        # "Metadata path 'objects?limit=1' does not exist" — so no paging args.
+        status, body, err = http(f"{base.rstrip('/')}/rest/metadata/objects",
                                  {"Authorization": f"Bearer {key}"})
         if status == 200:
-            status2, body2, _ = http(f"{base.rstrip('/')}/rest/metadata/objects?limit=200",
-                                     {"Authorization": f"Bearer {key}"})
-            n = body2.count('"nameSingular"') if status2 == 200 else 0
+            try:
+                node = json.loads(body)
+                for k in ("data", "objects"):
+                    if isinstance(node, dict) and k in node:
+                        node = node[k]
+                objs = node if isinstance(node, list) else []
+            except json.JSONDecodeError:
+                objs = []
+            names = {o.get("nameSingular") for o in objs if isinstance(o, dict)}
+            custom = sum(1 for o in objs if isinstance(o, dict) and o.get("isCustom"))
             aspire = sum(1 for o in ("serviceSubscription", "complianceEngagement",
                                      "trainingAccount", "phishingBaseline")
-                         if o in body2)
-            rep.add("twenty REST API", OK, f"{n} objects")
+                         if o in names)
+            rep.add("twenty REST API", OK, f"{len(objs)} objects ({custom} custom)")
             rep.add("aspire custom objects", OK if aspire == 4 else WARN,
-                    f"{aspire}/4 — run scripts/twenty_provision.py" if aspire < 4 else "all present")
+                    "all present" if aspire == 4
+                    else f"{aspire}/4 — run scripts/twenty_provision.py")
         elif status in (401, 403):
             rep.add("twenty REST API", FAIL, "key rejected")
         else:

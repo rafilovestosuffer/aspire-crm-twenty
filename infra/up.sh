@@ -57,6 +57,7 @@ gen_if_blank() {
 
 gen_if_blank PG_DATABASE_PASSWORD
 gen_if_blank ENCRYPTION_KEY
+gen_if_blank APP_SECRET
 gen_if_blank N8N_ENCRYPTION_KEY
 
 chmod 600 "$ENV_FILE"
@@ -100,10 +101,21 @@ done
 
 # The UI can look perfectly fine while this container is dead, which is why it
 # is checked separately rather than inferred from the server being up.
-if [[ "$("${COMPOSE[@]}" ps -q worker | wc -l)" -gt 0 ]]; then
+# `ps -q` also lists containers merely Created, which is how a worker that
+# never started still looked fine. Check the actual running state.
+worker_state="$(docker inspect --format '{{.State.Status}}' \
+                 "$("${COMPOSE[@]}" ps -aq worker 2>/dev/null | head -1)" 2>/dev/null || echo "missing")"
+if [[ "$worker_state" == "running" ]]; then
   c_ok "worker running"
 else
-  c_warn "worker NOT running — scheduled workflows and mailbox sync will not fire"
+  c_warn "worker is '$worker_state', not running — starting it"
+  "${COMPOSE[@]}" up -d worker >/dev/null 2>&1 || true
+  sleep 5
+  worker_state="$(docker inspect --format '{{.State.Status}}' \
+                   "$("${COMPOSE[@]}" ps -aq worker 2>/dev/null | head -1)" 2>/dev/null || echo "missing")"
+  [[ "$worker_state" == "running" ]] \
+    && c_ok "worker running" \
+    || c_warn "worker STILL not running — scheduled workflows and mailbox sync will not fire"
 fi
 
 SERVER_URL="$(grep -E '^SERVER_URL=' "$ENV_FILE" | cut -d= -f2-)"
