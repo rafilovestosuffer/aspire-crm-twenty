@@ -69,7 +69,7 @@
           "appendAttribution": false
         }
       },
-      "id": "086712467365",
+      "id": "991603865883",
       "name": "Public form",
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 2.2,
@@ -82,7 +82,7 @@
       "parameters": {
         "jsCode": "// Normalise at the edge. Everything downstream can then assume clean values.\nconst j = $input.first().json;\nconst email = String(j['Work email'] || '').trim().toLowerCase();\nconst phoneRaw = String(j['Phone'] || '').replace(/[^0-9+]/g, '');\n\nreturn [{ json: {\n  firstName: String(j['First name'] || '').trim(),\n  lastName:  String(j['Last name']  || '').trim(),\n  email,\n  phone: phoneRaw ? (phoneRaw.startsWith('+') ? phoneRaw : '+1' + phoneRaw) : '',\n  companyName: String(j['Company'] || '').trim(),\n  interest: j['What do you need help with?'] || '',\n  message: String(j['Message'] || '').slice(0, 2000),\n  consent: j['I agree to be contacted by Aspire Tech'] === true,\n  emailDomain: email.split('@')[1] || '',\n}}];"
       },
-      "id": "222153280723",
+      "id": "360327421684",
       "name": "Normalise",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -105,7 +105,7 @@
           }
         }
       },
-      "id": "798904101752",
+      "id": "821510248581",
       "name": "Find person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -126,7 +126,7 @@
       "parameters": {
         "jsCode": "// Idempotency: forms get double-submitted and webhooks get retried. Search\n// before create, always \u2014 cleaning duplicates later costs far more.\nconst found = ($input.first().json.data?.people || [])[0];\nreturn [{ json: { ...$('Normalise').first().json,\n                  existingId: found?.id || null } }];"
       },
-      "id": "983730470565",
+      "id": "653263168856",
       "name": "Exists?",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -156,7 +156,7 @@
         },
         "options": {}
       },
-      "id": "012374635079",
+      "id": "465639678031",
       "name": "New person?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -180,9 +180,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"name\": {\"firstName\": \"={{ $json.firstName }}\", \"lastName\": \"={{ $json.lastName }}\"}, \"emails\": {\"primaryEmail\": \"={{ $json.email }}\"}, \"phones\": {\"primaryPhoneNumber\": \"={{ $json.phone }}\"}}"
+        "jsonBody": "={{ JSON.stringify({\"name\": {\"firstName\": $json.firstName, \"lastName\": $json.lastName}, \"emails\": {\"primaryEmail\": $json.email}, \"phones\": {\"primaryPhoneNumber\": $json.phone}}) }}"
       },
-      "id": "140576742037",
+      "id": "569912543341",
       "name": "Create person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -214,9 +214,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"phones\": {\"primaryPhoneNumber\": \"={{ $json.phone }}\"}}"
+        "jsonBody": "={{ JSON.stringify({\"phones\": {\"primaryPhoneNumber\": $json.phone}}) }}"
       },
-      "id": "530780560242",
+      "id": "631139439493",
       "name": "Update person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -238,7 +238,7 @@
         "mode": "append",
         "options": {}
       },
-      "id": "527849615264",
+      "id": "007071553198",
       "name": "Merge",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
@@ -262,9 +262,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"channel\": \"EMAIL\", \"status\": \"={{ $('Normalise').first().json.consent ? 'OPTED_IN' : 'PENDING' }}\", \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": \"={{ $now.toISO() }}\", \"proof\": \"={{ 'n8n form execution ' + $execution.id }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $('Normalise').first().json.consent ? 'OPTED_IN' : 'PENDING', \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": $now.toISO(), \"proof\": 'n8n form execution ' + $execution.id}) }}"
       },
-      "id": "051235327024",
+      "id": "774894214539",
       "name": "Record consent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -296,9 +296,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"submittedAt\": \"={{ $now.toISO() }}\", \"consentGiven\": \"={{ $('Normalise').first().json.consent }}\", \"payload\": \"={{ JSON.stringify($('Normalise').first().json) }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"submittedAt\": $now.toISO(), \"consentGiven\": $('Normalise').first().json.consent, \"payload\": JSON.stringify($('Normalise').first().json)}) }}"
       },
-      "id": "974970720576",
+      "id": "177187483438",
       "name": "Log submission",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -319,7 +319,7 @@
       "parameters": {
         "jsCode": "// Transparent scoring \u2014 a rule anyone can read and argue with, unlike GHL's\n// opaque engagement score.\nconst d = $('Normalise').first().json;\nconst FREE = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com'];\n\nlet score = 0;\nif (d.emailDomain && !FREE.includes(d.emailDomain)) score += 30; else score -= 40;\nif (/cmmc|compliance|soc|incident/i.test(d.interest)) score += 25;\nif (/cmmc|cui|fci|dfars|nist/i.test(d.message))       score += 20;\nif (d.phone)                                          score += 10;\n\n// Deterministic round-robin: hashing the email keeps a person with the same\n// rep across re-runs, and needs no counter stored anywhere.\nconst REPS = (process.env.ASPIRE_REP_IDS || '').split(',').filter(Boolean);\nconst hash = [...d.email].reduce((a, c) => a + c.charCodeAt(0), 0);\n\nreturn [{ json: { ...d, score,\n  band: score >= 60 ? 'HOT' : score >= 30 ? 'WARM' : 'COLD',\n  assigneeId: REPS.length ? REPS[hash % REPS.length] : null }}];"
       },
-      "id": "367665873847",
+      "id": "039962834506",
       "name": "Score and route",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -343,9 +343,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"title\": \"={{ 'Follow up: ' + $json.firstName + ' ' + $json.lastName + ' (' + $json.band + ', score ' + $json.score + ')' }}\", \"status\": \"TODO\", \"dueAt\": \"={{ $now.plus({ days: 1 }).toISO() }}\", \"body\": \"={{ $json.interest + '\\\\n\\\\n' + $json.message }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"title\": 'Follow up: ' + $json.firstName + ' ' + $json.lastName + ' (' + $json.band + ', score ' + $json.score + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 1 }).toISO(), \"body\": $json.interest + '\\n\\n' + $json.message}) }}"
       },
-      "id": "451674276279",
+      "id": "067706977871",
       "name": "Create task",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -378,7 +378,7 @@
         },
         "options": {}
       },
-      "id": "480303243264",
+      "id": "463006681766",
       "name": "Send acknowledgement",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
@@ -394,7 +394,7 @@
         "text": "=:inbox_tray: *New lead \u2014 {{ $('Score and route').first().json.band }}* (score {{ $('Score and route').first().json.score }})\n*{{ $('Score and route').first().json.firstName }} {{ $('Score and route').first().json.lastName }}* \u2014 {{ $('Score and route').first().json.companyName }}\nInterest: {{ $('Score and route').first().json.interest }}\n{{ $('Score and route').first().json.email }}",
         "otherOptions": {}
       },
-      "id": "067932650763",
+      "id": "789868392004",
       "name": "Notify sales",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2,
@@ -423,9 +423,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"workflowName\": \"LEAD Form Intake\", \"status\": \"SUCCESS\", \"startedAt\": \"={{ $execution.startedAt }}\", \"n8nExecutionId\": \"={{ $execution.id }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"LEAD Form Intake\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id}) }}"
       },
-      "id": "313701121907",
+      "id": "896154583704",
       "name": "Log run",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,

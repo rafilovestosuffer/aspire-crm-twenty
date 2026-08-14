@@ -71,6 +71,20 @@ class N8n:
         except Exception as e:  # noqa: BLE001
             return 0, None, str(e).replace(self.key, "***")
 
+    def credentials(self) -> dict[str, str]:
+        """Map credential name -> id. Generated workflows reference credentials
+        by name so the JSON stays portable across environments; the ids are
+        environment-specific and are bound here at deploy time."""
+        status, body, err = self._call("GET", "/credentials?limit=250")
+        if err or status >= 400:
+            # Some n8n versions do not expose credential listing on the public
+            # API. Not fatal — n8n resolves many by name, and anything that
+            # fails to resolve is visible immediately in the editor.
+            return {}
+        items = (body or {}).get("data", body) or []
+        return {c["name"]: c["id"] for c in items
+                if isinstance(c, dict) and c.get("name") and c.get("id")}
+
     def existing(self) -> dict[str, str]:
         """Map workflow name → id for everything already in n8n."""
         status, body, err = self._call("GET", "/workflows?limit=250")
@@ -89,6 +103,18 @@ class N8n:
 
     def activate(self, wid: str):
         return self._call("POST", f"/workflows/{wid}/activate")
+
+
+def bind_credentials(flow: dict, by_name: dict[str, str]) -> int:
+    """Inject the environment's credential ids into every node that names one."""
+    bound = 0
+    for node in flow.get("nodes", []):
+        for cred_type, ref in (node.get("credentials") or {}).items():
+            name = ref.get("name") if isinstance(ref, dict) else None
+            if name and name in by_name:
+                node["credentials"][cred_type] = {"id": by_name[name], "name": name}
+                bound += 1
+    return bound
 
 
 def load_workflows(only: str) -> list[dict]:
@@ -132,10 +158,22 @@ def main() -> int:
 
     api = N8n(base, key)
     present = api.existing()
-    print(f"Connected to {base} — {len(present)} workflow(s) already there\n")
+    creds = api.credentials()
+    print(f"Connected to {base} — {len(present)} workflow(s) already there")
+    print(f"Credentials available: {', '.join(sorted(creds)) or 'none found'}\n")
+
+    missing = {name
+               for f in flows for n in f.get("nodes", [])
+               for ref in (n.get("credentials") or {}).values()
+               if (name := ref.get("name") if isinstance(ref, dict) else None)
+               and name not in creds}
+    if missing:
+        print(f"  !!    not yet created in n8n: {', '.join(sorted(missing))}")
+        print("        Those nodes will fail until the credential exists.\n")
 
     failures = 0
     for f in flows:
+        bind_credentials(f, creds)
         payload = {k: v for k, v in f.items() if k in ALLOWED}
         name = f["name"]
 

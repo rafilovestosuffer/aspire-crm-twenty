@@ -3,7 +3,7 @@
   "nodes": [
     {
       "parameters": {},
-      "id": "851834258261",
+      "id": "952752906790",
       "name": "Error Trigger",
       "type": "n8n-nodes-base.errorTrigger",
       "typeVersion": 1,
@@ -16,7 +16,7 @@
       "parameters": {
         "jsCode": "// n8n's error payload varies by failure mode; normalise it once here.\nconst e = $input.first().json;\nconst wf = e.workflow || {};\nconst ex = e.execution || {};\nreturn [{ json: {\n  workflowName: wf.name || 'unknown',\n  executionId:  ex.id || '',\n  nodeName:     ex.lastNodeExecuted || '',\n  message:      (ex.error && ex.error.message) || e.message || 'unknown error',\n  // Credit exhaustion on AI nodes returns a failure result rather than a normal\n  // error. Retrying it just spends more, so flag it as its own condition.\n  isBilling: /credit|quota|billing|insufficient/i.test(\n               (ex.error && ex.error.message) || ''),\n}}];"
       },
-      "id": "023438327041",
+      "id": "839302384615",
       "name": "Extract failure",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -40,9 +40,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"workflowName\": \"={{ $json.workflowName }}\", \"status\": \"FAILED\", \"errorMessage\": \"={{ $json.message }}\", \"n8nExecutionId\": \"={{ $json.executionId }}\", \"startedAt\": \"={{ $now.toISO() }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": $json.workflowName, \"status\": \"FAILED\", \"errorMessage\": $json.message, \"n8nExecutionId\": $json.executionId, \"startedAt\": $now.toISO()}) }}"
       },
-      "id": "037385051848",
+      "id": "603234644158",
       "name": "Log failure",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -73,7 +73,7 @@
           }
         }
       },
-      "id": "833914474514",
+      "id": "037849482366",
       "name": "Recent failures?",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -94,7 +94,7 @@
       "parameters": {
         "jsCode": "// One failing workflow can fire hundreds of times. Alert on the first, then\n// stay quiet for an hour \u2014 an alert nobody can act on trains people to ignore\n// the channel, which is worse than no alert at all.\nconst runs = ($input.first().json.data?.automationRuns) || [];\nconst hourAgo = Date.now() - 3600_000;\nconst priors = runs.filter(r => new Date(r.startedAt).getTime() > hourAgo).length;\nreturn [{ json: { ...$('Extract failure').first().json, suppress: priors > 1 } }];"
       },
-      "id": "917447299958",
+      "id": "935092576758",
       "name": "Suppress alert storm",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -124,7 +124,7 @@
         },
         "options": {}
       },
-      "id": "566565394715",
+      "id": "943519664669",
       "name": "Should alert?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -140,7 +140,7 @@
         "text": "=:rotating_light: *{{ $json.workflowName }}* failed\nNode: `{{ $json.nodeName }}`\nError: {{ $json.message }}\n{{ $json.isBilling ? ':credit_card: *Looks like an AI credit/billing failure \u2014 retrying will not help.*' : '' }}\nExecution: {{ $json.executionId }}",
         "otherOptions": {}
       },
-      "id": "142169249374",
+      "id": "436259057914",
       "name": "Alert",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2,
@@ -156,7 +156,7 @@
     },
     {
       "parameters": {},
-      "id": "093471931364",
+      "id": "975374820949",
       "name": "Suppressed",
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,

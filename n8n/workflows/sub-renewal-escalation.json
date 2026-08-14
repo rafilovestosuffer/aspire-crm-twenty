@@ -12,7 +12,7 @@
           ]
         }
       },
-      "id": "987767724168",
+      "id": "006942885032",
       "name": "Daily 06:00 UTC",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -35,7 +35,7 @@
           }
         }
       },
-      "id": "489710196207",
+      "id": "156396008518",
       "name": "Get active subscriptions",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -56,7 +56,7 @@
       "parameters": {
         "jsCode": "const subs = $input.first().json.data?.serviceSubscriptions || [];\nconst today = new Date(); today.setHours(0,0,0,0);\nconst out = [];\n\nfor (const s of subs) {\n  if (!s.renewalDate) continue;\n  const d = new Date(s.renewalDate); d.setHours(0,0,0,0);\n  const days = Math.round((d - today) / 86400000);\n  // Only act on the exact milestones, so a subscription is not chased daily\n  // for three months.\n  if ([90, 60, 30, 7].includes(days)) {\n    out.push({ json: { id: s.id, days, name: s.name,\n                       serviceLine: s.serviceLine, mrr: s.mrr,\n                       renewalDate: s.renewalDate, companyId: s.companyId }});\n  }\n}\nreturn out;"
       },
-      "id": "829480919303",
+      "id": "094623642705",
       "name": "Days until renewal",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -70,7 +70,7 @@
         "batchSize": 20,
         "options": {}
       },
-      "id": "745251221812",
+      "id": "676635893637",
       "name": "Batch 20",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
@@ -149,7 +149,7 @@
           "fallbackOutput": 3
         }
       },
-      "id": "215890033128",
+      "id": "663229522463",
       "name": "Which milestone?",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
@@ -173,9 +173,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"title\": \"={{ 'Renewal in 90 days \\u2014 ' + $json.name }}\", \"status\": \"TODO\", \"dueAt\": \"={{ $now.plus({ days: 3 }).toISO() }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"title\": 'Renewal in 90 days \u2014 ' + $json.name, \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 3 }).toISO()}) }}"
       },
-      "id": "732116235929",
+      "id": "867489491526",
       "name": "Task: begin renewal",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -207,9 +207,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"title\": \"={{ 'Renewal in 60 days \\u2014 confirm intent \\u2014 ' + $json.name }}\", \"status\": \"TODO\", \"dueAt\": \"={{ $now.plus({ days: 2 }).toISO() }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"title\": 'Renewal in 60 days \u2014 confirm intent \u2014 ' + $json.name, \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 2 }).toISO()}) }}"
       },
-      "id": "055287839682",
+      "id": "073897111285",
       "name": "Task: confirm intent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -241,9 +241,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"name\": \"={{ 'Renewal \\u2014 ' + $json.name }}\", \"stage\": \"NEW\", \"closeDate\": \"={{ $json.renewalDate }}\", \"companyId\": \"={{ $json.companyId }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"name\": 'Renewal \u2014 ' + $json.name, \"stage\": \"NEW\", \"closeDate\": $json.renewalDate, \"companyId\": $json.companyId}) }}"
       },
-      "id": "987973008924",
+      "id": "513878306770",
       "name": "Create renewal opportunity",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -267,7 +267,7 @@
         "text": "=:warning: *Renewal in 7 days, still no opportunity*\n{{ $json.name }} \u2014 {{ $json.serviceLine }}\nRenews {{ $json.renewalDate }}",
         "otherOptions": {}
       },
-      "id": "529386325745",
+      "id": "742978309552",
       "name": "Urgent escalation",
       "type": "n8n-nodes-base.slack",
       "typeVersion": 2,
@@ -296,9 +296,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"workflowName\": \"SUB Renewal Escalation\", \"status\": \"SUCCESS\", \"startedAt\": \"={{ $execution.startedAt }}\", \"n8nExecutionId\": \"={{ $execution.id }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"SUB Renewal Escalation\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id}) }}"
       },
-      "id": "903159022807",
+      "id": "004844895605",
       "name": "Log run",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,

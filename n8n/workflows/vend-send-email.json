@@ -17,7 +17,7 @@
           ]
         }
       },
-      "id": "535955714124",
+      "id": "062705153327",
       "name": "When called",
       "type": "n8n-nodes-base.executeWorkflowTrigger",
       "typeVersion": 1.1,
@@ -40,7 +40,7 @@
           }
         }
       },
-      "id": "909277747417",
+      "id": "276848655033",
       "name": "Get person",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -71,7 +71,7 @@
           }
         }
       },
-      "id": "210876721950",
+      "id": "415106709684",
       "name": "Get consent",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -92,7 +92,7 @@
       "parameters": {
         "jsCode": "// The whole point of routing every send through this sub-workflow: a workflow\n// author cannot forget the consent check, because they never touch SMTP.\nconst rows = $input.first().json.data?.consentRecords || [];\nconst latest = rows[0];\nconst person = $('Get person').first().json.data?.person || {};\nconst email  = person.emails?.primaryEmail;\n\nif (!email)                       return [{ json: { send:false, reason:'no_email' }}];\nif (!latest)                      return [{ json: { send:false, reason:'no_consent_record' }}];\nif (latest.status !== 'OPTED_IN') return [{ json: { send:false, reason:`consent_${latest.status}` }}];\n\nreturn [{ json: {\n  send: true, email,\n  firstName: person.name?.firstName || '',\n  personId: $('When called').first().json.personId,\n  templateKey: $('When called').first().json.templateKey,\n  mergeData: $('When called').first().json.mergeData || {},\n}}];"
       },
-      "id": "189667271071",
+      "id": "608365938351",
       "name": "Consent gate",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -122,7 +122,7 @@
         },
         "options": {}
       },
-      "id": "786110356142",
+      "id": "512820378905",
       "name": "Allowed to send?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -135,7 +135,7 @@
       "parameters": {
         "jsCode": "// Templates live here, in version control, not in a vendor UI nobody can diff.\nconst TEMPLATES = {\n  lead_ack: {\n    subject: 'Thanks for getting in touch, {{firstName}}',\n    body: `<p>Hi {{firstName}},</p>\n<p>Thanks for reaching out to Aspire. One of our security specialists\nwill be in touch within one business day.</p>\n<p>\u2014 Aspire Tech</p>`,\n  },\n  renewal_60d: {\n    subject: 'Your {{serviceLine}} renewal \u2014 {{renewalDate}}',\n    body: `<p>Hi {{firstName}},</p>\n<p>Your {{serviceLine}} subscription renews on {{renewalDate}}.\nWe will reach out shortly to confirm.</p>\n<p>\u2014 Aspire Tech</p>`,\n  },\n  appt_reminder_24h: {\n    subject: 'Reminder: {{appointmentType}} tomorrow',\n    body: `<p>Hi {{firstName}},</p>\n<p>A reminder of your {{appointmentType}} at {{scheduledAt}}.</p>\n<p>{{meetingUrl}}</p>`,\n  },\n};\n\nconst d = $input.first().json;\nconst t = TEMPLATES[d.templateKey];\nif (!t) throw new Error(`Unknown templateKey: ${d.templateKey}`);\n\nconst vars = { firstName: d.firstName, ...d.mergeData };\nconst fill = (s) => s.replace(/\\{\\{(\\w+)\\}\\}/g, (_, k) => vars[k] ?? '');\n\nreturn [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];"
       },
-      "id": "177640315474",
+      "id": "111305593275",
       "name": "Render template",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -152,7 +152,7 @@
         "html": "={{ $json.html }}",
         "options": {}
       },
-      "id": "279398743998",
+      "id": "310340384449",
       "name": "Send by SMTP",
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
@@ -181,9 +181,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"SENT\", \"subject\": \"={{ $('Render template').first().json.subject }}\", \"vendor\": \"smtp\", \"sentAt\": \"={{ $now.toISO() }}\", \"personId\": \"={{ $('Render template').first().json.personId }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"SENT\", \"subject\": $('Render template').first().json.subject, \"vendor\": \"smtp\", \"sentAt\": $now.toISO(), \"personId\": $('Render template').first().json.personId}) }}"
       },
-      "id": "603727030323",
+      "id": "841787311590",
       "name": "Log message",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
@@ -215,9 +215,9 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"FAILED\", \"subject\": \"={{ 'Blocked: ' + $json.reason }}\", \"vendor\": \"consent-gate\", \"sentAt\": \"={{ $now.toISO() }}\"}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"FAILED\", \"subject\": 'Blocked: ' + $json.reason, \"vendor\": \"consent-gate\", \"sentAt\": $now.toISO()}) }}"
       },
-      "id": "077938347880",
+      "id": "096266153183",
       "name": "Log suppressed",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,

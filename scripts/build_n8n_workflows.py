@@ -40,6 +40,29 @@ SALES_CHANNEL = "#sales"
 # Node helpers
 # --------------------------------------------------------------------------
 
+def _js_literal(value) -> str:
+    """
+    Render a request body as a JavaScript object literal for n8n.
+
+    String interpolation is not enough: `{"clickCount": "{{ $json.x }}"}`
+    evaluates to the STRING "1", and Twenty rejects a string where a number
+    belongs. Emitting real JS and letting JSON.stringify serialise it preserves
+    numbers, booleans and nulls.
+
+    An `"={{ expr }}"` value becomes the bare expression; everything else is
+    JSON-encoded as a literal.
+    """
+    if isinstance(value, dict):
+        inner = ", ".join(f"{json.dumps(k)}: {_js_literal(v)}"
+                          for k, v in value.items())
+        return "{" + inner + "}"
+    if isinstance(value, list):
+        return "[" + ", ".join(_js_literal(v) for v in value) + "]"
+    if isinstance(value, str) and value.startswith("={{") and value.endswith("}}"):
+        return value[3:-2].strip()          # "={{ $json.x }}" -> "$json.x"
+    return json.dumps(value)
+
+
 class Flow:
     """Builds one n8n workflow: nodes laid out left to right, wired in order."""
 
@@ -92,7 +115,17 @@ class Flow:
         if body is not None:
             params["sendBody"] = True
             params["specifyBody"] = "json"
-            params["jsonBody"] = json.dumps(body) if isinstance(body, dict) else body
+            # n8n evaluates jsonBody only when the WHOLE parameter is an
+            # expression, i.e. the string starts with "=". Putting "=" on the
+            # inner values instead sends them as literal text — the request
+            # body arrives as {"clickCount": "={{ $json.clickCount }}"} and
+            # Twenty rejects it. So: strip the inner "=" prefixes and mark the
+            # whole payload as one expression.
+            if isinstance(body, dict):
+                params["jsonBody"] = ("={{ JSON.stringify("
+                                      + _js_literal(body) + ") }}")
+            else:
+                params["jsonBody"] = body
         n = self.add(name, "n8n-nodes-base.httpRequest", params, version=4,
                      creds={"httpHeaderAuth": {"name": CRED_TWENTY}}, row=row)
         # Transient failures against Twenty are common at the 100/min ceiling.
@@ -499,18 +532,23 @@ def wf_tracked_link() -> Flow:
              "Serves /t/:slug, records the click on trackedLink, then 302s to "
              "the destination. Full replacement for GHL trigger links.")
 
+    # A static path with a query parameter, not a `:slug` path parameter.
+    # n8n registers `t/:slug` in the database but will not match `t/abc`
+    # against it — every request 404s with "webhook is not registered".
+    # Tracked links conventionally look like /t?s=abc123 anyway.
     trig = f.add("Click", "n8n-nodes-base.webhook", {
-        "path": "t/:slug",
+        "path": "t",
+        "httpMethod": "GET",
         "responseMode": "responseNode",
         "options": {},
     }, version=2)
 
     lookup = f.twenty("Find link", "GET",
-                      "/rest/trackedLinks?filter[slug][eq]={{ $json.params.slug }}&limit=1")
+                      "/rest/trackedLinks?filter[slug][eq]={{ $json.query.s }}&limit=1")
 
     check = f.code("Resolve", """
 const link = ($input.first().json.data?.trackedLinks || [])[0];
-const q = $('Click').first().json.query || {};
+const q = $('Click').first().json.query || {};   // ?s=<slug>&p=<personId>
 return [{ json: {
   found: !!link,
   id: link?.id || null,
