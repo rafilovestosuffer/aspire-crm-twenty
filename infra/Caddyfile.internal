@@ -23,11 +23,14 @@
 #   CRM_DOMAIN=crm.aspire.local
 #   AUTOMATION_DOMAIN=auto.aspire.local
 
-{
-	# No email and no ACME server: nothing external is contacted.
-	# Ports 80 and 443 are still served, just with a locally-issued cert.
-	auto_https disable_redirects
-}
+# No global options block on purpose. There is no ACME email because nothing
+# external is contacted — `tls internal` below makes Caddy issue the
+# certificate from its own CA.
+#
+# In particular `auto_https disable_redirects` is NOT set. It sounds harmless
+# for an internal site, but it makes port 80 serve nothing at all, so anyone
+# typing the address without a scheme gets a connection error instead of the
+# site. Caddy's default — redirect HTTP to HTTPS — is what is wanted.
 
 (hardening) {
 	encode zstd gzip

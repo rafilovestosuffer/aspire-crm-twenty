@@ -37,10 +37,16 @@ services:
       retries: 3
 
   server:
-    ports:
+    # !override replaces the base file's port list instead of adding to it.
+    # Compose MERGES lists by default, so without this the service is published
+    # twice — once on all interfaces from the base file and once on loopback
+    # here. That fails to bind, and if it did bind it would defeat the entire
+    # point of this overlay: the app would still be reachable from the internet
+    # directly, bypassing the proxy and the editor allowlist.
+    ports: !override
       - "127.0.0.1:${TWENTY_PORT:-3000}:3000"
   n8n:
-    ports:
+    ports: !override
       - "127.0.0.1:${N8N_PORT:-5678}:5678"
     environment:
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
