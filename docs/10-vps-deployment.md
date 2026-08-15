@@ -37,6 +37,57 @@ dig +short auto.aspiretss.com
 
 ---
 
+## Contabo specifics
+
+Contabo is a VPS host: the server has a **public IPv4 address**, which is what
+makes everything below work — real certificates, working public forms, inbound
+webhooks. If someone describes it as "the office server" that is about who pays
+for it, not where it sits on the network.
+
+Confirm in one command, on the server:
+
+```bash
+curl -s ifconfig.me; echo
+ip -4 addr show | grep inet
+```
+
+If the two agree, and the address does **not** start `192.168.`, `10.` or
+`172.16.`–`172.31.`, it is public and this document applies. If they disagree,
+the machine is behind NAT — use `docs/11-internal-server-deployment.md` instead.
+
+**Getting in the first time.** Contabo emails the root password when the server
+is provisioned; it can also be reset from the customer panel under *Your
+Services → the VPS → Password reset*. First login:
+
+```bash
+ssh root@<your server ip>
+```
+
+**Working as root.** Contabo hands you root by default. Create an ordinary user
+and stop using root over SSH:
+
+```bash
+adduser rafi
+usermod -aG sudo rafi
+```
+
+Then log in as that user from now on. The install steps below assume `sudo`.
+
+**Firewall.** Contabo does not filter traffic by default on most plans — the
+`ufw` rules below are your only firewall, so do not skip them. Newer plans also
+offer a Cloud Firewall in the panel; if it is enabled, allow 22, 80 and 443
+there too, or the certificate request will time out with no explanation.
+
+**DNS.** If the domain's nameservers point at Contabo, add the two A records in
+the customer panel under *Domains → DNS management*. HTTP-01 only needs the
+records to resolve — no API token, no provider plugin.
+
+**Sizing.** Contabo's cheaper VPS plans are generous on disk and thin on RAM.
+This stack wants 8 GB. On 4 GB, Twenty and Postgres will contend and the UI
+will feel slow under any real load.
+
+---
+
 ## Step 1 — Bring the stack up on the server
 
 ```bash
