@@ -1,0 +1,50 @@
+# Overlay for an internal office server — private IP, no inbound internet.
+#
+#   docker compose -f infra/docker-compose.yml \
+#                  -f infra/docker-compose.internal.yml up -d
+#
+# Differs from docker-compose.vps.yml in two ways: the proxy issues its own
+# certificates rather than asking Let's Encrypt (which cannot validate a server
+# it is unable to reach), and no ACME email is required.
+#
+# Ports 80 and 443 are published on all interfaces on purpose — colleagues on
+# the office network need to reach it. The app ports stay on loopback so the
+# proxy is the only way in.
+
+services:
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on: [server, n8n]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CRM_DOMAIN: ${CRM_DOMAIN:?set CRM_DOMAIN in infra/.env}
+      AUTOMATION_DOMAIN: ${AUTOMATION_DOMAIN:?set AUTOMATION_DOMAIN in infra/.env}
+    volumes:
+      - ./Caddyfile.internal:/etc/caddy/Caddyfile:ro
+      # Holds the local CA's root key. Lose this volume and Caddy generates a
+      # new CA, and every machine that trusted the old one starts warning again.
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  server:
+    ports:
+      - "127.0.0.1:${TWENTY_PORT:-3000}:3000"
+
+  n8n:
+    ports:
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
+    environment:
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+
+volumes:
+  caddy-data:
+  caddy-config:

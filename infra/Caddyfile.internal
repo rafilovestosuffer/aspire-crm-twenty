@@ -1,0 +1,64 @@
+# Reverse proxy and TLS for a server that is NOT reachable from the internet.
+#
+# Use this instead of ./Caddyfile when the machine sits on the office network
+# with a private address (192.168.x.x, 10.x.x.x, 172.16-31.x.x).
+#
+#   docker compose -f infra/docker-compose.yml \
+#                  -f infra/docker-compose.internal.yml up -d
+#
+# Why a separate file: the normal Caddyfile asks Let's Encrypt for a
+# certificate, and Let's Encrypt proves ownership by connecting *to the server
+# from the internet*. That connection cannot happen here, so the request fails
+# and Caddy serves nothing. `tls internal` sidesteps the problem entirely —
+# Caddy runs its own certificate authority locally and issues the certificate
+# itself, with no external validation and no ports open.
+#
+# The trade-off: browsers do not trust Caddy's CA until you install its root
+# certificate on each machine. That is one file, once per laptop, and
+# docs/11-internal-server-deployment.md walks through it. The alternative —
+# a real publicly-trusted certificate via a DNS-01 challenge — is in the same
+# document and needs a DNS provider API token.
+#
+# Set in infra/.env:
+#   CRM_DOMAIN=crm.aspire.local
+#   AUTOMATION_DOMAIN=auto.aspire.local
+
+{
+	# No email and no ACME server: nothing external is contacted.
+	# Ports 80 and 443 are still served, just with a locally-issued cert.
+	auto_https disable_redirects
+}
+
+(hardening) {
+	encode zstd gzip
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	# No HSTS here. It pins the browser to HTTPS for a year, and on an internal
+	# CA that turns a certificate mistake into a site nobody can reach until the
+	# header expires.
+}
+
+{$CRM_DOMAIN} {
+	tls internal
+	import hardening
+	# Twenty streams uploads and long GraphQL responses; the default flush
+	# interval buffers them and the UI appears to hang on a large import.
+	reverse_proxy server:3000 {
+		flush_interval -1
+	}
+}
+
+{$AUTOMATION_DOMAIN} {
+	tls internal
+	import hardening
+
+	# No IP allowlist here, unlike the internet-facing config. The whole host is
+	# already unreachable from outside the office, so the network is the control.
+	# If the office network is large or shared, add one — the n8n editor holds
+	# every credential in the stack.
+	reverse_proxy n8n:5678
+}

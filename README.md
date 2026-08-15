@@ -21,6 +21,7 @@ the recipe; Docker runs the kitchen.
 | [`docs/04-manual-sweep.md`](docs/04-manual-sweep.md) | Tier 5 checklist for everything no API serves |
 | [`docs/06-twenty-object-model.md`](docs/06-twenty-object-model.md) | The 25-object GHL parity model provisioned into Twenty |
 | [`docs/09-status-and-handover.md`](docs/09-status-and-handover.md) | **Start here.** What exists, what is proven, what is left, what it costs, how to run it |
+| [`docs/11-internal-server-deployment.md`](docs/11-internal-server-deployment.md) | **Office server** (private IP, no inbound internet). Written for a first-time server admin |
 | [`docs/10-vps-deployment.md`](docs/10-vps-deployment.md) | Company server: DNS, TLS, the editor allowlist, and what this doc does *not* do |
 | [`docs/07-build-plan.md`](docs/07-build-plan.md) | **The build plan.** What Twenty + n8n alone delivers, and the sprint sequence |
 | [`CLAUDE.md`](CLAUDE.md) | Operating rules. Read-only, no PII, rate limits |
@@ -81,7 +82,8 @@ n8n/workflows/                       8 workflows — 6 real, 2 dev-only (alert s
 infra/docker-compose.yml             Twenty + n8n + Postgres + Redis + backups
 infra/up.sh                          one-command bring-up, generates secrets
 infra/rebuild.sh                     zero to proven, every step a gate
-infra/Caddyfile                      reverse proxy + automatic TLS for the VPS
+infra/Caddyfile                      reverse proxy + Let's Encrypt (internet-facing)
+infra/Caddyfile.internal             reverse proxy + local CA (office network)
 scripts/verify_restore.py            restores a backup and compares row counts
 scripts/stack_verify.py              verifies every layer independently
 scripts/seed_demo_data.py            448 deterministic Aspire demo records
