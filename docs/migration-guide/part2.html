@@ -2,36 +2,72 @@
 
 <p>Three layers, plus AI as a cross-cutting concern. The layering exists to enforce one rule.</p>
 
-<pre>
-   SOURCES
-   Website forms · Chat · Lead magnets · Ad platforms · Inbound email · RSS
-        │
-        ▼
-   ┌──────────────────────────────────────────────────────────────────┐
-   │  ORCHESTRATION — n8n                                             │
-   │  Ingest · Transform · Deduplicate · Route · Approve · Retry       │
-   │  Moves data between layers. Stores none.                         │
-   └───────┬──────────────────────────────────────────┬───────────────┘
-           │                                          │
-           ▼                                          ▼
-   ┌───────────────────────────┐          ┌───────────────────────────┐
-   │  RECORD — Twenty          │          │  EXECUTION — Vendors      │
-   │  Companies · People       │          │  ESP  → email at volume   │
-   │  Opportunities            │          │  CPaaS → SMS, voice       │
-   │  Service Subscriptions    │          │  Forms → public capture   │
-   │  Compliance Engagements   │          │  Scheduling → booking     │
-   │  Training Accounts        │          │  CMS  → pages, blog       │
-   │  Phishing Baselines       │          │  Finance → invoices       │
-   │  + 20 GHL-parity objects  │          │                           │
-   │                           │          │  SOURCE OF TRUTH:         │
-   │  SOURCE OF TRUTH:         │          │  delivery events only     │
-   │  all business data        │          │                           │
-   └───────────────────────────┘          └───────────────────────────┘
-           │                                          │
-           └──────────────────┬───────────────────────┘
-                              ▼
-              REPORTING — Twenty views + warehouse
-</pre>
+<figure class="fig">
+<svg viewBox="0 0 700 452" width="100%" xmlns="http://www.w3.org/2000/svg"
+     font-family="DejaVu Sans, sans-serif" role="img"
+     aria-label="Layered architecture: sources feed n8n orchestration, which reads and writes Twenty as the system of record and calls satellite services; Postgres and Redis sit underneath.">
+
+  <!-- SOURCES -->
+  <rect x="8" y="8" width="684" height="46" rx="4" fill="#f7fafd" stroke="#c8d2e0"/>
+  <text x="20" y="26" font-size="9" font-weight="bold" fill="#48566c" letter-spacing="1">SOURCES</text>
+  <text x="20" y="42" font-size="10" fill="#24344a">Website form · Inbound email · Calendar · Vendor webhooks · Scheduled clock</text>
+
+  <path d="M350 54 L350 76" stroke="#8a94a6" stroke-width="1.4"/>
+  <path d="M346 70 L350 78 L354 70 Z" fill="#8a94a6"/>
+
+  <!-- ORCHESTRATION -->
+  <rect x="8" y="78" width="684" height="72" rx="4" fill="#dde5f6" stroke="#2d6cb5" stroke-width="1.3"/>
+  <text x="20" y="98" font-size="10" font-weight="bold" fill="#12325a" letter-spacing="1">ORCHESTRATION — n8n</text>
+  <text x="20" y="116" font-size="10" fill="#1c4a80">Ingest · Validate · Deduplicate · Score · Route · Retry · Alert</text>
+  <text x="20" y="136" font-size="9.5" font-style="italic" fill="#23407d">Moves data between layers. Stores none — anything worth remembering becomes a Twenty record.</text>
+
+  <path d="M200 150 L200 176" stroke="#8a94a6" stroke-width="1.4"/>
+  <path d="M196 170 L200 178 L204 170 Z" fill="#8a94a6"/>
+  <path d="M520 150 L520 176" stroke="#8a94a6" stroke-width="1.4"/>
+  <path d="M516 170 L520 178 L524 170 Z" fill="#8a94a6"/>
+  <text x="212" y="167" font-size="8.5" fill="#5a6478">reads / writes</text>
+  <text x="532" y="167" font-size="8.5" fill="#5a6478">calls, then writes the outcome back</text>
+
+  <!-- RECORD + SATELLITES -->
+  <rect x="8" y="178" width="330" height="112" rx="4" fill="#eefaf3" stroke="#1e7a4a" stroke-width="1.3"/>
+  <text x="22" y="198" font-size="10" font-weight="bold" fill="#1d5c2e" letter-spacing="1">SYSTEM OF RECORD — Twenty</text>
+  <text x="22" y="216" font-size="9.5" fill="#1c2430">People · Companies · Opportunities · Tasks</text>
+  <text x="22" y="232" font-size="9.5" fill="#1c2430">Service Subscription · Compliance Engagement</text>
+  <text x="22" y="248" font-size="9.5" fill="#1c2430">Training Account · Phishing Baseline</text>
+  <text x="22" y="266" font-size="9.5" font-weight="bold" fill="#1d5c2e">Consent Record · Automation Run</text>
+  <text x="22" y="282" font-size="8.5" font-style="italic" fill="#48566c">Single source of truth. Every field has exactly one owner.</text>
+
+  <rect x="352" y="178" width="340" height="112" rx="4" fill="#e2ddf0" stroke="#4b2f7a" stroke-width="1.3"/>
+  <text x="366" y="198" font-size="10" font-weight="bold" fill="#4b2f7a" letter-spacing="1">SATELLITES — self-hosted</text>
+  <text x="366" y="216" font-size="9.5" fill="#1c2430">Cal.com — booking pages and availability</text>
+  <text x="366" y="232" font-size="9.5" fill="#1c2430">DocuSeal — quotes and e-signature</text>
+  <text x="366" y="248" font-size="9.5" fill="#1c2430">SMTP relay — transactional email out</text>
+  <text x="366" y="266" font-size="8.5" font-style="italic" fill="#48566c">Each owns its own domain only, and writes</text>
+  <text x="366" y="280" font-size="8.5" font-style="italic" fill="#48566c">outcomes back into Twenty.</text>
+
+  <path d="M173 290 L173 316" stroke="#8a94a6" stroke-width="1.4"/>
+  <path d="M169 310 L173 318 L177 310 Z" fill="#8a94a6"/>
+  <path d="M522 290 L522 316" stroke="#8a94a6" stroke-width="1.4"/>
+  <path d="M518 310 L522 318 L526 310 Z" fill="#8a94a6"/>
+
+  <!-- DATA -->
+  <rect x="8" y="318" width="684" height="56" rx="4" fill="#eef2f7" stroke="#8a94a6"/>
+  <text x="22" y="338" font-size="10" font-weight="bold" fill="#24344a" letter-spacing="1">DATA — PostgreSQL · Redis</text>
+  <text x="22" y="356" font-size="9.5" fill="#24344a">Separate database per application on one instance. Nightly dump of both, retained 30 days.</text>
+
+  <path d="M350 374 L350 396" stroke="#8a94a6" stroke-width="1.4"/>
+  <path d="M346 390 L350 398 L354 390 Z" fill="#8a94a6"/>
+
+  <!-- EDGE -->
+  <rect x="8" y="398" width="684" height="46" rx="4" fill="#f0f5fb" stroke="#2d6cb5"/>
+  <text x="22" y="418" font-size="10" font-weight="bold" fill="#12325a" letter-spacing="1">EDGE — reverse proxy</text>
+  <text x="22" y="435" font-size="9.5" fill="#1c4a80">TLS terminates here. Application ports bound to loopback; only the proxy reaches them.</text>
+</svg>
+<figcaption>Figure 1 · The four layers. The load-bearing rule is that n8n stores
+nothing: if a fact matters, it lives in Twenty, which is what makes any single
+component replaceable without losing history.</figcaption>
+</figure>
+
 
 <div class="callout">
 <span class="lbl">The rule that governs everything</span>

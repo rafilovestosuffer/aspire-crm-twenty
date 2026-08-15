@@ -85,6 +85,7 @@ machine's own disk.
 
 ---
 
+## The detail
 
 The laptop stack and the server stack are the same files. What changes is
 `infra/.env`, one overlay, and a reverse proxy in front. Nothing is rebuilt and

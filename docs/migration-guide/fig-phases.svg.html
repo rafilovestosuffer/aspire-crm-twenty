@@ -1,0 +1,65 @@
+<figure class="fig">
+<svg viewBox="0 0 700 216" width="100%" xmlns="http://www.w3.org/2000/svg"
+     font-family="DejaVu Sans, sans-serif" role="img"
+     aria-label="Six delivery phases on a timeline with a gate between each: prove the automation layer, native configuration, satellites, data migration, hardening, then parallel run and cutover.">
+
+  <!-- spine -->
+  <line x1="16" y1="112" x2="684" y2="112" stroke="#c8d2e0" stroke-width="2"/>
+
+  <!-- phase 1 (done) -->
+  <rect x="16" y="76" width="96" height="72" rx="4" fill="#d9ead8" stroke="#1e7a4a" stroke-width="1.5"/>
+  <text x="64" y="96" text-anchor="middle" font-size="9" font-weight="bold" fill="#1d5c2e">1 · DONE</text>
+  <text x="64" y="112" text-anchor="middle" font-size="8.4" fill="#1d5c2e">Prove the</text>
+  <text x="64" y="124" text-anchor="middle" font-size="8.4" fill="#1d5c2e">automation layer</text>
+  <text x="64" y="140" text-anchor="middle" font-size="8" font-style="italic" fill="#1d5c2e">25 checks pass</text>
+
+  <rect x="126" y="76" width="96" height="72" rx="4" fill="#f5f8fb" stroke="#c8d2e0"/>
+  <text x="174" y="96" text-anchor="middle" font-size="9" font-weight="bold" fill="#24344a">2 · 3 days</text>
+  <text x="174" y="112" text-anchor="middle" font-size="8.4" fill="#24344a">Native config</text>
+  <text x="174" y="124" text-anchor="middle" font-size="8.4" fill="#24344a">mailbox, views, roles</text>
+
+  <rect x="236" y="76" width="96" height="72" rx="4" fill="#f5f8fb" stroke="#c8d2e0"/>
+  <text x="284" y="96" text-anchor="middle" font-size="9" font-weight="bold" fill="#24344a">3 · 1 week</text>
+  <text x="284" y="112" text-anchor="middle" font-size="8.4" fill="#24344a">Booking and</text>
+  <text x="284" y="124" text-anchor="middle" font-size="8.4" fill="#24344a">e-signature</text>
+
+  <rect x="346" y="76" width="96" height="72" rx="4" fill="#fdf8ec" stroke="#b8860b" stroke-width="1.5"/>
+  <text x="394" y="96" text-anchor="middle" font-size="9" font-weight="bold" fill="#8a4b06">4 · 1 week</text>
+  <text x="394" y="112" text-anchor="middle" font-size="8.4" fill="#8a4b06">Data migration</text>
+  <text x="394" y="128" text-anchor="middle" font-size="8" font-weight="bold" fill="#a02c2c">export consent FIRST</text>
+
+  <rect x="456" y="76" width="96" height="72" rx="4" fill="#f5f8fb" stroke="#c8d2e0"/>
+  <text x="504" y="96" text-anchor="middle" font-size="9" font-weight="bold" fill="#24344a">5 · 3 days</text>
+  <text x="504" y="112" text-anchor="middle" font-size="8.4" fill="#24344a">Hardening</text>
+  <text x="504" y="124" text-anchor="middle" font-size="8.4" fill="#24344a">monitoring, runbook</text>
+  <text x="504" y="140" text-anchor="middle" font-size="7.6" font-style="italic" fill="#1d5c2e">TLS + restore done</text>
+
+  <rect x="566" y="76" width="118" height="72" rx="4" fill="#dde5f6" stroke="#2d6cb5" stroke-width="1.5"/>
+  <text x="625" y="96" text-anchor="middle" font-size="9" font-weight="bold" fill="#12325a">6 · 2–3 weeks</text>
+  <text x="625" y="112" text-anchor="middle" font-size="8.4" fill="#1c4a80">Parallel run,</text>
+  <text x="625" y="124" text-anchor="middle" font-size="8.4" fill="#1c4a80">reconcile, cut over</text>
+  <text x="625" y="140" text-anchor="middle" font-size="7.6" font-style="italic" fill="#1c4a80">GHL read-only 30–60d</text>
+
+  <!-- gates -->
+  <g font-size="7.4" fill="#5a6478" text-anchor="middle">
+    <circle cx="119" cy="112" r="5.5" fill="#fff" stroke="#8a94a6" stroke-width="1.2"/>
+    <circle cx="229" cy="112" r="5.5" fill="#fff" stroke="#8a94a6" stroke-width="1.2"/>
+    <circle cx="339" cy="112" r="5.5" fill="#fff" stroke="#8a94a6" stroke-width="1.2"/>
+    <circle cx="449" cy="112" r="5.5" fill="#fff" stroke="#8a94a6" stroke-width="1.2"/>
+    <circle cx="559" cy="112" r="5.5" fill="#fff" stroke="#8a94a6" stroke-width="1.2"/>
+    <text x="119" y="66">gate</text><text x="229" y="66">gate</text><text x="339" y="66">gate</text>
+    <text x="449" y="66">gate</text><text x="559" y="66">gate</text>
+  </g>
+
+  <text x="350" y="30" text-anchor="middle" font-size="9.6" font-weight="bold" fill="#12325a">Six phases · 6–8 weeks · a demonstrable system from week one</text>
+  <text x="350" y="46" text-anchor="middle" font-size="8.4" fill="#48566c">Each gate is a pass/fail check. Do not start the next phase until the one before it passes.</text>
+
+  <rect x="16" y="166" width="668" height="40" rx="4" fill="#fbf0f0" stroke="#a02c2c" stroke-width="1.2"/>
+  <text x="28" y="184" font-size="8.6" font-weight="bold" fill="#a02c2c">The one irreversible step</text>
+  <text x="28" y="198" font-size="8.4" fill="#a02c2c">GoHighLevel's suppression list cannot be recovered after termination. Export and reconcile it before any end date is agreed.</text>
+</svg>
+<figcaption>Figure 4 · Delivery sequence. Phase 1 is complete and two Phase 5
+items — TLS behind a reverse proxy, and a restore-tested backup — are already
+done. The gates matter more than the durations: a phase that starts before the
+previous one passes moves the failure later, where it costs more.</figcaption>
+</figure>

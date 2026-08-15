@@ -7,6 +7,75 @@
 <h3>7.1 Contacts → Twenty People <span class="pill t-twenty">TWENTY</span></h3>
 
 <p><b>What GoHighLevel does.</b> Stores contacts with standard fields, unlimited custom fields, tags, DND flags, assigned user, source attribution, and full interaction history.</p>
+<figure class="fig">
+<svg viewBox="0 0 700 300" width="100%" xmlns="http://www.w3.org/2000/svg"
+     font-family="DejaVu Sans, sans-serif" role="img"
+     aria-label="Data model: Company at the centre, linked to People, Opportunities, Service Subscriptions, Compliance Engagements and Training Accounts; Training Account links to Phishing Baseline; Person links to Consent Record.">
+
+  <defs>
+    <marker id="d" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#8a94a6"/>
+    </marker>
+  </defs>
+
+  <!-- centre -->
+  <rect x="270" y="122" width="160" height="52" rx="4" fill="#dde5f6" stroke="#2d6cb5" stroke-width="1.6"/>
+  <text x="350" y="144" text-anchor="middle" font-size="11" font-weight="bold" fill="#12325a">Company</text>
+  <text x="350" y="160" text-anchor="middle" font-size="8" fill="#1c4a80">the account</text>
+
+  <g stroke="#8a94a6" stroke-width="1.1" fill="none" marker-end="url(#d)">
+    <path d="M270 137 L190 100"/>
+    <path d="M270 160 L190 196"/>
+    <path d="M430 130 L510 96"/>
+    <path d="M430 148 L510 148"/>
+    <path d="M430 166 L510 200"/>
+    <path d="M578 220 L578 244"/>
+    <path d="M110 220 L110 244"/>
+  </g>
+
+  <!-- left -->
+  <rect x="34" y="74" width="156" height="46" rx="4" fill="#eefaf3" stroke="#1e7a4a"/>
+  <text x="112" y="93" text-anchor="middle" font-size="10" font-weight="bold" fill="#1d5c2e">Person</text>
+  <text x="112" y="108" text-anchor="middle" font-size="8" fill="#1d5c2e">contacts at the account</text>
+
+  <rect x="34" y="174" width="156" height="46" rx="4" fill="#f5f8fb" stroke="#c8d2e0"/>
+  <text x="112" y="193" text-anchor="middle" font-size="10" fill="#24344a">Opportunity</text>
+  <text x="112" y="208" text-anchor="middle" font-size="8" fill="#5a6478">pipeline, new business</text>
+
+  <rect x="20" y="244" width="180" height="46" rx="4" fill="#fdf8ec" stroke="#b8860b" stroke-width="1.4"/>
+  <text x="110" y="263" text-anchor="middle" font-size="10" font-weight="bold" fill="#8a4b06">Consent Record</text>
+  <text x="110" y="278" text-anchor="middle" font-size="8" fill="#8a4b06">per person, per channel, with proof</text>
+
+  <!-- right -->
+  <rect x="510" y="72" width="176" height="46" rx="4" fill="#eefaf3" stroke="#1e7a4a"/>
+  <text x="598" y="91" text-anchor="middle" font-size="10" font-weight="bold" fill="#1d5c2e">Service Subscription</text>
+  <text x="598" y="106" text-anchor="middle" font-size="8" fill="#1d5c2e">recurring, has a renewal date</text>
+
+  <rect x="510" y="126" width="176" height="46" rx="4" fill="#eefaf3" stroke="#1e7a4a"/>
+  <text x="598" y="145" text-anchor="middle" font-size="10" font-weight="bold" fill="#1d5c2e">Compliance Engagement</text>
+  <text x="598" y="160" text-anchor="middle" font-size="8" fill="#1d5c2e">CMMC level, audit date</text>
+
+  <rect x="510" y="180" width="176" height="46" rx="4" fill="#eefaf3" stroke="#1e7a4a"/>
+  <text x="598" y="199" text-anchor="middle" font-size="10" font-weight="bold" fill="#1d5c2e">Training Account</text>
+  <text x="598" y="214" text-anchor="middle" font-size="8" fill="#1d5c2e">seats purchased vs consumed</text>
+
+  <rect x="500" y="244" width="196" height="46" rx="4" fill="#eefaf3" stroke="#1e7a4a"/>
+  <text x="598" y="263" text-anchor="middle" font-size="10" font-weight="bold" fill="#1d5c2e">Phishing Baseline</text>
+  <text x="598" y="278" text-anchor="middle" font-size="8" fill="#1d5c2e">score per quarter — the trend line</text>
+
+  <!-- note -->
+  <rect x="216" y="196" width="268" height="76" rx="4" fill="#f7fafd" stroke="#c8d2e0" stroke-dasharray="3 2"/>
+  <text x="350" y="216" text-anchor="middle" font-size="8.6" fill="#24344a">GoHighLevel has none of the four green</text>
+  <text x="350" y="230" text-anchor="middle" font-size="8.6" fill="#24344a">objects on the right. They become custom</text>
+  <text x="350" y="244" text-anchor="middle" font-size="8.6" fill="#24344a">fields on a single "deal", which is why</text>
+  <text x="350" y="258" text-anchor="middle" font-size="8.6" fill="#24344a">renewal and seat reporting needs an export.</text>
+</svg>
+<figcaption>Figure 3 · The six objects that carry Aspire's business, of twenty-five
+in total. Everything hangs off Company except consent, which hangs off the
+person — the distinction matters, because consent follows the human, not the
+account.</figcaption>
+</figure>
+
 
 <p><b>How to build it.</b></p>
 <ol>

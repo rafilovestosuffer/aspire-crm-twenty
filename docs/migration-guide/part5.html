@@ -132,6 +132,94 @@ IF: is this a repeat failure of the same workflow within 1 hour?
 <h2>15. Worked recipes</h2>
 
 <p>Six automations built end to end. Between them they exercise every pattern in §12–13; most GoHighLevel workflows are a variation on one of these.</p>
+<figure class="fig">
+<svg viewBox="0 0 700 316" width="100%" xmlns="http://www.w3.org/2000/svg"
+     font-family="DejaVu Sans, sans-serif" role="img"
+     aria-label="Lead capture flow from public form through deduplication, company matching, consent recording, scoring and routing, to the send sub-workflow where a consent gate either sends or refuses and logs the reason.">
+
+  <defs>
+    <marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="#5a6478"/>
+    </marker>
+  </defs>
+  <g stroke="#5a6478" stroke-width="1.2" marker-end="url(#ar)" fill="none">
+    <path d="M104 40 L134 40"/><path d="M222 40 L252 40"/><path d="M340 40 L370 40"/>
+    <path d="M458 40 L488 40"/><path d="M576 40 L606 40"/>
+    <path d="M653 62 L653 88 L60 88 L60 114"/>
+    <path d="M104 130 L134 130"/><path d="M222 130 L252 130"/><path d="M340 130 L370 130"/>
+    <path d="M436 152 L436 190"/>
+    <path d="M436 246 L436 272"/>
+  </g>
+
+  <g font-size="9">
+    <!-- row 1 -->
+    <rect x="8" y="22" width="96" height="36" rx="3" fill="#dde5f6" stroke="#2d6cb5"/>
+    <text x="56" y="38" text-anchor="middle" fill="#12325a" font-weight="bold">Public form</text>
+    <text x="56" y="51" text-anchor="middle" fill="#1c4a80" font-size="8">hosted by n8n</text>
+
+    <rect x="134" y="22" width="88" height="36" rx="3" fill="#f5f8fb" stroke="#c8d2e0"/>
+    <text x="178" y="38" text-anchor="middle" fill="#24344a">Normalise</text>
+    <text x="178" y="51" text-anchor="middle" fill="#5a6478" font-size="8">email, phone</text>
+
+    <rect x="252" y="22" width="88" height="36" rx="3" fill="#f5f8fb" stroke="#c8d2e0"/>
+    <text x="296" y="38" text-anchor="middle" fill="#24344a">Find person</text>
+    <text x="296" y="51" text-anchor="middle" fill="#5a6478" font-size="8">dedupe by email</text>
+
+    <rect x="370" y="22" width="88" height="36" rx="3" fill="#eefaf3" stroke="#1e7a4a"/>
+    <text x="414" y="38" text-anchor="middle" fill="#1d5c2e">Create/update</text>
+    <text x="414" y="51" text-anchor="middle" fill="#1d5c2e" font-size="8">person</text>
+
+    <rect x="488" y="22" width="88" height="36" rx="3" fill="#eefaf3" stroke="#1e7a4a"/>
+    <text x="532" y="38" text-anchor="middle" fill="#1d5c2e">Match company</text>
+    <text x="532" y="51" text-anchor="middle" fill="#1d5c2e" font-size="8">by email domain</text>
+
+    <rect x="606" y="22" width="86" height="36" rx="3" fill="#d9ead8" stroke="#1e7a4a" stroke-width="1.3"/>
+    <text x="649" y="38" text-anchor="middle" fill="#1d5c2e" font-weight="bold">Consent</text>
+    <text x="649" y="51" text-anchor="middle" fill="#1d5c2e" font-size="8">record written</text>
+
+    <!-- row 2 -->
+    <rect x="8" y="112" width="96" height="36" rx="3" fill="#f5f8fb" stroke="#c8d2e0"/>
+    <text x="56" y="128" text-anchor="middle" fill="#24344a">Score</text>
+    <text x="56" y="141" text-anchor="middle" fill="#5a6478" font-size="8">transparent rules</text>
+
+    <rect x="134" y="112" width="88" height="36" rx="3" fill="#f5f8fb" stroke="#c8d2e0"/>
+    <text x="178" y="128" text-anchor="middle" fill="#24344a">Assign owner</text>
+    <text x="178" y="141" text-anchor="middle" fill="#5a6478" font-size="8">round-robin</text>
+
+    <rect x="252" y="112" width="88" height="36" rx="3" fill="#eefaf3" stroke="#1e7a4a"/>
+    <text x="296" y="128" text-anchor="middle" fill="#1d5c2e">Raise task</text>
+    <text x="296" y="141" text-anchor="middle" fill="#1d5c2e" font-size="8">with due date</text>
+
+    <rect x="370" y="112" width="132" height="36" rx="3" fill="#dde5f6" stroke="#2d6cb5" stroke-width="1.3"/>
+    <text x="436" y="128" text-anchor="middle" fill="#12325a" font-weight="bold">Send sub-workflow</text>
+    <text x="436" y="141" text-anchor="middle" fill="#1c4a80" font-size="8">the only path to SMTP</text>
+  </g>
+
+  <!-- consent gate -->
+  <rect x="330" y="190" width="212" height="56" rx="4" fill="#fdf8ec" stroke="#b8860b" stroke-width="1.4"/>
+  <text x="436" y="209" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#8a4b06">CONSENT GATE</text>
+  <text x="436" y="224" text-anchor="middle" font-size="8.5" fill="#8a4b06">Latest consent record for this person</text>
+  <text x="436" y="237" text-anchor="middle" font-size="8.5" fill="#8a4b06">and this channel. No way around it.</text>
+
+  <g stroke="#5a6478" stroke-width="1.2" fill="none">
+    <path d="M436 246 L436 262 L214 262 L214 276" marker-end="url(#ar)"/>
+    <path d="M436 246 L436 262 L620 262 L620 276" marker-end="url(#ar)"/>
+  </g>
+
+  <rect x="120" y="276" width="188" height="34" rx="3" fill="#eefaf3" stroke="#1e7a4a"/>
+  <text x="214" y="292" text-anchor="middle" font-size="9" font-weight="bold" fill="#1d5c2e">OPTED_IN → send</text>
+  <text x="214" y="304" text-anchor="middle" font-size="8" fill="#1d5c2e">logged to messageLog as SENT</text>
+
+  <rect x="526" y="276" width="188" height="34" rx="3" fill="#fbf0f0" stroke="#a02c2c"/>
+  <text x="620" y="292" text-anchor="middle" font-size="9" font-weight="bold" fill="#a02c2c">anything else → refuse</text>
+  <text x="620" y="304" text-anchor="middle" font-size="8" fill="#a02c2c">logged with the reason</text>
+</svg>
+<figcaption>Figure 2 · Lead capture, end to end. The consent gate sits inside the
+send sub-workflow rather than in each calling workflow — a workflow author
+cannot forget it, because they never touch SMTP directly. Both outcomes are
+written to the CRM, so a refusal is evidence rather than silence.</figcaption>
+</figure>
+
 
 <h3>15.1 Inbound lead → qualified, assigned, acknowledged</h3>
 
