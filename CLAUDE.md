@@ -102,6 +102,12 @@ off a public URL. The generator lints for it.
   A bare string is a 400; a plain `body` key is not a field.
 - Default opportunity stages are `NEW, SCREENING, MEETING, PROPOSAL, CUSTOMER`.
   There is no `WON`.
+- `seed_demo_data.py --wipe` deletes **only** seeded data, identified by the
+  `.example.com` addresses (RFC 2606), the `[demo]` task prefix, and any foreign
+  key pointing at a seeded parent — company, person *or* training account. Match
+  on `companyId` alone and consent records and phishing baselines are missed,
+  because they hang off a person and a training account; they then accumulate on
+  every reseed. With no seeded parent found it deletes nothing, by design.
 
 ### n8n facts learned the hard way
 

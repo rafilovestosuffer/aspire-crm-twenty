@@ -163,7 +163,7 @@ class Twenty:
                 return v
         return []
 
-    def find_seeded(self, plural: str, company_ids: set[str]) -> list[dict]:
+    def find_seeded(self, plural: str, parent_ids: set[str]) -> list[dict]:
         """
         Only records this script created.
 
@@ -184,12 +184,16 @@ class Twenty:
             return self.query(plural, "emails.primaryEmail[ilike]:%.example.com%")
         if plural == "tasks":
             return self.query(plural, f"title[ilike]:%{MARK}%")
-        # Children of a seeded company. Without any seeded company there is
-        # nothing of ours to remove, so removing nothing is the right answer.
-        if not company_ids:
+        # Everything else is a child. Match on ANY foreign key pointing at a
+        # seeded parent, not `companyId` alone: consent records hang off a
+        # person and phishing baselines off a training account, so a
+        # company-only match silently deleted none of them and they accumulated
+        # on every reseed until the object was full of duplicates.
+        if not parent_ids:
             return []
         return [r for r in self.query(plural)
-                if r.get("companyId") in company_ids]
+                if any(k.endswith("Id") and v in parent_ids
+                       for k, v in r.items() if isinstance(v, str))]
 
 
 def read_env() -> dict[str, str]:
@@ -398,17 +402,28 @@ def main() -> int:
 
     if args.wipe:
         print("Wiping previously seeded records...")
-        # Resolve the seeded companies first: the child objects are identified
-        # by pointing at one, and companies must be deleted last.
-        seeded_companies = {c["id"] for c in api.find_seeded("companies", set())}
+        # Resolve every seeded parent first, while they still exist: children
+        # are identified by pointing at one, and the parents are deleted last.
+        # Training accounts are themselves children of a seeded company, and
+        # phishing baselines hang off them, so resolve in that order.
+        parents = {c["id"] for c in api.find_seeded("companies", set())}
+        parents |= {p_["id"] for p_ in api.find_seeded("people", set())}
+        parents |= {t_["id"] for t_ in api.find_seeded("trainingAccounts", parents)}
         for plural in ("phishingBaselines", "consentRecords", "trainingAccounts",
                        "complianceEngagements", "serviceSubscriptions",
                        "opportunities", "tasks", "people", "companies"):
-            rows = api.find_seeded(plural, seeded_companies)
+            # A page holds 200 rows and the metadata API cannot be paged, so
+            # sweep repeatedly until a pass finds nothing. Without this the
+            # wipe silently stops at the first page and "wiped" is a lie for
+            # any object holding more than that.
             n = 0
-            for r in rows:
-                api.call("DELETE", f"/rest/{plural}/{r['id']}")
-                n += 1
+            for _ in range(20):
+                rows = api.find_seeded(plural, parents)
+                if not rows:
+                    break
+                for r in rows:
+                    api.call("DELETE", f"/rest/{plural}/{r['id']}")
+                    n += 1
             print(f"  {plural:24} {n} deleted")
         print()
 
