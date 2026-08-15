@@ -56,6 +56,12 @@ RESET = "\033[0m"
 # the workflow stopped working. Status that outlives its evidence is exactly
 # what this script exists to prevent.
 EXPLICIT: dict[str, tuple[str, str]] = {
+    # n8n shows both the workflow list and every step's internals in its
+    # editor — the exact thing GoHighLevel's API refuses to expose, which is
+    # what made this audit hard (docs/02). Native, not outstanding work.
+    "WF-01": (NATIVE, "n8n workflow list"),
+    "WF-02": (NATIVE, "n8n editor — full step internals, unlike GHL"),
+
     # Twenty does these natively; they need configuration, not building.
     "CT-01": (NATIVE, "Twenty saved views"),
     "CT-02": (NATIVE, "Twenty bulk edit"),
@@ -133,6 +139,22 @@ OBJECT_FEATURES = {
 # Features satisfied by the provisioned data model itself.
 MODEL_FEATURES = ["DM-01", "DM-02", "DM-03", "DM-06", "OP-01"]
 
+# Automation *capabilities* are evidenced by the node types that actually ran.
+# A workflow with a successful execution containing an `if` node is proof that
+# conditional branching works here — stronger evidence than any checklist, and
+# it stops these reading as unbuilt when they are demonstrably in daily use.
+# Keyed by n8n node type, without the `n8n-nodes-base.` prefix.
+NODE_FEATURES: dict[str, list[str]] = {
+    "if":              ["WF-04", "WF-06"],   # branching; goal/exit conditions
+    "switch":          ["WF-04"],
+    "code":            ["WF-07", "WF-09"],   # formulas; custom code
+    "httpRequest":     ["WF-08"],            # outbound webhooks
+    "webhook":         ["WF-03", "IN-04"],   # triggers; inbound webhooks
+    "scheduleTrigger": ["WF-03", "EM-09"],   # triggers; scheduled sends
+    "formTrigger":     ["WF-03"],
+    "wait":            ["WF-05"],            # delay steps
+}
+
 
 def read_env() -> dict[str, str]:
     env: dict[str, str] = {}
@@ -171,10 +193,15 @@ def _assert_no_asserted_live() -> None:
             + " — LIVE may only come from probing the running stack.")
 
 
-def probe_live(env: dict[str, str]) -> tuple[set[str], dict[str, bool], str]:
-    """Ask the running stack what exists. Returns (objects, workflow->ran, note)."""
+def probe_live(env: dict[str, str]):
+    """
+    Ask the running stack what exists.
+
+    Returns (objects, workflow->ran, proven node types, note).
+    """
     objects: set[str] = set()
     ran: dict[str, bool] = {}
+    node_types: set[str] = set()
 
     base = env.get("TWENTY_BASE_URL") or env.get("SERVER_URL") or "http://localhost:3000"
     key = env.get("TWENTY_API_KEY", "")
@@ -206,7 +233,18 @@ def probe_live(env: dict[str, str]) -> tuple[set[str], dict[str, bool], str]:
                         succeeded.add(names.get(e.get("workflowId"), ""))
             for wid, name in names.items():
                 ran[name] = name in succeeded
-    return objects, ran, note
+            # Node types inside workflows that actually completed.
+            by_id = {}
+            try:
+                by_id = {w["id"]: w for w in json.loads(wf_body)["data"]}
+            except Exception:  # noqa: BLE001
+                pass
+            for wid, name in names.items():
+                if name in succeeded:
+                    for n in by_id.get(wid, {}).get("nodes", []):
+                        node_types.add(str(n.get("type", ""))
+                                       .replace("n8n-nodes-base.", ""))
+    return objects, ran, node_types, note
 
 
 def main() -> int:
@@ -216,7 +254,7 @@ def main() -> int:
 
     _assert_no_asserted_live()
     env = read_env()
-    live_objects, workflow_ran, note = probe_live(env)
+    live_objects, workflow_ran, live_nodes, note = probe_live(env)
 
     slug_to_name = {
         "sys-error-handler": "SYS Error Handler",
@@ -250,6 +288,11 @@ def main() -> int:
             if exists:
                 claim(fid, LIVE if proven else BUILT,
                       f"workflow `{slug}`" + ("" if proven else " — never executed"))
+
+    for ntype, feats in NODE_FEATURES.items():
+        if ntype in live_nodes:
+            for fid in feats:
+                claim(fid, LIVE, f"`{ntype}` node ran in a successful execution")
 
     for fid, (st, why) in EXPLICIT.items():
         status[fid] = (st, why)

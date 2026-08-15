@@ -227,6 +227,7 @@ out/*
 !out/.gitkeep
 !out/feature_audit.csv
 !out/implementation_status.md
+!out/restore_verification.json
 !out/*.pdf
 docs/migration-guide/_combined.html
 .session_curl.txt

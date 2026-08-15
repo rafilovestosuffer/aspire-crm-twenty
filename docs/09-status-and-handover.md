@@ -151,9 +151,12 @@ is terminated. Export it and reconcile the count exactly, before any termination
 date is agreed. Emailing someone who opted out is a compliance incident, and
 Aspire sells compliance.
 
-**No backup here has ever been restored.** Backups run nightly. An untested
-backup is not a backup. Restoring one into a scratch database, and recording the
-date it was done, is a Phase 5 gate, not a nice-to-have.
+**Backups are restore-tested.** `scripts/verify_restore.py` dumps a database,
+restores it into a scratch database, counts rows in both and compares exactly,
+then drops the scratch copy. Both databases verified — Twenty 4,045 rows and
+n8n 1,364, restored exactly. The date of the last successful restore is recorded
+in `out/restore_verification.json`. Re-run it monthly; an untested backup is not
+a backup.
 
 Keep GoHighLevel read-only for 30–60 days after cutover.
 
