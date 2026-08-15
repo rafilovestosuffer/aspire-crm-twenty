@@ -1,0 +1,529 @@
+<title>Aspire CRM Handover</title>
+<style>
+  /* Light palette is the base. Neutrals carry a slight teal bias so they sit
+     with the petrol accent rather than reading as default grey. */
+  :root {
+    --paper:      #FAFBFB;
+    --surface:    #FFFFFF;
+    --sunken:     #F1F4F5;
+    --ink:        #0E1417;
+    --slate:      #59666B;
+    --rule:       #DCE3E5;
+    --rule-soft:  #E9EEEF;
+    --accent:     #0F6E8C;
+    --accent-dim: #E2EFF4;
+    --live:       #1E7A4D;
+    --live-dim:   #E1F0E8;
+    --warn:       #B0741F;
+    --warn-dim:   #F6EBDB;
+    --muted-dim:  #E6EAEB;
+    --shadow:     0 1px 2px rgba(14, 20, 23, .05), 0 8px 24px -12px rgba(14, 20, 23, .12);
+
+    --display: Georgia, "Iowan Old Style", "Times New Roman", ui-serif, serif;
+    --body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+
+  /* Un-stamped root follows the OS; an explicit light choice still wins. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1417;
+      --surface:    #161F23;
+      --sunken:     #1B252A;
+      --ink:        #E6EDEF;
+      --slate:      #97A6AB;
+      --rule:       #2A363B;
+      --rule-soft:  #212C31;
+      --accent:     #5FBAD6;
+      --accent-dim: #16323C;
+      --live:       #58B583;
+      --live-dim:   #163023;
+      --warn:       #D9A24A;
+      --warn-dim:   #322613;
+      --muted-dim:  #242F34;
+      --shadow:     0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+    }
+  }
+  /* Explicit dark choice wins over a light OS. */
+  :root[data-theme="dark"] {
+    --paper:      #0E1417;
+    --surface:    #161F23;
+    --sunken:     #1B252A;
+    --ink:        #E6EDEF;
+    --slate:      #97A6AB;
+    --rule:       #2A363B;
+    --rule-soft:  #212C31;
+    --accent:     #5FBAD6;
+    --accent-dim: #16323C;
+    --live:       #58B583;
+    --live-dim:   #163023;
+    --warn:       #D9A24A;
+    --warn-dim:   #322613;
+    --muted-dim:  #242F34;
+    --shadow:     0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: clamp(2rem, 5vw, 4.5rem) clamp(1.1rem, 5vw, 2rem) 6rem;
+  }
+
+  .wrap { max-width: 68ch; margin: 0 auto; display: flex; flex-direction: column; gap: 3.25rem; }
+
+  /* ---------- masthead ---------- */
+  .masthead { display: flex; flex-direction: column; gap: .9rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .72rem; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--accent); margin: 0;
+  }
+  h1 {
+    font-family: var(--display);
+    font-size: clamp(2.1rem, 5.5vw, 3rem);
+    line-height: 1.12; letter-spacing: -.015em;
+    text-wrap: balance; margin: 0; font-weight: 700;
+  }
+  .standfirst { font-size: 1.075rem; color: var(--slate); margin: 0; max-width: 58ch; }
+  .meta {
+    font-family: var(--mono); font-size: .76rem; color: var(--slate);
+    border-top: 1px solid var(--rule); padding-top: .85rem; margin: .4rem 0 0;
+  }
+
+  /* ---------- sections ---------- */
+  section { display: flex; flex-direction: column; gap: 1.05rem; }
+  h2 {
+    font-family: var(--display);
+    font-size: clamp(1.4rem, 3.2vw, 1.75rem);
+    line-height: 1.2; letter-spacing: -.01em; text-wrap: balance;
+    margin: 0; font-weight: 700;
+    display: flex; align-items: baseline; gap: .7rem;
+  }
+  /* The numbers are real cross-references — §7 cites §6 — not decoration. */
+  h2 .num {
+    font-family: var(--mono); font-size: .82rem; font-weight: 400;
+    color: var(--accent); letter-spacing: .04em;
+    flex: none; padding-top: .1rem;
+  }
+  h3 {
+    font-family: var(--body); font-size: 1rem; font-weight: 650;
+    letter-spacing: .005em; margin: .6rem 0 0;
+  }
+  p { margin: 0; }
+  strong { font-weight: 650; }
+  em { font-style: italic; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px;
+  }
+  code {
+    font-family: var(--mono); font-size: .85em;
+    background: var(--sunken); border: 1px solid var(--rule-soft);
+    border-radius: 4px; padding: .1em .35em;
+  }
+
+  /* ---------- status bar ---------- */
+  .scorecard {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 1.4rem 1.5rem 1.5rem;
+    display: flex; flex-direction: column; gap: 1.1rem; box-shadow: var(--shadow);
+  }
+  .scorecard .lede { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1rem; }
+  .bignum {
+    font-family: var(--mono); font-size: 2.1rem; font-weight: 600;
+    letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .bignum-label { font-size: .95rem; color: var(--slate); }
+
+  .bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; gap: 2px; }
+  .bar span { display: block; }
+  .seg-live { background: var(--live); }
+  .seg-native { background: var(--accent); }
+  .seg-modelled { background: color-mix(in srgb, var(--accent) 45%, var(--paper)); }
+  .seg-designed { background: var(--warn); }
+  .seg-deferred { background: color-mix(in srgb, var(--slate) 40%, var(--paper)); }
+
+  .legend {
+    list-style: none; margin: 0; padding: 0;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .55rem 1.1rem;
+  }
+  .legend li { display: flex; align-items: baseline; gap: .5rem; font-size: .84rem; }
+  .dot { width: 9px; height: 9px; border-radius: 2px; flex: none; transform: translateY(-1px); }
+  .legend .n {
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    font-weight: 600; margin-left: auto;
+  }
+  .legend .t { color: var(--slate); }
+
+  /* ---------- tables ---------- */
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: .6rem .8rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--slate); font-weight: 500;
+    border-bottom: 1px solid var(--rule); white-space: nowrap;
+  }
+  td:first-child { font-weight: 550; }
+  tbody tr:last-child td { border-bottom: none; }
+  .num-cell {
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    white-space: nowrap; font-weight: 600;
+  }
+
+  /* ---------- chips + callouts ---------- */
+  .chip {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .07em;
+    text-transform: uppercase; padding: .17em .5em; border-radius: 4px;
+    white-space: nowrap; font-weight: 600;
+  }
+  .chip-live { background: var(--live-dim); color: var(--live); }
+  .chip-warn { background: var(--warn-dim); color: var(--warn); }
+  .chip-done { background: var(--accent-dim); color: var(--accent); }
+  .chip-muted { background: var(--muted-dim); color: var(--slate); }
+
+  .note {
+    border-left: 3px solid var(--accent); background: var(--sunken);
+    padding: .95rem 1.15rem; border-radius: 0 7px 7px 0;
+    display: flex; flex-direction: column; gap: .6rem; font-size: .95rem;
+  }
+  .note.risk { border-left-color: var(--warn); }
+  .note .label {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .11em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .note.risk .label { color: var(--warn); }
+
+  pre {
+    font-family: var(--mono); font-size: .82rem; line-height: 1.6;
+    background: var(--sunken); border: 1px solid var(--rule-soft);
+    border-radius: 8px; padding: .95rem 1.1rem; margin: 0; overflow-x: auto;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+
+  ul.plain { margin: 0; padding-left: 1.15rem; display: flex; flex-direction: column; gap: .45rem; }
+
+  footer {
+    border-top: 1px solid var(--rule); padding-top: 1.1rem;
+    font-family: var(--mono); font-size: .74rem; color: var(--slate);
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Aspire Tech · CRM Migration</p>
+    <h1>Off GoHighLevel, onto our own stack</h1>
+    <p class="standfirst">What exists, what is proven, and what is left. Every
+      number here is produced by a script that runs against the live system — so
+      when the system changes, this changes.</p>
+    <p class="meta">Twenty CRM + n8n · self-hosted · 25 of 25 automated checks passing</p>
+  </header>
+
+  <section>
+    <h2><span class="num">01</span> What this is</h2>
+    <p>Aspire's CRM is moving off GoHighLevel onto software we run ourselves:
+      <strong>Twenty</strong> for the CRM — contacts, companies, pipeline, and a
+      data model shaped like our actual business — and <strong>n8n</strong> for
+      automation: forms, lead routing, renewal chasing, email, alerting.</p>
+    <p>Both are open source. Both run on one server. The data lives in our own
+      database. The build is scripted end to end: one command takes an empty
+      machine to a working CRM with the automation running and verified.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span> Why move</h2>
+    <p><strong>GoHighLevel cannot model this business.</strong> It has contacts
+      and it has "deals". We sell recurring SOC subscriptions, CMMC engagements
+      with audit dates, and training accounts with seat counts and phishing
+      scores tracked over quarters. In GoHighLevel all of that flattens into
+      custom fields on a deal. Here they are real objects with real
+      relationships — so "which subscriptions renew in the next 90 days, and how
+      are their seats tracking" is a saved view, not a spreadsheet export.</p>
+    <p><strong>GoHighLevel hides its own automation history.</strong> No API
+      exposes what a workflow did, or whether it failed. That gap is what made
+      this audit hard, and it is why every automation here writes an
+      <code>automationRun</code> record back into the CRM. Every run, success and
+      failure, is queryable.</p>
+    <p><strong>We are a security company.</strong> Client data in a marketing
+      SaaS is a harder conversation than client data on infrastructure we
+      control, patch and back up.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span> What is built</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Component</th><th>Built</th></tr></thead>
+        <tbody>
+          <tr><td>Objects in the CRM</td><td class="num-cell">53 — 28 standard, 25 custom</td></tr>
+          <tr><td>Fields and relations</td><td class="num-cell">177 · 0 failures</td></tr>
+          <tr><td>Demo dataset</td><td class="num-cell">448 records, deterministic</td></tr>
+          <tr><td>Automations</td><td class="num-cell">6 live + 2 test-only</td></tr>
+          <tr><td>Automated checks</td><td class="num-cell">25 · all passing</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Four objects carry the business — <code>serviceSubscription</code>,
+      <code>complianceEngagement</code>, <code>trainingAccount</code>,
+      <code>phishingBaseline</code>. Two more carry the discipline:
+      <code>consentRecord</code> (who may be contacted, on which channel, with
+      proof) and <code>automationRun</code> (the execution history GoHighLevel
+      never exposed).</p>
+
+    <h3>The six workflows</h3>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Workflow</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td>Lead intake</td><td>Public form → dedupe → person + company → consent record → score → owner → task → acknowledgement → sales notification</td></tr>
+          <tr><td>Send email</td><td>The <em>only</em> path to SMTP. Checks consent, renders the template, logs the message. No other workflow may send directly</td></tr>
+          <tr><td>Renewal escalation</td><td>Daily. At 90/60/30/7 days before renewal, raises tasks and opportunities. GoHighLevel cannot do this — it has no subscription object</td></tr>
+          <tr><td>Tracked links</td><td>Counts the click, then redirects</td></tr>
+          <tr><td>Scheduled sweeps</td><td>Finds what did <em>not</em> happen — stale opportunities, no-shows, overdue invoices</td></tr>
+          <tr><td>Error handler</td><td>Catches any failure, records it, alerts, and suppresses alert storms</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">04</span> What "proven" means</h2>
+    <p>Deployed is not working. These workflows sat in n8n for weeks looking
+      correct and were completely broken — filters the CRM silently ignored, an
+      error handler wired to a name that resolved to nothing, consent records
+      created with no person attached. All of it looked fine in the editor.</p>
+    <p>So the verification does not check that workflows exist. It submits the
+      real form, follows the real redirect, breaks something on purpose,
+      triggers the real schedules, and then asks the CRM whether the records are
+      there.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Proves</th><th>Check</th></tr></thead>
+        <tbody>
+          <tr><td>Lead capture</td><td>Person, company, linked consent, scored task, acknowledgement <strong>to the right address</strong></td></tr>
+          <tr><td>Consent enforcement</td><td>Non-consenting contact → send <strong>refused</strong>, no mail, refusal logged with its reason</td></tr>
+          <tr><td>Click tracking</td><td>Redirect to the destination, click counted</td></tr>
+          <tr><td>Failure handling</td><td>A deliberate failure produces a FAILED record carrying the real error, and a delivered alert</td></tr>
+          <tr><td>Scheduled work</td><td>Renewals and sweeps run clean against the seeded data</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Run it any time. If something breaks later, it says so.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">05</span> Honest status</h2>
+    <p>111 GoHighLevel features were catalogued. Every one has a disposition.</p>
+
+    <div class="scorecard">
+      <div class="lede">
+        <span class="bignum">27<span style="color:var(--slate);font-weight:400">/111</span></span>
+        <span class="bignum-label">working or native today · <strong>nothing built but never run</strong></span>
+      </div>
+      <div class="bar" role="img" aria-label="16 live, 11 native, 22 modelled, 29 designed, 33 deferred, of 111 features">
+        <span class="seg-live"    style="width:14.4%"></span>
+        <span class="seg-native"  style="width:9.9%"></span>
+        <span class="seg-modelled" style="width:19.8%"></span>
+        <span class="seg-designed" style="width:26.1%"></span>
+        <span class="seg-deferred" style="width:29.7%"></span>
+      </div>
+      <ul class="legend">
+        <li><span class="dot seg-live"></span><span class="t">Live</span><span class="n">16</span></li>
+        <li><span class="dot seg-native"></span><span class="t">Native</span><span class="n">11</span></li>
+        <li><span class="dot seg-modelled"></span><span class="t">Modelled</span><span class="n">22</span></li>
+        <li><span class="dot seg-designed"></span><span class="t">Designed</span><span class="n">29</span></li>
+        <li><span class="dot seg-deferred"></span><span class="t">Deferred</span><span class="n">33</span></li>
+      </ul>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip chip-live">Live</span></td><td>Verified working on the running stack</td></tr>
+          <tr><td><span class="chip chip-done">Native</span></td><td>Twenty does it out of the box; needs configuration, not building</td></tr>
+          <tr><td><span class="chip chip-done">Modelled</span></td><td>The object exists to hold the data; no automation on it yet</td></tr>
+          <tr><td><span class="chip chip-warn">Designed</span></td><td>Specified in the replacement guide; nothing built</td></tr>
+          <tr><td><span class="chip chip-muted">Deferred</span></td><td>Deliberately out of scope, each with a recorded reason</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><strong>Nothing is "built but never run."</strong> That is the sentence
+      that matters. The dangerous category in any migration is code that exists,
+      looks finished, and has never executed. It is empty here.</p>
+    <p>The 33 deferred are mostly telephony — SMS, voice, IVR, call recording,
+      which need a licensed carrier and which we barely use — plus website and
+      funnel hosting (aspiretss.com stays where it is) and course delivery
+      (aspireelearning.com already does it). They are not gaps; they are
+      decisions.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">06</span> What it costs</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Item</th><th>Cost</th></tr></thead>
+        <tbody>
+          <tr><td>Twenty, n8n, Postgres, Redis</td><td class="num-cell">£0 — open source</td></tr>
+          <tr><td>Server</td><td>One VPS, 4–8 cores / 8–16 GB</td></tr>
+          <tr><td>Email under ~2,000/day</td><td class="num-cell">£0 — existing Workspace relay</td></tr>
+          <tr><td>Email above that</td><td class="num-cell">~$0.10 per 1,000 (SES)</td></tr>
+          <tr><td>Booking pages</td><td class="num-cell">£0 — Cal.com, self-hosted</td></tr>
+          <tr><td>Quotes and e-signature</td><td class="num-cell">£0 — DocuSeal, self-hosted</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>There is no irreducible third-party product.</strong> Every
+      GoHighLevel capability we use has a native answer, an n8n answer, or a
+      self-hostable one. The recurring GoHighLevel subscription is replaced by a
+      server bill.</p>
+    <p>The one number to measure before go-live is send volume, because it
+      decides whether the Workspace relay is enough. Everything else is settled.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">07</span> What is left</h2>
+    <p>Each phase has a gate. Do not start the next until it passes.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Phase</th><th>Work</th><th>Time</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip chip-live">Done</span></td><td>Prove the automation layer</td><td class="num-cell">—</td></tr>
+          <tr><td>2</td><td>Native config — connect a mailbox, saved views, roles</td><td class="num-cell">3 days</td></tr>
+          <tr><td>3</td><td>Cal.com booking + DocuSeal quotes and e-signature</td><td class="num-cell">1 week</td></tr>
+          <tr><td>4</td><td>Data migration — <strong>export the suppression list first</strong></td><td class="num-cell">1 week</td></tr>
+          <tr><td>5</td><td>Hardening — VPS, TLS, monitoring, <strong>a tested restore</strong>, runbook, second operator</td><td class="num-cell">1 week</td></tr>
+          <tr><td>6</td><td>Parallel run, reconcile daily, cut over</td><td class="num-cell">2–3 weeks</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong>6–8 weeks to production</strong>, with a demonstrable system from
+      week one.</p>
+
+    <div class="note risk">
+      <span class="label">Unrecoverable if missed</span>
+      <p><strong>The consent list does not come back.</strong> GoHighLevel's
+        suppression list — everyone who has unsubscribed or bounced — is lost
+        when the account terminates. Export it and reconcile the count exactly
+        before any termination date is agreed. Emailing someone who opted out is
+        a compliance incident, and we sell compliance.</p>
+    </div>
+    <div class="note risk">
+      <span class="label">Not yet true</span>
+      <p><strong>No backup here has ever been restored.</strong> Backups run
+        nightly, but an untested backup is not a backup. Restoring one into a
+        scratch database, and recording the date, is a Phase 5 gate — not a
+        nice-to-have. Keep GoHighLevel read-only for 30–60 days after cutover.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">08</span> Running it</h2>
+    <p>Docker, 6 GB of free RAM, Python 3.9+.</p>
+<pre><code>git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
+cd aspire-crm-twenty
+./infra/rebuild.sh</code></pre>
+    <p>Eleven gated steps, about twelve minutes, stopping at the first failure:
+      stack up → verify every layer → create the workspace → object model → demo
+      data → credentials → validate every CRM API call against the live schema →
+      deploy and activate → <strong>run the workflows and check what they
+      did</strong> → verify every layer again.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Service</th><th>Address</th></tr></thead>
+        <tbody>
+          <tr><td>CRM</td><td class="num-cell">localhost:3000</td></tr>
+          <tr><td>Automation</td><td class="num-cell">localhost:5678</td></tr>
+          <tr><td>Mail catcher</td><td class="num-cell">localhost:8025</td></tr>
+          <tr><td>Public form</td><td class="num-cell">localhost:5678/form/aspire-contact</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Nothing leaves the machine. Email goes to a local catcher, so the send
+      path runs for real with no mail account and no chance of reaching a live
+      contact.</p>
+    <div class="note">
+      <span class="label">Before anything else</span>
+      <p>Back up <code>ENCRYPTION_KEY</code> and <code>N8N_ENCRYPTION_KEY</code>
+        somewhere other than the laptop. Lose the first and every secret the CRM
+        holds becomes permanently unreadable. There is no recovery path. Change
+        the default login before the machine is on a shared network.</p>
+    </div>
+    <h3>Moving to the company server</h3>
+    <p>The laptop stack and the server stack are the same files — nothing is
+      thrown away and nothing is untested at cutover. The server overlay binds
+      both ports to loopback so only the reverse proxy reaches them; set the real
+      hostnames, point alerts at the real chat webhook, and terminate TLS at the
+      proxy. Several features require a secure context.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">09</span> The demo, in ten minutes</h2>
+    <p>Order matters. Lead with the data model, land on the live form.</p>
+    <ul class="plain">
+      <li>A company record — people, subscription, compliance engagement,
+        training account, phishing trend. <em>"GoHighLevel can't model any of
+        this. It forces everything into a deal."</em></li>
+      <li>Renewals in the next 90 days, the pipeline, seats near capacity.
+        <em>"Renewal exposure and upsell signals, both one click."</em></li>
+      <li>A contact timeline with a real email thread and calendar event.
+        <em>"This is where the inbox went. Native, syncs every five
+        minutes."</em></li>
+      <li><strong>Fill the public form live on screen.</strong> The person
+        appears scored and assigned, a task is raised, the acknowledgement sends.
+        <em>"That form is hosted by our own stack. No third-party tool."</em></li>
+      <li>Try to send to an opted-out contact. It refuses and logs why.
+        <em>"This is the control we tell clients to implement."</em></li>
+      <li>Run the renewal escalation. <em>"GoHighLevel cannot do this — it has
+        no subscription object."</em></li>
+      <li>The automation-run view. <em>"Every run, success and failure.
+        GoHighLevel exposes no execution history at all — that gap is what made
+        the audit hard."</em></li>
+    </ul>
+    <p>Watching a record appear from a form submission does more than any
+      document.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">10</span> Hard questions</h2>
+
+    <h3>Is this a hobby project that will break?</h3>
+    <p>Every claim here is produced by a script that runs against the live
+      system. The build has three gates: the workflow generator refuses to emit
+      code that would fail at runtime, a validator checks all 28 CRM API calls
+      against the live schema, and 25 checks exercise the real paths. Together
+      they caught more than twenty defects — several of which would have been
+      silent in production.</p>
+
+    <h3>What happens when Rafi is on holiday?</h3>
+    <p>Today, that is a real risk. It is a Phase 5 gate: a runbook plus a second
+      named operator who has completed one task from it unaided. Do not skip it.</p>
+
+    <h3>What if Twenty disappears?</h3>
+    <p>The data is in our own database and can be dumped to CSV or SQL at any
+      time. That is strictly better than the current position, where the data is
+      in someone else's SaaS.</p>
+
+    <h3>Why not just keep GoHighLevel?</h3>
+    <p>Because it cannot model subscriptions, compliance engagements or training
+      seats; because it will not tell us what its own automation did; and because
+      it costs a recurring fee for a system we cannot inspect. The replacement
+      runs on one server.</p>
+  </section>
+
+  <footer>
+    Figures from <code>implementation_audit.py</code> and
+    <code>prove_workflows.py</code>, run against the live stack. Re-run either to
+    refresh this page's numbers.
+  </footer>
+
+</div>

@@ -20,6 +20,7 @@ the recipe; Docker runs the kitchen.
 | [`docs/03-replacement-stack.md`](docs/03-replacement-stack.md) | What "no GHL in Phase 1" actually requires. 52 ESCALATE rows → 8 vendor decisions |
 | [`docs/04-manual-sweep.md`](docs/04-manual-sweep.md) | Tier 5 checklist for everything no API serves |
 | [`docs/06-twenty-object-model.md`](docs/06-twenty-object-model.md) | The 25-object GHL parity model provisioned into Twenty |
+| [`docs/09-status-and-handover.md`](docs/09-status-and-handover.md) | **Start here.** What exists, what is proven, what is left, what it costs, how to run it |
 | [`docs/07-build-plan.md`](docs/07-build-plan.md) | **The build plan.** What Twenty + n8n alone delivers, and the sprint sequence |
 | [`CLAUDE.md`](CLAUDE.md) | Operating rules. Read-only, no PII, rate limits |
 

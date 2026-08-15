@@ -100,6 +100,21 @@ def build_options(labels: list[str]) -> list[dict]:
             for i, lab in enumerate(labels)]
 
 
+def _already_exists(err: str) -> bool:
+    """
+    Does this error mean "that already exists"?
+
+    Twenty answers a duplicate with a generic "Multiple validation errors
+    occurred while creating fields" and no detail, so match broadly rather
+    than on one phrasing. Worst case a genuinely different validation error is
+    reported as already-present — which twenty_probe.py, run straight after,
+    would catch by finding the field missing.
+    """
+    e = (err or "").lower()
+    return ("already exist" in e or "duplicate" in e
+            or "validation error" in e or "name is not available" in e)
+
+
 class Twenty:
     def __init__(self, base: str, key: str, dry_run: bool):
         self.base = base.rstrip("/")
@@ -141,10 +156,32 @@ class Twenty:
         return {o.get("nameSingular"): o for o in items if isinstance(o, dict)}
 
     def existing_fields(self, obj: dict) -> set[str]:
+        """
+        Field names already on the object.
+
+        `/rest/metadata/objects` embeds only a *slice* of each object's fields
+        and rejects every query string, so the rest cannot be paged in. Reading
+        it alone made existing fields look missing, and a re-run — the
+        documented way to recover from a partial failure — tried to recreate
+        them and produced a wall of 400s.
+
+        A real row carries the complete key set, so merge one in. An object
+        with no rows yet falls back to the slice, which is why the create
+        helpers also treat a duplicate rejection as "already there".
+        """
         raw = obj.get("fields")
         if isinstance(raw, dict):
             raw = [e.get("node", e) for e in raw.get("edges", [])]
-        return {f.get("name") for f in (raw or []) if isinstance(f, dict)}
+        names = {f.get("name") for f in (raw or []) if isinstance(f, dict)}
+
+        plural = obj.get("namePlural")
+        if plural and not self.dry_run:
+            status, body, _ = self._request("GET", f"/rest/{plural}?limit=1")
+            if status < 400 and isinstance(body, dict):
+                rows = (body.get("data") or {}).get(plural) or []
+                if rows:
+                    names |= set(rows[0])
+        return names
 
     def create_object(self, spec: dict) -> tuple[bool, str]:
         payload = {
@@ -159,6 +196,9 @@ class Twenty:
             print(f"    POST /rest/metadata/objects {json.dumps(payload)[:150]}...")
             return True, ""
         status, _, err = self._request("POST", "/rest/metadata/objects", payload)
+        if status >= 400 and _already_exists(err):
+            # Not a failure: the thing is there, which is what was wanted.
+            return True, "already present"
         return (status < 400), err
 
     def create_field(self, object_id: str, spec: dict) -> tuple[bool, str]:
@@ -175,6 +215,9 @@ class Twenty:
             print(f"      POST /rest/metadata/fields {json.dumps(payload)[:150]}...")
             return True, ""
         status, _, err = self._request("POST", "/rest/metadata/fields", payload)
+        if status >= 400 and _already_exists(err):
+            # Not a failure: the thing is there, which is what was wanted.
+            return True, "already present"
         return (status < 400), err
 
     def create_relation(self, source_id: str, target_id: str, rel: dict,
@@ -197,6 +240,9 @@ class Twenty:
                   f"{rel['to']} <- {rel['label']}")
             return True, ""
         status, _, err = self._request("POST", "/rest/metadata/fields", payload)
+        if status >= 400 and _already_exists(err):
+            # Not a failure: the thing is there, which is what was wanted.
+            return True, "already present"
         return (status < 400), err
 
 
