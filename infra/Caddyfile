@@ -1,0 +1,76 @@
+# Reverse proxy and TLS for the VPS deployment.
+#
+# Caddy obtains and renews Let's Encrypt certificates automatically — there is
+# no certbot, no renewal cron, and no certificate to forget about. It needs
+# ports 80 and 443 reachable from the internet and the DNS records already
+# pointing here; the HTTP-01 challenge fails otherwise and the site stays on
+# the internal name.
+#
+# Domains come from infra/.env:
+#   CRM_DOMAIN=crm.aspiretss.com
+#   AUTOMATION_DOMAIN=auto.aspiretss.com
+#   ACME_EMAIL=it@aspiretss.com
+#
+# Upstreams are addressed by compose service name, not localhost: Caddy runs in
+# the same network, and the app ports are bound to 127.0.0.1 on the host so
+# nothing but this proxy can reach them.
+{
+	email {$ACME_EMAIL}
+	# Uncomment to rehearse against Let's Encrypt's staging CA, which has far
+	# looser rate limits. Certificates will not be trusted by browsers — that
+	# is expected, and the point is proving the challenge completes before
+	# spending a real-CA rate limit on a misconfigured DNS record.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# Applied to both sites below.
+(hardening) {
+	encode zstd gzip
+
+	header {
+		# HSTS. Only meaningful once the certificate is real — a browser that
+		# sees this over a bad certificate will refuse the site until the max-age
+		# expires, so leave the preload directive off until you are certain.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# The proxy terminates TLS; do not advertise what is behind it.
+		-Server
+	}
+}
+
+{$CRM_DOMAIN} {
+	import hardening
+	# Twenty streams file uploads and long GraphQL responses; the default
+	# flush interval buffers them and the UI appears to hang on large imports.
+	reverse_proxy server:3000 {
+		flush_interval -1
+	}
+}
+
+{$AUTOMATION_DOMAIN} {
+	import hardening
+
+	# The public form and inbound webhooks are the only paths that need to be
+	# reachable without authentication. Everything else on this host is the n8n
+	# editor, which holds every credential in the stack — exposing it to the
+	# internet is the single largest avoidable risk in this deployment.
+	#
+	# Restrict the editor to the office and VPN ranges. Replace these with the
+	# real ones; as written they match nothing routable and will lock you out,
+	# which is the safer direction to fail in.
+	# Public paths: the form, inbound webhooks, and the OAuth callback.
+	@public path /webhook/* /webhook-test/* /form/* /rest/oauth2-credential/*
+	handle @public {
+		reverse_proxy n8n:5678
+	}
+
+	# Everything else is the editor. Anything not from a trusted network is
+	# refused before it reaches n8n.
+	handle {
+		@untrusted not remote_ip 203.0.113.0/24 198.51.100.0/24
+		respond @untrusted "Not available from this network" 403
+		reverse_proxy n8n:5678
+	}
+}

@@ -7,6 +7,35 @@
 # Everything else — including which image tag runs — stays in infra/.env.
 
 services:
+
+  # TLS terminates here. Caddy gets and renews Let's Encrypt certificates on
+  # its own — no certbot, no renewal cron, nothing to forget. It is the only
+  # service publishing a public port; everything else is bound to loopback
+  # below and reachable only across the compose network.
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on: [server, n8n]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"        # HTTP/3
+    environment:
+      CRM_DOMAIN: ${CRM_DOMAIN:?set CRM_DOMAIN in infra/.env}
+      AUTOMATION_DOMAIN: ${AUTOMATION_DOMAIN:?set AUTOMATION_DOMAIN in infra/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in infra/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys. Losing this volume means
+      # re-issuing on next start, which burns Let's Encrypt rate limit.
+      - caddy-data:/data
+      - caddy-config:/config
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   server:
     ports:
       - "127.0.0.1:${TWENTY_PORT:-3000}:3000"
@@ -15,3 +44,7 @@ services:
       - "127.0.0.1:${N8N_PORT:-5678}:5678"
     environment:
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+
+volumes:
+  caddy-data:
+  caddy-config:
