@@ -177,7 +177,12 @@ def check_call(obj: str, query: str, schema: dict[str, dict],
                                     f"array — `[A,B]` — a bare list is a 400")
                     continue
                 value = tail[1:tail.find("]")] if "]" in tail else tail[1:]
-            opts = fields[root]["options"]
+            # `root` may have been confirmed by the live probe rather than
+            # found in `fields` — that is the whole point of the probe — so it
+            # is not necessarily a key here. Indexing it directly crashed the
+            # gate on a fresh stack, where an object with no rows yet cannot be
+            # enriched from a sample and the metadata slice omitted the field.
+            opts = fields.get(root, {}).get("options") or []
             if opts and value and not PLACEHOLDER.search(value):
                 for v in (x.strip() for x in value.split(",")):
                     if v and v not in opts:
