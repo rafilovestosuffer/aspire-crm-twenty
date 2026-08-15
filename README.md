@@ -81,7 +81,9 @@ scripts/implementation_audit.py      per-feature status, measured not claimed
 n8n/workflows/                       8 workflows — 6 real, 2 dev-only (alert sink, failure probe)
 infra/docker-compose.yml             Twenty + n8n + Postgres + Redis + backups
 infra/up.sh                          one-command bring-up, generates secrets
-infra/rebuild.sh                     zero to proven, every step a gate
+infra/rebuild.sh                     zero to proven, every step a gate (demo machine)
+infra/preflight.sh                   is this server ready? run before deploying
+infra/deploy.sh                      one-command server deploy, ten gated steps
 infra/Caddyfile                      reverse proxy + Let's Encrypt (internet-facing)
 infra/Caddyfile.internal             reverse proxy + local CA (office network)
 scripts/verify_restore.py            restores a backup and compares row counts

@@ -1,5 +1,91 @@
 # Deploying to the Company Server
 
+## Tonight, in order
+
+Everything below is explained in detail further down. This is the sequence.
+
+```bash
+# --- on the server, as a normal user with sudo ---
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y ufw git python3 curl
+sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+sudo ufw --force enable                      # SSH rule FIRST or you lock yourself out
+
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+exit                                          # log out and back in, or docker stays denied
+```
+
+Log back in, then:
+
+```bash
+git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
+cd aspire-crm-twenty
+cp infra/.env.example infra/.env
+
+# print four secrets, paste them into infra/.env
+for k in PG_DATABASE_PASSWORD ENCRYPTION_KEY APP_SECRET N8N_ENCRYPTION_KEY; do
+  printf '%s=%s\n' "$k" "$(openssl rand -base64 32)"
+done
+
+nano infra/.env        # set the four secrets + the block below
+```
+
+The minimum that must be set:
+
+```ini
+SERVER_URL=https://crm.aspiretss.com
+N8N_HOST=auto.aspiretss.com
+N8N_PROTOCOL=https
+N8N_PUBLIC_URL=https://auto.aspiretss.com
+
+CRM_DOMAIN=crm.aspiretss.com
+AUTOMATION_DOMAIN=auto.aspiretss.com
+ACME_EMAIL=it@aspiretss.com
+
+EMAIL_SMTP_HOST=smtp-relay.gmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_SMTP_USER=<workspace user>
+EMAIL_SMTP_PASSWORD=<app password>
+
+ALERT_WEBHOOK_URL=<real chat webhook, or leave blank>
+```
+
+Then:
+
+```bash
+./infra/preflight.sh     # 20 seconds. Fix anything it calls a blocker
+./infra/deploy.sh        # ~15 minutes
+```
+
+`preflight.sh` checks RAM, disk, Docker, every required setting, that DNS
+resolves **to this server**, that ports 80 and 443 are free, and that the
+firewall allows them. It exists because each of those otherwise fails later,
+with an error that does not name the cause — and a DNS mistake discovered
+during the real certificate request costs you a Let's Encrypt rate limit.
+
+`deploy.sh` runs ten gated steps and stops at the first failure: stack up,
+worker check, workspace, object model, credentials, query validation, deploy
+and activate, verify every layer, and prove the backup restores on this
+machine's own disk.
+
+### Before you start, have these
+
+| | |
+|---|---|
+| DNS | Both A records added **and resolving** — `dig +short crm.aspiretss.com` |
+| SMTP | Host, user, app password. Without it the deploy stops rather than half-working |
+| Office IP range | For the editor allowlist in step 3 below |
+
+### Three things immediately after
+
+1. **Change both default passwords** — CRM and automation. They are in a public repository.
+2. **Check the padlock** on the CRM. A warning means Let's Encrypt could not reach port 80.
+3. **Edit the editor allowlist** in `infra/Caddyfile` — it ships matching nothing, so the editor currently refuses everyone including you. Put your office and VPN ranges in, then recreate Caddy.
+
+---
+
+
 The laptop stack and the server stack are the same files. What changes is
 `infra/.env`, one overlay, and a reverse proxy in front. Nothing is rebuilt and
 nothing is untested at cutover.

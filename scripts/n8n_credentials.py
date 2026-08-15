@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import sys
 from pathlib import Path
 from urllib import error, request
@@ -71,6 +72,15 @@ class N8n:
             return 0, None, redact(str(e), self.key)
 
 
+def _reachable(host: str, port: int, timeout: float = 2.0) -> bool:
+    """Is something listening there? Used to tell a dev stack from a server."""
+    try:
+        with socket.create_connection((host, port), timeout):
+            return True
+    except OSError:
+        return False
+
+
 def redact(text: str, *secrets: str) -> str:
     for s in secrets:
         if s and len(s) > 6:
@@ -100,6 +110,23 @@ def main() -> int:
     # Defaults point at the Mailpit container, so a freshly built stack can
     # prove the send path with no external mail account at all. Set the
     # EMAIL_SMTP_* vars in infra/.env to send for real.
+    #
+    # Mailpit only exists behind the dev compose profile. On a server it is
+    # absent, and defaulting to it would create a credential pointing at a
+    # host that does not resolve — every send would fail at delivery time,
+    # long after anyone was watching. Refuse instead.
+    if not env.get("EMAIL_SMTP_HOST") and not _reachable("mailpit", 1025):
+        print("ERROR: EMAIL_SMTP_HOST is not set and no Mailpit is running.\n"
+              "       On a server, set the real relay in infra/.env before "
+              "creating credentials:\n"
+              "         EMAIL_SMTP_HOST=smtp-relay.gmail.com\n"
+              "         EMAIL_SMTP_PORT=587\n"
+              "         EMAIL_SMTP_USER=<workspace user>\n"
+              "         EMAIL_SMTP_PASSWORD=<app password>\n"
+              "       Locally, start the stack with the dev profile instead.",
+              file=sys.stderr)
+        return 2
+
     smtp = {
         "host": env.get("EMAIL_SMTP_HOST") or "mailpit",
         "port": int(env.get("EMAIL_SMTP_PORT") or 1025),
