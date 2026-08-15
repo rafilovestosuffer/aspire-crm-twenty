@@ -1,0 +1,131 @@
+<h2 class="newpage">Appendix A · How this fails silently</h2>
+
+<p>Everything in the preceding sections describes how the replacement is
+<i>designed</i>. This appendix describes how it <i>breaks</i>, and it exists
+because the gap between the two turned out to be the whole risk in this
+project.</p>
+
+<p>Every item below was found by building the system and running it, not by
+reading documentation. Each one produced a workflow that looked correct in the
+editor, deployed without error, and did the wrong thing — in most cases with no
+error logged anywhere. Two of them sent real output to the wrong recipient.</p>
+
+<p class="warn"><b>The pattern worth internalising.</b> In this stack, a
+malformed instruction is usually not rejected. It is ignored, and the surrounding
+logic carries on with whatever it got. A migration is therefore not validated by
+"it deployed" or "no errors in the log" — only by asserting on the records that
+were supposed to be created.</p>
+
+<h3>A.1 Twenty silently ignores a malformed query</h3>
+
+<p>This is the most dangerous single behaviour in the platform, and the one that
+justifies the validator in §A.6.</p>
+
+<table>
+<tr><th style="width:34%">Written as</th><th>What actually happens</th></tr>
+<tr><td><code>?filter[email][eq]=x</code></td><td><b>The filter is discarded and the entire table is returned.</b> HTTP 200. No warning</td></tr>
+<tr><td><code>?orderBy=field[DescNullsLast]</code></td><td>Sort discarded, arbitrary order returned. HTTP 200</td></tr>
+<tr><td><code>?filter=status[in]:A,B</code></td><td>400 — <code>in</code> requires a bracketed array, <code>[A,B]</code></td></tr>
+</table>
+
+<p>The correct forms are <code>?filter=field[eq]:value</code> and
+<code>?order_by=field[DescNullsLast]</code>. Comma separates conditions and
+means AND.</p>
+
+<p>In this build, the lead-capture workflow used the bracketed form to find an
+existing contact by email. It matched nothing, so it received every person in
+the database and used the first row. The consequence was an acknowledgement
+email addressed to an unrelated contact, and a consent check that read a
+different person's consent record. The only visible symptom was a wrong first
+name in an email nobody was reading closely.</p>
+
+<p><b>Every interpolated filter value must be URL-encoded.</b> A space, bracket
+or colon in the value corrupts the query into a 400. The error handler's own
+deduplication query broke this way on a workflow name containing brackets: the
+failure was recorded, the handler then errored on the next node, and the alert
+was never sent. Values reaching these filters include user-typed email addresses
+and a slug taken from a public URL, so this is not only about awkward internal
+names.</p>
+
+<h3>A.2 n8n expressions end at the first <code>}}</code></h3>
+
+<p>An expression containing a nested object literal terminates early, and the
+remainder is parsed as code:</p>
+
+<pre>{{ JSON.stringify({"phones": {"primaryPhoneNumber": $json.phone}}) }}
+                                                              ^^ ends here</pre>
+
+<p>Twenty's composite fields — <code>name</code>, <code>emails</code>,
+<code>phones</code>, <code>domainName</code>, <code>bodyV2</code> — are all
+nested, so this affects most write operations. Emit <code>} }</code> with a
+space. The generator in this build lints for it and refuses to write a workflow
+containing one.</p>
+
+<p>Relatedly, <code>jsonBody</code> is only evaluated when the <b>whole</b>
+parameter begins with <code>=</code>. Marking the inner values instead sends the
+body as literal text: the API receives <code>{"clickCount": "={{ $json.count }}"}</code>
+and rejects it, or worse, accepts the string where a number was meant.</p>
+
+<h3>A.3 References resolve by id, not by name</h3>
+
+<p>Sub-workflow calls and <code>settings.errorWorkflow</code> both look like they
+accept a name. They do not — they resolve by internal id. Given a name, they
+dangle silently.</p>
+
+<p>The effect is that <b>every workflow appears to have error handling and none
+of it fires</b>. Nothing warns; the error workflow simply is not invoked. In this
+build the deployment script binds ids at deploy time, which is why the workflow
+library in version control can still reference them by name and stay portable
+between instances.</p>
+
+<h3>A.4 Error workflows do not fire for manual runs</h3>
+
+<p><code>settings.errorWorkflow</code> is invoked only for <b>production</b>
+executions. A workflow run by hand in the editor fails in the editor, and the
+error workflow is never called.</p>
+
+<p>This means testing failure handling by clicking "Execute Workflow" proves
+nothing whatsoever. The only way to verify it is to trigger a real failure
+through a real trigger — which is why this build ships a deliberately-failing
+webhook-triggered workflow used solely to exercise the alerting path.</p>
+
+<p>Similarly, <b>a webhook responds on receipt, before the workflow runs</b>. A
+200 from a webhook says nothing about the outcome. Assert on the record that
+should have been written, never on the HTTP status.</p>
+
+<h3>A.5 Version-specific traps</h3>
+
+<table>
+<tr><th style="width:30%">Trap</th><th>Consequence</th></tr>
+<tr><td>Form inputs post as <code>field-0</code>, <code>field-1</code> … by <b>position</b>, not by label</td><td>Only affects scripted submissions; a browser gets it right. A script posting by label receives 200 with every value silently null</td></tr>
+<tr><td>Form path moved from <code>path</code> to <code>options.path</code> at typeVersion 2.2</td><td>Set only one and the other version falls back to a random UUID — the form works, at a URL no campaign can link to. Set both</td></tr>
+<tr><td>Task body is <code>bodyV2</code>, a rich-text composite taking <code>{"markdown": "..."}</code></td><td>A bare string is a 400; a plain <code>body</code> key is not a field at all</td></tr>
+<tr><td>Code nodes run in a sandboxed task runner</td><td><code>process</code> does not exist. Use <code>$env</code></td></tr>
+<tr><td>A Switch's <code>fallbackOutput</code> must be an existing index or <code>"extra"</code></td><td>Naming a non-existent output throws at runtime, not at save time</td></tr>
+<tr><td>Default opportunity stages are <code>NEW, SCREENING, MEETING, PROPOSAL, CUSTOMER</code></td><td>There is no <code>WON</code>. Filtering on it is a 400</td></tr>
+<tr><td><code>/rest/metadata/*</code> rejects every query string, and returns only a <i>slice</i> of each object's fields</td><td>It is not a complete schema. Merge it with the keys of a real record. Reading it alone makes existing fields look absent</td></tr>
+<tr><td>Twenty's rate limit is 100 requests per <b>minute</b></td><td>Retries three times two seconds apart give up six seconds into a sixty-second window. Use the longest backoff the platform allows</td></tr>
+</table>
+
+<h3>A.6 What this implies for the migration method</h3>
+
+<p>Because failures are silent, correctness has to be asserted rather than
+assumed. Three gates were built for this migration and each one caught defects
+the others did not:</p>
+
+<table>
+<tr><th style="width:30%">Gate</th><th>What it catches</th></tr>
+<tr><td><b>Generation-time lint</b></td><td>Refuses to emit a workflow containing an expression that would fail at runtime — truncated expressions, un-encoded filter values, bodies that are not marked as expressions</td></tr>
+<tr><td><b>Schema validation</b></td><td>Checks every API call against the <i>live</i> instance: object exists, field exists, enum value is declared, filter and sort syntax correct. Reconstructing the schema requires merging the metadata endpoint with a real record, because neither is complete alone</td></tr>
+<tr><td><b>Behavioural proof</b></td><td>Submits the real form, follows the real redirect, breaks something on purpose, triggers the real schedules — then asks the CRM whether the records exist. This is the only gate that can catch a silently-ignored filter</td></tr>
+</table>
+
+<p>The third is the one that matters. A workflow can pass every static check and
+still write to the wrong record, and no amount of code review finds it. The
+question a migration must be able to answer is not "did it run" but "is the
+right row in the database now".</p>
+
+<p class="small">All defects in this appendix were found and fixed during the
+build. They are recorded here because the same platforms will behave the same
+way for the next person, and because a document that describes only the happy
+path is the reason projects like this are declared finished three weeks early.</p>

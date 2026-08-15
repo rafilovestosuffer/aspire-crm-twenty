@@ -24,7 +24,9 @@ OUT_PDF = ROOT / "out" / "GHL-to-Twenty-n8n-Replacement-Guide.pdf"
 
 PARTS = ["part1.html", "part2.html", "part3.html", "part4.html", "part5.html",
          "part6.html", "part7.html", "part8.html"]
-TAIL = "part9.html"
+# Appendix A precedes the existing appendices, which historically began at B.
+TAIL = "part9a.html"
+TAIL2 = "part9.html"
 
 # Phase 1 removes GoHighLevel entirely, so ESCALATE reads as VENDOR here.
 PILL = {
@@ -175,6 +177,7 @@ def assemble(toc_html: str) -> str:
         body.append((HERE / name).read_text(encoding="utf-8"))
     body.append(build_appendix_a())
     body.append((HERE / TAIL).read_text(encoding="utf-8"))
+    body.append((HERE / TAIL2).read_text(encoding="utf-8"))
     body.append("</body></html>")
     return "\n".join(body)
 

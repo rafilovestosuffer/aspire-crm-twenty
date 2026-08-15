@@ -93,16 +93,18 @@
 
 <p>Open source removes licence cost, not operational cost. Both belong in the number given to management.</p>
 
+<p class="callout"><b>Net position.</b> The only unavoidable recurring cost is one server plus the hours to operate it. Forms, scheduling and e-signature all turned out to have self-hosted answers, and transactional email fits inside the existing Workspace allowance at Aspire's volume. Telephony is the one genuinely priced cluster, and it is deferred because Aspire barely uses it.</p>
+
 <table>
 <tr><th style="width:34%">Item</th><th style="width:24%">Basis</th><th>Note</th></tr>
 <tr><td>Twenty licence</td><td>—</td><td>Self-hosted, no licence cost</td></tr>
 <tr><td>n8n licence</td><td>—</td><td>Self-hosted community edition</td></tr>
 <tr><td>Infrastructure</td><td>Per month</td><td>VPS for Twenty (4 GB+) and n8n, plus backup storage</td></tr>
-<tr><td><b>ESP</b></td><td>Per volume</td><td>Priced on monthly send volume — from the audit, not estimated</td></tr>
+<tr><td><b>Transactional email</b></td><td>Usually nil</td><td>The existing Google Workspace relay covers ~2,000 recipients/day. Above that, a relay such as Amazon SES at about $0.10 per 1,000. Take the volume from the audit, not an estimate</td></tr>
 <tr><td><b>CPaaS</b></td><td>Per number + per message/minute</td><td>Plus A2P registration fees</td></tr>
-<tr><td>Scheduling</td><td>Per seat</td><td>Only seats that actually take bookings</td></tr>
-<tr><td>Forms</td><td>Per volume</td><td>Often the cheapest cluster</td></tr>
-<tr><td>Commerce / e-sign</td><td>Per document or seat</td><td>May be zero if finance already owns it</td></tr>
+<tr><td>Scheduling</td><td>Nil self-hosted</td><td>Cal.com runs on the same server. A hosted plan is a convenience choice, not a requirement</td></tr>
+<tr><td>Forms</td><td>Nil</td><td>n8n hosts the form itself — no vendor at any volume. This was assumed to need one and does not</td></tr>
+<tr><td>Commerce / e-sign</td><td>Nil self-hosted</td><td>DocuSeal runs on the same server and is eIDAS/ESIGN valid. Payments remain a finance decision</td></tr>
 <tr><td>LLM usage</td><td>Per token</td><td>Measure during pilot; hard caps at the gateway</td></tr>
 <tr><td><b>Operational load</b></td><td>Hours per month</td><td>Updates, backups, patching, vendor management, workflow maintenance. <b>Assign to a named owner</b>, do not absorb informally</td></tr>
 <tr><td><b>Migration effort</b></td><td>One-off</td><td>Audit, rebuild, verification, parallel run</td></tr>
@@ -121,7 +123,7 @@
 <li><b>The unified inbox does not come back.</b> Option B in §17 approximates it with another vendor. Options A and C do not. This is a real reduction in day-to-day convenience for reps and should be communicated before cutover, not defended after it.</li>
 <li><b>Twenty's reporting is less mature</b> than GoHighLevel's dashboards. Adequate for pipeline and record reporting; weaker for marketing analytics. Cross-system attribution needs a warehouse, which is a separate project.</li>
 <li><b>No native mobile app.</b> Twenty's web UI is responsive but not field-optimised. If anyone genuinely works from the GoHighLevel mobile app, this is a real gap with no clean answer.</li>
-<li><b>Performance at Aspire's real data volume is unproven.</b> Local Docker testing cannot establish it. Neither can it establish backup and restore behaviour under load, or TLS and reverse-proxy behaviour in production.</li>
+<li><b>Performance at Aspire's real data volume is unproven.</b> Local Docker testing cannot establish it, and it remains the largest untested assumption. <i>Two items previously listed here have since been settled:</i> backup and restore is now verified by a script that dumps each database, restores it into a scratch database and compares row counts exactly, recording the date; and TLS with a reverse proxy has been stood up and exercised — certificates issued, traffic proxied, HTTP redirected, security headers applied.</li>
 <li><b>More systems means more failure modes.</b> One vendor relationship becomes four to six, each with its own outages, billing and support. The operational surface grows even as the licence cost falls.</li>
 <li><b>Deliverability becomes Aspire's responsibility.</b> GoHighLevel managed sending reputation invisibly. Someone must now own it by name.</li>
 <li><b>This document assumes the audit's findings.</b> It describes how to replace capabilities. It does not know which ones Aspire uses. Building from it without the audit would replace things nobody needs — and the audit typically removes a third to a half of the surface.</li>
@@ -129,5 +131,17 @@
 
 <div class="callout">
 <span class="lbl">The fair summary</span>
-<p>Twenty and n8n replace GoHighLevel's CRM and automation completely, and improve on both. They replace none of its communication infrastructure, which must be bought. The migration is sound, the data model is a genuine upgrade, and the automation layer is materially more capable — but it is an <b>unbundling exercise with a procurement dependency</b>, not a like-for-like swap, and the schedule is set by vendor lead times rather than by engineering effort.</p>
+<p>Twenty and n8n replace GoHighLevel's CRM and automation completely, and improve on
+both. <b>The communication layer proved cheaper to replace than this document
+originally assumed.</b> Public forms are hosted by n8n itself; booking and
+e-signature have credible self-hosted answers in Cal.com and DocuSeal;
+transactional email goes through the existing Google Workspace relay, with a
+paid relay needed only above roughly 2,000 recipients a day. SMS, voice and
+WhatsApp genuinely require a licensed carrier — but Aspire barely uses them, so
+they are a deferred decision rather than a blocking dependency.
+What remains is therefore an unbundling exercise with <i>no irreducible
+procurement dependency</i>, and a schedule set by engineering effort and data
+migration rather than by vendor lead times. The remaining hard constraints are
+operational, not commercial: someone must own deliverability by name, and the
+system needs a second person who can operate it.</p>
 </div>
