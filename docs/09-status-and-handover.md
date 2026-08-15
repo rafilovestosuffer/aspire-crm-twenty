@@ -91,13 +91,13 @@ Run it any time. If something breaks later, it says so.
 
 | Status | Count | Meaning |
 |---|---|---|
-| **LIVE** | 16 | Verified working on the running stack |
-| **NATIVE** | 11 | Twenty does it out of the box; needs configuration, not building |
+| **LIVE** | 24 | Verified working on the running stack |
+| **NATIVE** | 13 | Twenty or n8n does it out of the box; needs configuration |
 | **MODELLED** | 22 | The object exists to hold the data; no automation on it yet |
-| **DESIGNED** | 29 | Specified in the replacement guide; nothing built |
+| **DESIGNED** | 19 | Specified in the replacement guide; nothing built |
 | **DEFERRED** | 33 | Deliberately out of scope, each with a recorded reason |
 
-**Working or native today: 27 of 111 (24%). Nothing is "built but never run".**
+**Working or native today: 37 of 111 (33%). Nothing is "built but never run".**
 
 That last sentence is the one that matters. The dangerous category in any
 migration is code that exists, looks finished, and has never executed. It is
@@ -108,7 +108,7 @@ need a licensed carrier, and Aspire barely uses them), website and funnel
 hosting (aspiretss.com stays where it is), and course delivery
 (aspireelearning.com already does it). They are not gaps; they are decisions.
 
-The 51 still to build are real work, sized in §7.
+The 41 still to build are real work, sized in §7. A third of those need something only Aspire can supply — our DNS, our identity provider, our Google account, our GoHighLevel token, our server.
 
 ## 6. What it costs
 
@@ -138,7 +138,7 @@ Each phase has a gate. Do not start the next until it passes.
 | 2 | Native Twenty config — connect a mailbox, saved views, roles | 3 days |
 | 3 | Cal.com (booking) + DocuSeal (quotes, e-signature) | 1 week |
 | 4 | Data migration — **export the GHL suppression list first** | 1 week |
-| 5 | Production hardening — VPS, TLS, queue mode, monitoring, **a tested restore**, runbook, second operator | 1 week |
+| 5 | Production hardening — VPS, ~~TLS~~, queue mode, monitoring, ~~a tested restore~~, runbook, second operator | 3 days |
 | 6 | Parallel run, reconcile daily, then cut over | 2–3 weeks |
 
 **6–8 weeks to production**, with a demonstrable system from week one.

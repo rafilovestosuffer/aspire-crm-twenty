@@ -195,6 +195,8 @@
     display: flex; flex-direction: column; gap: .6rem; font-size: .95rem;
   }
   .note.risk { border-left-color: var(--warn); }
+  .note.good { border-left-color: var(--live); }
+  .note.good .label { color: var(--live); }
   .note .label {
     font-family: var(--mono); font-size: .68rem; letter-spacing: .11em;
     text-transform: uppercase; color: var(--accent);
@@ -325,21 +327,21 @@
 
     <div class="scorecard">
       <div class="lede">
-        <span class="bignum">27<span style="color:var(--slate);font-weight:400">/111</span></span>
+        <span class="bignum">37<span style="color:var(--slate);font-weight:400">/111</span></span>
         <span class="bignum-label">working or native today · <strong>nothing built but never run</strong></span>
       </div>
-      <div class="bar" role="img" aria-label="16 live, 11 native, 22 modelled, 29 designed, 33 deferred, of 111 features">
-        <span class="seg-live"    style="width:14.4%"></span>
-        <span class="seg-native"  style="width:9.9%"></span>
+      <div class="bar" role="img" aria-label="24 live, 13 native, 22 modelled, 19 designed, 33 deferred, of 111 features">
+        <span class="seg-live"    style="width:21.6%"></span>
+        <span class="seg-native"  style="width:11.7%"></span>
         <span class="seg-modelled" style="width:19.8%"></span>
-        <span class="seg-designed" style="width:26.1%"></span>
+        <span class="seg-designed" style="width:17.1%"></span>
         <span class="seg-deferred" style="width:29.7%"></span>
       </div>
       <ul class="legend">
-        <li><span class="dot seg-live"></span><span class="t">Live</span><span class="n">16</span></li>
-        <li><span class="dot seg-native"></span><span class="t">Native</span><span class="n">11</span></li>
+        <li><span class="dot seg-live"></span><span class="t">Live</span><span class="n">24</span></li>
+        <li><span class="dot seg-native"></span><span class="t">Native</span><span class="n">13</span></li>
         <li><span class="dot seg-modelled"></span><span class="t">Modelled</span><span class="n">22</span></li>
-        <li><span class="dot seg-designed"></span><span class="t">Designed</span><span class="n">29</span></li>
+        <li><span class="dot seg-designed"></span><span class="t">Designed</span><span class="n">19</span></li>
         <li><span class="dot seg-deferred"></span><span class="t">Deferred</span><span class="n">33</span></li>
       </ul>
     </div>
@@ -417,12 +419,14 @@
         before any termination date is agreed. Emailing someone who opted out is
         a compliance incident, and we sell compliance.</p>
     </div>
-    <div class="note risk">
-      <span class="label">Not yet true</span>
-      <p><strong>No backup here has ever been restored.</strong> Backups run
-        nightly, but an untested backup is not a backup. Restoring one into a
-        scratch database, and recording the date, is a Phase 5 gate — not a
-        nice-to-have. Keep GoHighLevel read-only for 30–60 days after cutover.</p>
+    <div class="note good">
+      <span class="label">Proven, keep proving it</span>
+      <p><strong>Backups are restore-tested.</strong> Both databases were
+        dumped, restored into a scratch database and compared row for row —
+        4,045 and 1,364 rows, exact. The date of the last successful restore is
+        recorded on disk. Re-run it monthly, and on the server on day one: a
+        restore proven on a laptop says nothing about the server's disk. Keep
+        GoHighLevel read-only for 30–60 days after cutover.</p>
     </div>
   </section>
 

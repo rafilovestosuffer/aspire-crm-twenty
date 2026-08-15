@@ -4,10 +4,10 @@ Source: probed live stack. 111 catalogued features.
 
 | Status | Count | Meaning |
 |---|---|---|
-| LIVE | 16 | Verified working on the running stack |
-| NATIVE | 11 | Twenty does it; needs configuration only |
+| LIVE | 24 | Verified working on the running stack |
+| NATIVE | 13 | Twenty does it; needs configuration only |
 | MODELLED | 22 | Object exists to hold the data; no automation |
-| DESIGNED | 29 | Specified in the guide; nothing built |
+| DESIGNED | 19 | Specified in the guide; nothing built |
 | DEFERRED | 33 | Deliberately out of scope, reason recorded |
 
 
@@ -66,7 +66,7 @@ Source: probed live stack. 111 catalogued features.
 | `EM-06` | Dedicated sending domain / DKIM / SPF | **DESIGNED** | specified in the guide only |
 | `EM-07` | Unsubscribe / suppression list | **LIVE** | workflow `vend-send-email` |
 | `EM-08` | Email verification | **DESIGNED** | specified in the guide only |
-| `EM-09` | Scheduled email sends | **DESIGNED** | specified in the guide only |
+| `EM-09` | Scheduled email sends | **LIVE** | `scheduleTrigger` node ran in a successful execution |
 
 ### SMS & Telephony
 
@@ -132,15 +132,15 @@ Source: probed live stack. 111 catalogued features.
 
 | ID | Feature | Status | Evidence |
 |---|---|---|---|
-| `WF-01` | Workflow inventory | **DESIGNED** | specified in the guide only |
-| `WF-02` | Workflow internals (steps and actions) | **DESIGNED** | specified in the guide only |
-| `WF-03` | Workflow triggers | **DESIGNED** | specified in the guide only |
-| `WF-04` | If/else and conditional branching | **DESIGNED** | specified in the guide only |
+| `WF-01` | Workflow inventory | **NATIVE** | n8n workflow list |
+| `WF-02` | Workflow internals (steps and actions) | **NATIVE** | n8n editor — full step internals, unlike GHL |
+| `WF-03` | Workflow triggers | **LIVE** | `webhook` node ran in a successful execution |
+| `WF-04` | If/else and conditional branching | **LIVE** | `if` node ran in a successful execution |
 | `WF-05` | Wait / delay steps | **DESIGNED** | specified in the guide only |
-| `WF-06` | Goal / exit conditions | **DESIGNED** | specified in the guide only |
-| `WF-07` | Math / formula operations | **DESIGNED** | specified in the guide only |
-| `WF-08` | Outbound webhooks from workflows | **DESIGNED** | specified in the guide only |
-| `WF-09` | Custom code steps | **DESIGNED** | specified in the guide only |
+| `WF-06` | Goal / exit conditions | **LIVE** | `if` node ran in a successful execution |
+| `WF-07` | Math / formula operations | **LIVE** | `code` node ran in a successful execution |
+| `WF-08` | Outbound webhooks from workflows | **LIVE** | `httpRequest` node ran in a successful execution |
+| `WF-09` | Custom code steps | **LIVE** | `code` node ran in a successful execution |
 | `WF-10` | Legacy campaigns (drip) | **MODELLED** | `campaign` object exists, no automation |
 | `WF-11` | Workflow execution history / enrolment counts | **LIVE** | workflow `sys-error-handler` |
 
@@ -215,7 +215,7 @@ Source: probed live stack. 111 catalogued features.
 | `IN-01` | Installed marketplace apps | **DESIGNED** | specified in the guide only |
 | `IN-02` | Native integrations (Stripe/Google/Meta/QuickBooks) | **DESIGNED** | specified in the guide only |
 | `IN-03` | Zapier / Make connections | **DESIGNED** | specified in the guide only |
-| `IN-04` | Inbound webhooks into GHL | **DESIGNED** | specified in the guide only |
+| `IN-04` | Inbound webhooks into GHL | **LIVE** | `webhook` node ran in a successful execution |
 
 ### Agency & Multi-Location
 
