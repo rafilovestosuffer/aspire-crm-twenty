@@ -56,13 +56,13 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter=workflowName[eq]:{{ $json.workflowName }},status[eq]:FAILED&order_by=startedAt[DescNullsLast]&limit=5",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter=workflowName[eq]:{{ encodeURIComponent($json.workflowName) }},status[eq]:FAILED&order_by=startedAt[DescNullsLast]&limit=5",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -87,8 +87,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {

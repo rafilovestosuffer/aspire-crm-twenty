@@ -62,10 +62,34 @@
 <tr><td>Schema</td><td>Per workspace — a new custom object immediately gets endpoints under its own name</td></tr>
 </table>
 
+<h3>Query syntax — get this wrong and it fails silently</h3>
+
+<p class="warn"><b>Twenty does not reject a malformed filter.</b> Send the
+bracketed shape most people try first and it <b>ignores the filter and returns
+the whole table</b>. No error, no log entry — the workflow simply reads the
+first row of every record. In our own build this sent a lead acknowledgement to
+an unrelated contact, and the only symptom was the wrong first name in the
+email. <code>orderBy=</code> is ignored the same way.</p>
+
+<table>
+<tr><th>Purpose</th><th>Correct</th><th>Wrong, and what happens</th></tr>
+<tr><td>Filter</td><td><code>?filter=field[eq]:value</code></td><td><code>?filter[field][eq]=value</code> — returns everything</td></tr>
+<tr><td>Multiple</td><td><code>?filter=a[eq]:1,b[eq]:2</code> (comma = AND)</td><td>—</td></tr>
+<tr><td>In a set</td><td><code>?filter=status[in]:[A,B]</code></td><td>bare comma list — 400</td></tr>
+<tr><td>Substring</td><td><code>?filter=domainName.primaryLinkUrl[ilike]:%acme%</code></td><td>—</td></tr>
+<tr><td>Sort</td><td><code>?order_by=field[DescNullsLast]</code></td><td><code>orderBy=</code> — silently ignored</td></tr>
+<tr><td>Relation</td><td><code>?filter=personId[eq]:&lt;uuid&gt;</code></td><td>the relation is <code>person</code>; the filter key is <code>personId</code></td></tr>
+</table>
+
+<p><code>/rest/metadata/*</code> rejects every query string, and
+<code>/rest/metadata/objects</code> embeds only a <i>slice</i> of each object's
+fields — so it is not a complete schema. Merge it with the keys of a real row
+from <code>/rest/{object}?limit=1</code>.</p>
+
 <h3>Common calls</h3>
 <pre>
 # Find a person by email  (idempotency check before create)
-GET /rest/people?filter[emails][eq]=someone@example.com
+GET /rest/people?filter=emails.primaryEmail[eq]:someone@example.com
 
 # Create
 POST /rest/people

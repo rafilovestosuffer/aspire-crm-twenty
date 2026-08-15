@@ -36,7 +36,7 @@ ALLOWED = {"name", "nodes", "connections", "settings", "staticData"}
 
 # Local-verification scaffolding. Deployed only with --dev, so a production
 # deploy cannot accidentally stand up the alert sink and swallow real alerts.
-DEV_ONLY = {"SYS Alert Sink (dev)"}
+DEV_ONLY = {"SYS Alert Sink (dev)", "SYS Failure Probe (dev)"}
 
 
 def read_env() -> dict[str, str]:
@@ -253,10 +253,18 @@ def main() -> int:
         note = ""
         if args.activate and wid:
             astatus, _, aerr = api.activate(wid)
-            note = " + activated" if not aerr and astatus < 400 else f" (activate failed: {aerr[:60]})"
+            if aerr or astatus >= 400:
+                # A workflow that deployed but did not activate is off. Counting
+                # it as success meant the script exited 0 while nothing was
+                # listening — the failure mode this whole pass exists to remove.
+                failures += 1
+                note = f" (ACTIVATE FAILED: {aerr[:80]})"
+            else:
+                note = " + activated"
         print(f"  ok    {name:32} {verb}{note}")
 
-    print(f"\n{len(flows) - failures}/{len(flows)} deployed.")
+    print(f"\n{len(flows) - failures}/{len(flows)} deployed"
+          + (" and activated." if args.activate else "."))
     if not args.activate:
         print("Workflows are INACTIVE. Test each one in the n8n editor, then "
               "re-run with --activate.")

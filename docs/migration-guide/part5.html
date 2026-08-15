@@ -75,7 +75,7 @@ IF: is this a repeat failure of the same workflow within 1 hour?
 <p><b>Idempotency.</b> Webhooks retry. A vendor that does not get a 200 quickly will send the same event again, and a workflow that blindly creates records will produce duplicates. Always search-then-upsert on a deterministic external key:</p>
 
 <pre>
-1. HTTP Request → Twenty: GET /rest/people?filter[emails][eq]=&lt;email&gt;
+1. HTTP Request → Twenty: GET /rest/people?filter=emails.primaryEmail[eq]:&lt;email&gt;
 2. IF found:  PATCH /rest/people/&lt;id&gt;
    ELSE:      POST  /rest/people
 </pre>
@@ -143,7 +143,7 @@ IF: is this a repeat failure of the same workflow within 1 hour?
  1  Webhook (POST from form vendor)
  2  Code: verify vendor signature
  3  Set: normalise — lowercase email, E.164 phone, trim
- 4  HTTP Request → Twenty: GET /rest/people?filter[emails][eq]={{email}}
+ 4  HTTP Request → Twenty: GET /rest/people?filter=emails.primaryEmail[eq]:{{email}}
  5  IF exists
       ├ yes → PATCH person (fill blanks only, never overwrite)
       └ no  → POST person

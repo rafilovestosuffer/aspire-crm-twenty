@@ -109,6 +109,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
+      # First boot runs the full migration set, which takes several minutes and
+      # answers nothing on /healthz meanwhile. Without a start_period those
+      # attempts count as failures: the container is declared unhealthy at
+      # ~100s, and `worker`, which waits on service_healthy, gives up and stays
+      # in Created forever. The server then goes healthy on its own and
+      # everything looks fine — except no scheduled job or mailbox sync ever
+      # runs, because the worker was never started.
+      start_period: 300s
 
   worker:
     image: twentycrm/twenty:${TAG:-v2.1.0}

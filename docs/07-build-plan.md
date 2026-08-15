@@ -112,10 +112,12 @@ just a backup taken.
 |---|---|
 | Provision the object model | `python scripts/twenty_provision.py --dry-run` then for real. 25 objects, 132 fields, 20 relations |
 | Create Twenty API key | Settings → API & Webhooks. Scope it to a role, not admin |
-| Create n8n credentials | `Twenty API` (header auth), `Aspire SMTP`, `Aspire Slack` |
-| Deploy the workflows | `python scripts/n8n_deploy.py` — inactive at first |
-| Test the error handler | Force a failure; confirm the Slack alert and the `automationRun` record |
+| Create n8n credentials | `python scripts/n8n_credentials.py` — writes `Twenty API` (header auth) and `Aspire SMTP`. Chat alerts use an incoming webhook (`ALERT_WEBHOOK_URL`), not a credential |
+| Validate every Twenty call | `python scripts/validate_workflow_queries.py` — checks all 28 against the live schema |
+| Deploy the workflows | `python scripts/n8n_deploy.py --dev` — inactive at first |
+| Test the error handler | Force a failure; confirm the chat alert and the `automationRun` record |
 | Test the send sub-workflow | Send to yourself. Then **flip consent to opted-out and confirm it refuses** |
+| Prove the whole layer | `python scripts/prove_workflows.py` — 25 checks against the running stack |
 
 **Gate:** a deliberate failure produces an alert, and the consent gate demonstrably blocks a send.
 

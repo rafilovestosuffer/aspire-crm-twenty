@@ -88,6 +88,13 @@ Getting these wrong is usually **silent**, not an error. Enforced by
 | order | `?order_by=field[DescNullsLast]` | `orderBy=` — **silently ignored** |
 | relation | `?filter=personId[eq]:<uuid>` | the relation is `person`, the filter key is `personId` |
 
+**Every interpolated filter value must be `encodeURIComponent`-wrapped.** A
+space, bracket or colon in the value corrupts the query into a 400. This broke
+the error handler's own dedupe query on a workflow name containing brackets:
+the failure was logged, the handler then errored, and **the alert was never
+sent**. Values reaching these filters include user-typed emails and a slug taken
+off a public URL. The generator lints for it.
+
 - `/rest/metadata/*` **rejects every query string**, and `/rest/metadata/objects`
   embeds only a *slice* of each object's fields — so it is not a complete
   schema. Merge it with the keys of a real row from `/rest/{object}?limit=1`.
@@ -110,6 +117,12 @@ Getting these wrong is usually **silent**, not an error. Enforced by
   `options.path` from 2.2; set both or the URL falls back to a random UUID.
 - Code nodes run in a sandboxed task runner: use `$env`, never `process.env`.
 - A Switch's `fallbackOutput` must be an existing index or `"extra"`.
+- **`settings.errorWorkflow` fires only for PRODUCTION executions.** A manual
+  run fails in the editor and the error workflow is never called, so testing
+  failure handling by hand proves nothing. `SYS Failure Probe (dev)` is
+  webhook-triggered for exactly this reason.
+- A webhook answers on receipt, before the workflow runs: a 200 says nothing
+  about the outcome. Assert on the record written, not the HTTP status.
 
 ## Working style
 Verify empirically before writing logic against it. The GHL docs and the live API

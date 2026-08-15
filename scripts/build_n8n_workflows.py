@@ -31,6 +31,24 @@ OUT = ROOT / "n8n" / "workflows"
 _PLACEHOLDER = re.compile(r"\{\{(.*?)\}\}", re.S)
 
 
+def q(expr: str) -> str:
+    """
+    Interpolate a value into a Twenty filter, URL-encoded.
+
+    Filter values go into a query string, and Twenty's parser treats `,` `:`
+    `[` `]` structurally. A raw value containing any of them — or a space, or a
+    bracket — corrupts the query into a 400. That is how the error handler's
+    own dedupe query broke on the workflow name "SYS Failure Probe (dev)":
+    the failure was logged, the handler then errored on the next node, and the
+    alert was never sent. A safety net that fails silently on some inputs is
+    worse than none, because it is trusted.
+
+    Values that reach these filters include user-typed emails and a slug taken
+    straight off a public URL, so this is not only about awkward names.
+    """
+    return "{{ encodeURIComponent(" + expr + ") }}"
+
+
 def _stable_id(*parts: str) -> str:
     """A deterministic 12-digit node id, identical on every run."""
     h = hashlib.sha1("\x00".join(parts).encode("utf-8")).hexdigest()
@@ -185,10 +203,15 @@ class Flow:
                 params["jsonBody"] = body
         n = self.add(name, "n8n-nodes-base.httpRequest", params, version=4,
                      creds={"httpHeaderAuth": {"name": CRED_TWENTY}}, row=row)
-        # Transient failures against Twenty are common at the 100/min ceiling.
+        # Twenty's ceiling is 100 requests per MINUTE, so a burst that trips it
+        # stays tripped for a good part of that minute. Three tries two seconds
+        # apart covers six seconds and gives up well inside the window — which
+        # is how a renewal run died on "receiving too many requests" right
+        # after the seeder had saturated the limit. 5 x 5s is n8n's maximum and
+        # covers 20s, enough for the sweeps and renewal batches measured here.
         self.nodes[-1]["retryOnFail"] = True
-        self.nodes[-1]["maxTries"] = 3
-        self.nodes[-1]["waitBetweenTries"] = 2000
+        self.nodes[-1]["maxTries"] = 5
+        self.nodes[-1]["waitBetweenTries"] = 5000
         return n
 
     def code(self, name: str, js: str, *, row: int = 0) -> str:
@@ -302,7 +325,7 @@ return [{ json: {
 
     recent = f.twenty("Recent failures?", "GET",
                       "/rest/automationRuns?filter=workflowName[eq]:"
-                      "{{ $json.workflowName }},status[eq]:FAILED"
+                      "{{ encodeURIComponent($json.workflowName) }},status[eq]:FAILED"
                       "&order_by=startedAt[DescNullsLast]&limit=5")
 
     dedupe = f.code("Suppress alert storm", """
@@ -350,7 +373,7 @@ def wf_send_email() -> Flow:
 
     consent = f.twenty("Get consent", "GET",
                        "/rest/consentRecords?filter=personId[eq]:"
-                       "{{ $('When called').first().json.personId }}"
+                       "{{ encodeURIComponent($('When called').first().json.personId) }}"
                        ",channel[eq]:EMAIL"
                        "&order_by=effectiveAt[DescNullsLast]&limit=1")
 
@@ -510,7 +533,8 @@ return [{ json: {
 """.strip())
 
     find = f.twenty("Find person", "GET",
-                    "/rest/people?filter=emails.primaryEmail[eq]:{{ $json.email }}&limit=1")
+                    "/rest/people?filter=emails.primaryEmail[eq]:"
+                    "{{ encodeURIComponent($json.email) }}&limit=1")
 
     exists = f.code("Exists?", """
 // Idempotency: forms get double-submitted and webhooks get retried. Search
@@ -548,7 +572,7 @@ return [{ json: { ...$('Normalise').first().json,
     find_co = f.twenty("Find company", "GET",
                        "/rest/companies"
                        "?filter=domainName.primaryLinkUrl[ilike]:"
-                       "%{{ $('Normalise').first().json.emailDomain }}%&limit=1")
+                       "%{{ encodeURIComponent($('Normalise').first().json.emailDomain) }}%&limit=1")
 
     co_branch = f.code("Company exists?", """
 const found = ($input.first().json.data?.companies || [])[0];
@@ -678,7 +702,8 @@ def wf_tracked_link() -> Flow:
     }, version=2)
 
     lookup = f.twenty("Find link", "GET",
-                      "/rest/trackedLinks?filter=slug[eq]:{{ $json.query.s }}&limit=1")
+                      "/rest/trackedLinks?filter=slug[eq]:"
+                      "{{ encodeURIComponent($json.query.s) }}&limit=1")
 
     check = f.code("Resolve", """
 const link = ($input.first().json.data?.trackedLinks || [])[0];
@@ -736,7 +761,7 @@ def wf_renewal() -> Flow:
                      # which is a full table scan every morning forever.
                      "/rest/serviceSubscriptions"
                      "?filter=status[in]:[ACTIVE,RENEWAL_DUE],"
-                     "renewalDate[lte]:{{ $now.plus({ days: 90 }).toISO() }}"
+                     "renewalDate[lte]:{{ encodeURIComponent($now.plus({ days: 90 }).toISO()) }}"
                      "&order_by=renewalDate[AscNullsLast]&limit=200")
 
     window = f.code("Days until renewal", """
@@ -936,13 +961,48 @@ return [{ json: {
     return f
 
 
+def wf_failure_probe() -> Flow:
+    """
+    Dev-only workflow whose entire job is to fail.
+
+    The error handler is the safety net for everything else, and it was the one
+    workflow never exercised: on a freshly built stack nothing had failed, so
+    it had no executions and the audit correctly reported it unproven. Waiting
+    for a real failure to find out whether failure handling works is the wrong
+    order.
+
+    Running this fires the same path a genuine failure does — error trigger,
+    automationRun FAILED, alert — so `prove_workflows.py` can assert on it.
+    """
+    f = Flow("SYS Failure Probe (dev)",
+             "Throws on purpose so the error handler can be proven. Deployed "
+             "and activated only with --dev.")
+
+    # A webhook, not a manual trigger. n8n only invokes `settings.errorWorkflow`
+    # for PRODUCTION executions — a manual run fails in the editor and the
+    # error workflow is never called, so a probe run by hand proves nothing
+    # about the path a real failure takes.
+    trig = f.add("Fail on request", "n8n-nodes-base.webhook", {
+        "path": "fail-probe",
+        "httpMethod": "GET",
+        "options": {},
+    }, version=2)
+    boom = f.code("Fail deliberately", """
+// The message is asserted on by prove_workflows.py.
+throw new Error('deliberate failure probe');
+""".strip())
+    f.chain(trig, boom)
+    return f
+
+
 # Workflows that exist only to make local verification possible. They are
 # generated and committed so the proof is reproducible, but never deployed to
 # production, where the real chat webhook replaces them.
-DEV_ONLY = {"SYS Alert Sink (dev)"}
+DEV_ONLY = {"SYS Alert Sink (dev)", "SYS Failure Probe (dev)"}
 
 BUILDERS = [wf_error_handler, wf_send_email, wf_lead_form,
-            wf_tracked_link, wf_renewal, wf_sweeps, wf_alert_sink]
+            wf_tracked_link, wf_renewal, wf_sweeps, wf_alert_sink,
+            wf_failure_probe]
 
 
 def lint(flow: Flow) -> list[str]:
@@ -971,6 +1031,17 @@ def lint(flow: Flow) -> list[str]:
                         f"would evaluate `{seen.strip()[:60]}...`")
             if val.count("{{") != val.count("}}"):
                 problems.append(f"{where}: `{key}` has unbalanced braces")
+        # A raw value interpolated into a filter corrupts the query string.
+        for key, val in (node.get("parameters") or {}).items():
+            if key != "url" or not isinstance(val, str) or "filter=" not in val:
+                continue
+            tail = val.split("filter=", 1)[1].split("&", 1)[0]
+            for m in _PLACEHOLDER.finditer(tail):
+                if "encodeURIComponent" not in m.group(1):
+                    problems.append(
+                        f"{where}: filter value `{m.group(1).strip()[:40]}` is "
+                        "interpolated raw — wrap it in encodeURIComponent()")
+
         # A body sent as a plain string never gets evaluated.
         if node.get("type") == "n8n-nodes-base.httpRequest":
             body = (node.get("parameters") or {}).get("jsonBody")

@@ -26,12 +26,21 @@ the recipe; Docker runs the kitchen.
 ## Quick start
 
 ```bash
-# Build the CRM (see docs/08-local-build.md)
+# Build the CRM and prove it works — see docs/08-local-build.md
+./infra/rebuild.sh          # zero to proven, ~12 min, stops at the first failure
+
+# or step by step
 ./infra/up.sh                             # stack up, secrets generated
 python scripts/stack_verify.py            # every layer, worker included
+python scripts/bootstrap_workspace.py     # Twenty user, workspace, API key
+python scripts/bootstrap_n8n.py           # n8n owner + API key
 python scripts/twenty_provision.py        # 25 objects, 132 fields
 python scripts/seed_demo_data.py          # 448 demo records
-python scripts/n8n_deploy.py              # 6 workflows
+python scripts/n8n_credentials.py         # Twenty header auth + SMTP
+python scripts/validate_workflow_queries.py    # every query vs the live schema
+python scripts/n8n_deploy.py --dev --activate  # 8 workflows (2 dev-only)
+python scripts/prove_workflows.py         # 25 checks against the running stack
+python scripts/implementation_audit.py    # honest per-feature status
 
 # Audit GHL
 cp .env.example .env          # fill in GHL_TOKEN, GHL_LOCATION
@@ -61,10 +70,15 @@ scripts/twenty_probe.py              reads the live Twenty instance's real capab
 scripts/twenty_provision.py          builds the object model via the Metadata API
 scripts/build_audit.py               merges evidence + taxonomy → the report
 scripts/build_n8n_workflows.py       generates the n8n workflow library
+scripts/validate_workflow_queries.py every Twenty call vs the live schema
+scripts/n8n_credentials.py           creates the n8n credentials headlessly
 scripts/n8n_deploy.py                pushes workflows into n8n (idempotent)
-n8n/workflows/                       6 workflows, 58 nodes — the foundation
+scripts/prove_workflows.py           runs the workflows, asserts what happened
+scripts/implementation_audit.py      per-feature status, measured not claimed
+n8n/workflows/                       8 workflows — 6 real, 2 dev-only (alert sink, failure probe)
 infra/docker-compose.yml             Twenty + n8n + Postgres + Redis + backups
 infra/up.sh                          one-command bring-up, generates secrets
+infra/rebuild.sh                     zero to proven, every step a gate
 scripts/stack_verify.py              verifies every layer independently
 scripts/seed_demo_data.py            448 deterministic Aspire demo records
 docs/                                method, findings, open decisions

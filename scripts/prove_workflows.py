@@ -90,6 +90,17 @@ def twenty(path: str) -> dict:
     return json.loads(body or "{}")
 
 
+def twenty_post(obj: str, body: dict) -> dict:
+    status, raw, _ = http("POST", f"{TWENTY}/rest/{obj}",
+                          headers={"Authorization": f"Bearer {TWENTY_KEY}",
+                                   "Content-Type": "application/json"},
+                          data=json.dumps(body).encode())
+    if status >= 400:
+        raise RuntimeError(f"Twenty {status}: {raw[:200].decode('utf-8','replace')}")
+    d = json.loads(raw or "{}").get("data", {})
+    return next(iter(d.values()), {}) if d else {}
+
+
 def rows(obj: str, query: str = "") -> list[dict]:
     parts = [q for q in query.split("&") if q]
     if not any(q.startswith("limit=") for q in parts):
@@ -207,6 +218,12 @@ def submit_form(fields: list[str]) -> int:
 
 RESULTS: list[tuple[str, bool, str]] = []
 
+# Records this run created, newest first, as (object, id). Cleared up at the
+# end unless --keep: the proof runs against the same instance that gets
+# demonstrated, and "Proof Lead 2b5a508b" sitting in the pipeline during a
+# walkthrough undoes the point of seeding realistic data in the first place.
+CREATED: list[tuple[str, str]] = []
+
 
 def check(name: str, ok: bool, detail: str = "") -> bool:
     RESULTS.append((name, ok, detail))
@@ -232,6 +249,9 @@ def prove_lead_form() -> None:
     if not check("person created", len(people) == 1, f"{len(people)} found"):
         return
     person = people[0]
+    CREATED.append(("people", person["id"]))
+    if person.get("companyId"):
+        CREATED.append(("companies", person["companyId"]))
 
     check("company created and linked", bool(person.get("companyId")),
           str(person.get("companyId")))
@@ -269,6 +289,9 @@ def prove_consent_gate() -> None:
     people = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
     if not check("person still created", len(people) == 1):
         return
+    CREATED.append(("people", people[0]["id"]))
+    if people[0].get("companyId"):
+        CREATED.append(("companies", people[0]["companyId"]))
 
     consent = rows("consentRecords", f"filter=personId[eq]:{people[0]['id']}")
     check("consent recorded as PENDING, not OPTED_IN",
@@ -287,10 +310,22 @@ def prove_consent_gate() -> None:
 
 def prove_tracked_link() -> None:
     print(f"\n{BOLD}MSG Tracked Link Redirect — click tracking{OFF}")
-    links = rows("trackedLinks", "limit=1")
-    if not check("a tracked link exists to test", bool(links)):
+    # Create the link rather than borrowing a seeded one. A check that only
+    # runs when the demo data happens to contain the right record is a check
+    # that quietly stops running — this one did, on the first clean rebuild.
+    slug = "proof-" + uuid.uuid4().hex[:8]
+    try:
+        link = twenty_post("trackedLinks", {
+            "name": f"Proof link {slug}",
+            "slug": slug,
+            "destinationUrl": {"primaryLinkUrl": "https://aspiretss.com/cmmc"},
+            "clickCount": 0,
+        })
+    except RuntimeError as e:
+        check("a tracked link can be created to test", False, str(e)[:90])
         return
-    link = links[0]
+    CREATED.append(("trackedLinks", link["id"]))
+    check("a tracked link exists to test", bool(link.get("id")), slug)
     before = link.get("clickCount") or 0
 
     status, _, headers = http("GET", f"{N8N}/webhook/t?s={link['slug']}",
@@ -308,22 +343,55 @@ def prove_tracked_link() -> None:
 
 
 def prove_error_handler(sess: N8nSession, ids: dict) -> None:
-    print(f"\n{BOLD}SYS Error Handler — failures are caught and alerted{OFF}")
-    before = len(rows("automationRuns", "filter=status[eq]:FAILED"))
+    """
+    Break something on purpose and check the safety net catches it.
 
-    # A workflow whose Twenty call cannot succeed: point it at a bad path.
-    wid = ids.get("MSG Tracked Link Redirect")
+    Asserting that the error handler *exists* proves nothing — on a freshly
+    built stack nothing has failed, so it has no executions and no evidence
+    either way. `SYS Failure Probe (dev)` throws deliberately so the real path
+    runs: error trigger, automationRun FAILED, alert.
+    """
+    print(f"\n{BOLD}SYS Error Handler — failures are caught and alerted{OFF}")
+
     status, _, _ = http("GET", f"{N8N}/webhook/t?s=__definitely_not_a_slug__",
                         redirect=False)
     check("unknown slug does not 5xx", status < 500, f"HTTP {status}")
 
-    runs = rows("automationRuns", "order_by=createdAt[DescNullsLast]")
-    check("automationRun history is being written", len(runs) > 0,
-          f"{len(runs)} run(s) recorded")
+    before = len(rows("automationRuns", "filter=status[eq]:FAILED"))
+    alerts_before = len([r for r in rows("automationRuns")
+                         if (r.get("workflowName") or "").startswith("ALERT")])
 
-    alerts = [r for r in runs if (r.get("workflowName") or "").startswith("ALERT")]
-    check("chat alerts reach the webhook", bool(alerts),
-          f"{len(alerts)} alert(s) delivered")
+    have_probe = bool(ids.get("SYS Failure Probe (dev)"))
+    if not check("failure probe deployed", have_probe,
+                 "" if have_probe else "deploy with --dev --activate"):
+        return
+    # Hit the production webhook. A manual run would fail in the editor without
+    # ever invoking the error workflow, which is the thing under test.
+    # The webhook answers on receipt, before the workflow runs, so a 200 here
+    # says nothing about the outcome. The proof is the automationRun below.
+    status, _, _ = http("GET", f"{N8N}/webhook/fail-probe", redirect=False)
+    check("failure probe fired", status < 400, f"HTTP {status}")
+
+    # The error workflow runs after the failing execution finishes.
+    failed, alerts = [], []
+    for _ in range(15):
+        time.sleep(2)
+        failed = rows("automationRuns", "filter=status[eq]:FAILED"
+                                        "&order_by=createdAt[DescNullsLast]")
+        alerts = [r for r in rows("automationRuns")
+                  if (r.get("workflowName") or "").startswith("ALERT")]
+        if len(failed) > before and len(alerts) > alerts_before:
+            break
+
+    check("failure recorded in Twenty as automationRun FAILED",
+          len(failed) > before,
+          failed[0].get("workflowName", "") if failed else "none")
+    check("failure message captured, not swallowed",
+          bool(failed) and "deliberate failure probe" in
+          (failed[0].get("errorMessage") or ""),
+          (failed[0].get("errorMessage") or "")[:60] if failed else "")
+    check("alert delivered for the failure", len(alerts) > alerts_before,
+          f"{len(alerts) - alerts_before} new alert(s)")
 
 
 def prove_scheduled(sess: N8nSession, ids: dict) -> None:
@@ -353,12 +421,44 @@ def prove_scheduled(sess: N8nSession, ids: dict) -> None:
               failed[0][0] + ": " + failed[0][1] if failed else status)
 
 
+def cleanup() -> None:
+    """
+    Remove the records this run created.
+
+    Deletes people and companies only. The consent records, message logs and
+    automationRuns it also produced are the audit trail — they are supposed to
+    outlive the thing they describe, and a run that erased its own suppression
+    evidence would be a strange thing to ship.
+    """
+    if not CREATED:
+        return
+    gone = 0
+    for obj, rid in reversed(CREATED):
+        # A proof run finishes right after a burst of writes, so the deletes
+        # land on a saturated rate limit and 429. Without a retry the cleanup
+        # quietly gave up and left test records in the CRM.
+        for attempt in range(4):
+            status, _, _ = http("DELETE", f"{TWENTY}/rest/{obj}/{rid}",
+                                headers={"Authorization": f"Bearer {TWENTY_KEY}"})
+            if status < 400:
+                gone += 1
+                break
+            if status != 429:
+                break
+            time.sleep(5)
+    left = len(CREATED) - gone
+    print(f"\n  {DIM}cleaned up {gone}/{len(CREATED)} test record(s){OFF}"
+          + (f"  {RED}{left} left behind{OFF}" if left else ""))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Prove the workflows work")
     ap.add_argument("--only", default="",
                     help="lead, consent, link, error, scheduled")
     ap.add_argument("--email", default="admin@aspiretss.com")
     ap.add_argument("--password", default="AspireDemo2026!")
+    ap.add_argument("--keep", action="store_true",
+                    help="leave the test records in Twenty for inspection")
     args = ap.parse_args()
 
     if not TWENTY_KEY or not N8N_KEY:
@@ -390,6 +490,9 @@ def main() -> int:
     run("link", prove_tracked_link)
     run("error", prove_error_handler, sess, ids)
     run("scheduled", prove_scheduled, sess, ids)
+
+    if not args.keep:
+        cleanup()
 
     passed = sum(1 for _, ok, _ in RESULTS if ok)
     total = len(RESULTS)

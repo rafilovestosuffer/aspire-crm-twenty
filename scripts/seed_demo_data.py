@@ -29,6 +29,7 @@ import time
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import quote
 from urllib import error, request
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,8 +48,10 @@ rng = random.Random(SEED)
 # relative dates ("renews in 90 days") stay correct on whatever day it runs.
 NOW = datetime.combine(date.today(), datetime.min.time(), tzinfo=timezone.utc)
 
-# Everything created here carries this marker so --wipe can find it again and
-# nobody mistakes seeded data for real records.
+# Task titles carry this marker so nobody mistakes seeded work for real work.
+# It is NOT how --wipe identifies records generally: every generated address is
+# under `.example.com` (RFC 2606 reserves it for exactly this), and everything
+# else hangs off a seeded company. See Twenty.find_seeded.
 MARK = "[demo]"
 
 INDUSTRIES = [
@@ -149,8 +152,9 @@ class Twenty:
                 return v["id"]
         return data.get("id")
 
-    def find_seeded(self, plural: str) -> list[dict]:
-        status, resp, err = self.call("GET", f"/rest/{plural}?limit=200")
+    def query(self, plural: str, filt: str = "") -> list[dict]:
+        q = f"?filter={quote(filt)}&limit=200" if filt else "?limit=200"
+        status, resp, err = self.call("GET", f"/rest/{plural}{q}")
         if err or status >= 400 or self.dry_run:
             return []
         node = (resp or {}).get("data", {})
@@ -158,6 +162,34 @@ class Twenty:
             if isinstance(v, list):
                 return v
         return []
+
+    def find_seeded(self, plural: str, company_ids: set[str]) -> list[dict]:
+        """
+        Only records this script created.
+
+        This used to return `/rest/{plural}?limit=200` — every record in the
+        object, unfiltered — so `--wipe` deleted whatever it found, seeded or
+        not. On a stack holding real data that is straightforward data loss,
+        and the wipe runs as part of the rebuild script.
+
+        Seeded records are identifiable without an extra column: every
+        generated address is under `.example.com`, which RFC 2606 reserves for
+        exactly this, and tasks carry the MARK prefix. Everything else hangs
+        off a seeded company.
+        """
+        if plural == "companies":
+            return self.query(plural,
+                              "domainName.primaryLinkUrl[ilike]:%.example.com%")
+        if plural == "people":
+            return self.query(plural, "emails.primaryEmail[ilike]:%.example.com%")
+        if plural == "tasks":
+            return self.query(plural, f"title[ilike]:%{MARK}%")
+        # Children of a seeded company. Without any seeded company there is
+        # nothing of ours to remove, so removing nothing is the right answer.
+        if not company_ids:
+            return []
+        return [r for r in self.query(plural)
+                if r.get("companyId") in company_ids]
 
 
 def read_env() -> dict[str, str]:
@@ -366,10 +398,13 @@ def main() -> int:
 
     if args.wipe:
         print("Wiping previously seeded records...")
+        # Resolve the seeded companies first: the child objects are identified
+        # by pointing at one, and companies must be deleted last.
+        seeded_companies = {c["id"] for c in api.find_seeded("companies", set())}
         for plural in ("phishingBaselines", "consentRecords", "trainingAccounts",
                        "complianceEngagements", "serviceSubscriptions",
                        "opportunities", "tasks", "people", "companies"):
-            rows = api.find_seeded(plural)
+            rows = api.find_seeded(plural, seeded_companies)
             n = 0
             for r in rows:
                 api.call("DELETE", f"/rest/{plural}/{r['id']}")

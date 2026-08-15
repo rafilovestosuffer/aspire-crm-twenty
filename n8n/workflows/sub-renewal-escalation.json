@@ -24,7 +24,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/serviceSubscriptions?filter=status[in]:[ACTIVE,RENEWAL_DUE],renewalDate[lte]:{{ $now.plus({ days: 90 }).toISO() }}&order_by=renewalDate[AscNullsLast]&limit=200",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/serviceSubscriptions?filter=status[in]:[ACTIVE,RENEWAL_DUE],renewalDate[lte]:{{ encodeURIComponent($now.plus({ days: 90 }).toISO()) }}&order_by=renewalDate[AscNullsLast]&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -49,8 +49,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -189,8 +189,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -223,8 +223,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -257,8 +257,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -313,8 +313,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {

@@ -62,7 +62,7 @@ Source: probed live stack. 111 catalogued features.
 | `EM-02` | Drag-and-drop email builder | **MODELLED** | `emailTemplate` object exists, no automation |
 | `EM-03` | Bulk / campaign email send | **MODELLED** | `campaign` object exists, no automation |
 | `EM-04` | Drip sequences | **MODELLED** | `campaign` object exists, no automation |
-| `EM-05` | Trigger links / click tracking | **LIVE** | webhook 307 + clickCount 0->1 verified |
+| `EM-05` | Trigger links / click tracking | **LIVE** | workflow `msg-tracked-link-redirect` |
 | `EM-06` | Dedicated sending domain / DKIM / SPF | **DESIGNED** | specified in the guide only |
 | `EM-07` | Unsubscribe / suppression list | **LIVE** | workflow `vend-send-email` |
 | `EM-08` | Email verification | **DESIGNED** | specified in the guide only |

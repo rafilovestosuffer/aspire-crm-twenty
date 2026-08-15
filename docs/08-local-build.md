@@ -18,12 +18,28 @@ overlay file. No rebuild.
 
 ---
 
-## Step 1 — Start the stack
+## The short version
 
 ```bash
 git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
 cd aspire-crm-twenty
 
+./infra/rebuild.sh
+```
+
+Ten steps, each a gate, stopping at the first failure: stack up → verify every
+layer → Twenty workspace and n8n owner → object model → demo data → n8n
+credentials → validate every Twenty API call against the live schema → deploy
+and activate → run the workflows and assert what they did.
+
+Roughly 12 minutes, most of it Twenty's first-boot migrations. The rest of this
+document is what each step does and why, for when one of them fails.
+
+---
+
+## Step 1 — Start the stack
+
+```bash
 ./infra/up.sh
 ```
 
@@ -171,23 +187,28 @@ The syntax the API actually wants:
 | order | `order_by=field[DescNullsLast]` | `orderBy=` — ignored |
 
 **`prove_workflows.py`** submits the real form, follows the real redirect,
-triggers the real schedules, and then asks Twenty whether the records exist.
-22 checks. Expect all of them to pass:
+breaks something on purpose, triggers the real schedules, and then asks Twenty
+whether the records exist. 25 checks. Expect all of them to pass:
 
 | Proves | Check |
 |---|---|
 | `LEAD Form Intake` | person, company, linked consent, scored task, acknowledgement to the right address |
 | Consent gate | opted-out send **refused**, no mail, refusal logged in `messageLog` |
 | `MSG Tracked Link Redirect` | 307 to the destination, `clickCount` incremented |
-| `SYS Error Handler` | `automationRun` history written, chat alert delivered |
+| `SYS Error Handler` | a deliberate failure produces `automationRun` FAILED with the real message, and an alert |
 | `SUB Renewal Escalation`, `OPS Scheduled Sweeps` | run clean against seeded data |
 
 Then `python scripts/n8n_deploy.py --activate`.
 
-> Mailpit (`http://localhost:8025`) and the alert sink are **dev only**. Mailpit
-> sits behind a compose profile the VPS never enables, and `n8n_deploy.py`
-> refuses to deploy the sink without `--dev`, so production alerts can never be
-> swallowed by it.
+> Mailpit (`http://localhost:8025`), the alert sink and the failure probe are
+> **dev only**. Mailpit sits behind a compose profile the VPS never enables, and
+> `n8n_deploy.py` refuses to deploy the other two without `--dev` — so
+> production alerts can never be swallowed by the sink, and nothing in
+> production throws on purpose.
+
+> **Error workflows do not fire for manual runs.** n8n only invokes
+> `settings.errorWorkflow` for production executions, which is why the probe is
+> webhook-triggered. Testing failure handling from the editor proves nothing.
 
 ---
 

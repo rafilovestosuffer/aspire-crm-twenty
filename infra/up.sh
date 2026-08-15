@@ -2,6 +2,7 @@
 # Bring up the Aspire CRM stack. Safe to re-run.
 #
 #   ./infra/up.sh              start (generates any missing secrets first)
+#   ./infra/up.sh --no-dev     start without the local mail catcher
 #   ./infra/up.sh --vps        start with the VPS overlay (loopback binding)
 #   ./infra/up.sh --down       stop, keep data
 #   ./infra/up.sh --destroy    stop and DELETE ALL DATA
@@ -14,6 +15,18 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$HERE/.env"
 COMPOSE=(docker compose -f "$HERE/docker-compose.yml")
 
+# The dev profile adds Mailpit, a local SMTP catcher, so the send path can be
+# exercised end to end with no mail account and no chance of a test reaching a
+# real contact. On by default locally; --vps and --no-dev leave it out, and the
+# profile must be set for `down` too or the container is orphaned.
+DEV_PROFILE=1
+for arg in "$@"; do
+  case "$arg" in
+    --vps|--no-dev) DEV_PROFILE=0 ;;
+  esac
+done
+[[ $DEV_PROFILE -eq 1 ]] && COMPOSE+=(--profile dev)
+
 c_ok()   { printf '\033[32m  ok  \033[0m %s\n' "$1"; }
 c_warn() { printf '\033[33m  !!  \033[0m %s\n' "$1"; }
 c_info() { printf '\033[36m  ..  \033[0m %s\n' "$1"; }
@@ -21,11 +34,12 @@ c_info() { printf '\033[36m  ..  \033[0m %s\n' "$1"; }
 for arg in "$@"; do
   case "$arg" in
     --vps) COMPOSE+=(-f "$HERE/docker-compose.vps.yml") ;;
-    --down) "${COMPOSE[@]}" down; c_ok "stopped — data kept"; exit 0 ;;
+    --no-dev) ;;
+    --down) "${COMPOSE[@]}" down --remove-orphans; c_ok "stopped — data kept"; exit 0 ;;
     --destroy)
       read -rp "This deletes the database and every workflow. Type DESTROY: " a
       [[ "$a" == "DESTROY" ]] || { echo "aborted"; exit 1; }
-      "${COMPOSE[@]}" down -v; c_ok "destroyed"; exit 0 ;;
+      "${COMPOSE[@]}" down -v --remove-orphans; c_ok "destroyed"; exit 0 ;;
   esac
 done
 
@@ -82,7 +96,12 @@ c_info "pulling images (first run takes a few minutes)"
 "${COMPOSE[@]}" pull --quiet 2>/dev/null || "${COMPOSE[@]}" pull
 
 c_info "starting"
-"${COMPOSE[@]}" up -d
+# `set -e` would abort here on a first boot: `worker` waits for the server to
+# be healthy, and if migrations outlast the healthcheck grace period compose
+# exits non-zero even though the server itself is fine. The health wait below
+# is the real gate, and the worker check after it recovers anything that gave
+# up early.
+"${COMPOSE[@]}" up -d || c_warn "compose reported an error — checking what is actually up"
 
 # Twenty runs migrations on first boot; that is the slow part.
 c_info "waiting for Twenty to become healthy (up to 5 minutes on first run)"
@@ -95,7 +114,12 @@ try:
     print(d[0].get("Health") or d[0].get("State") or "?")
 except Exception: print("?")' 2>/dev/null || echo "?")"
   [[ "$state" == "healthy" ]] && { c_ok "Twenty healthy"; break; }
-  [[ $i -eq 60 ]] && c_warn "still not healthy — check: docker compose -f infra/docker-compose.yml logs server"
+  if [[ $i -eq 60 ]]; then
+    c_warn "still not healthy — check: docker compose -f infra/docker-compose.yml logs server"
+    # Exit non-zero so a scripted rebuild stops here rather than running eight
+    # more steps against a server that is not answering.
+    exit 1
+  fi
   sleep 5
 done
 

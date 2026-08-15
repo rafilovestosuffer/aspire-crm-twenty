@@ -20,7 +20,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/trackedLinks?filter=slug[eq]:{{ $json.query.s }}&limit=1",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/trackedLinks?filter=slug[eq]:{{ encodeURIComponent($json.query.s) }}&limit=1",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -45,8 +45,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -122,8 +122,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {

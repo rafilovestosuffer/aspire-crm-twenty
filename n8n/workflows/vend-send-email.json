@@ -54,13 +54,13 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/consentRecords?filter=personId[eq]:{{ $('When called').first().json.personId }},channel[eq]:EMAIL&order_by=effectiveAt[DescNullsLast]&limit=1",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/consentRecords?filter=personId[eq]:{{ encodeURIComponent($('When called').first().json.personId) }},channel[eq]:EMAIL&order_by=effectiveAt[DescNullsLast]&limit=1",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -85,8 +85,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -197,8 +197,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
@@ -231,8 +231,8 @@
         }
       },
       "retryOnFail": true,
-      "maxTries": 3,
-      "waitBetweenTries": 2000
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     }
   ],
   "connections": {

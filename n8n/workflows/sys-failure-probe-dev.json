@@ -1,0 +1,58 @@
+{
+  "name": "SYS Failure Probe (dev)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "fail-probe",
+        "httpMethod": "GET",
+        "options": {}
+      },
+      "id": "826495307396",
+      "name": "Fail on request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// The message is asserted on by prove_workflows.py.\nthrow new Error('deliberate failure probe');"
+      },
+      "id": "371599893297",
+      "name": "Fail deliberately",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Fail on request": {
+      "main": [
+        [
+          {
+            "node": "Fail deliberately",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Throws on purpose so the error handler can be proven. Deployed and activated only with --dev."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

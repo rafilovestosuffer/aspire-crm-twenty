@@ -47,10 +47,15 @@ RESET = "\033[0m"
 
 # Feature id -> (status, evidence). Anything not listed falls through to the
 # rules below. Only put a feature here when there is a specific reason.
+#
+# LIVE is deliberately NOT allowed here, and `_assert_no_asserted_live` below
+# enforces it. LIVE means "this was observed working on the running stack a
+# moment ago" — the one claim in this file that must never be a remembered
+# result. An earlier version hard-coded EM-05 as LIVE from a verified run, and
+# because EXPLICIT is applied last it would have kept reporting LIVE long after
+# the workflow stopped working. Status that outlives its evidence is exactly
+# what this script exists to prevent.
 EXPLICIT: dict[str, tuple[str, str]] = {
-    # Proven end to end on the running stack this session.
-    "EM-05": (LIVE, "webhook 307 + clickCount 0->1 verified"),
-
     # Twenty does these natively; they need configuration, not building.
     "CT-01": (NATIVE, "Twenty saved views"),
     "CT-02": (NATIVE, "Twenty bulk edit"),
@@ -157,6 +162,15 @@ def http(url: str, headers: dict[str, str]) -> tuple[int, str]:
         return 0, ""
 
 
+def _assert_no_asserted_live() -> None:
+    """LIVE must be measured, never declared. See the note on EXPLICIT."""
+    asserted = [f for f, (st, _) in EXPLICIT.items() if st == LIVE]
+    if asserted:
+        raise SystemExit(
+            "EXPLICIT claims LIVE for " + ", ".join(sorted(asserted))
+            + " — LIVE may only come from probing the running stack.")
+
+
 def probe_live(env: dict[str, str]) -> tuple[set[str], dict[str, bool], str]:
     """Ask the running stack what exists. Returns (objects, workflow->ran, note)."""
     objects: set[str] = set()
@@ -200,6 +214,7 @@ def main() -> int:
     ap.add_argument("--markdown", action="store_true")
     args = ap.parse_args()
 
+    _assert_no_asserted_live()
     env = read_env()
     live_objects, workflow_ran, note = probe_live(env)
 
