@@ -131,14 +131,32 @@ def opener_for(cafile: str | None = None):
     return urllib.request.build_opener(*handlers)
 
 
-def fetch(opener, url: str, host: str | None = None):
-    """Return (status, headers). HTTP errors are results here, not exceptions."""
+def fetch(opener, url: str, host: str | None = None, tries: int = 3):
+    """Return (status, headers). HTTP errors are results here, not exceptions.
+
+    A refused or reset connection is retried: the throwaway proxy is seconds
+    old and the app behind it may still be binding. Only transport failures
+    retry — an HTTP status is an answer, and answering slowly is not a pass.
+    deploy.sh gates on this script, so a blip that escaped as a traceback would
+    fail the deployment with a stack trace naming nothing.
+    """
     req = urllib.request.Request(url, headers={"Host": host} if host else {})
-    try:
-        with opener.open(req, timeout=20) as r:
-            return r.status, dict(r.headers)
-    except urllib.error.HTTPError as e:
-        return e.code, dict(e.headers)
+    for attempt in range(tries):
+        try:
+            with opener.open(req, timeout=20) as r:
+                return r.status, dict(r.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers)
+        except (urllib.error.URLError, OSError) as e:
+            if attempt == tries - 1:
+                raise SystemExit(
+                    f"\n  cannot reach {url}"
+                    + (f" (Host: {host})" if host else "")
+                    + f"\n  {type(e).__name__}: {e}\n"
+                    f"  The proxy under test did not answer after {tries} "
+                    f"attempts. Re-run; if it persists the container failed to "
+                    f"start — check `docker compose logs caddy`.")
+            time.sleep(2 * (attempt + 1))
 
 
 # ---------------------------------------------------------------- VPS mode

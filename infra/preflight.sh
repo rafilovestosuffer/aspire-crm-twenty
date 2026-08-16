@@ -127,12 +127,30 @@ else
   bad "SMTP relay" "EMAIL_SMTP_HOST not set — the deploy stops at step 6, because nothing can send email. Google Workspace: smtp-relay.gmail.com:587 with an app password"
 fi
 
+# Also a blocker on a server, and for a sharper reason than it looks.
+# deploy.sh runs n8n_deploy.py WITHOUT --dev, so the alert-sink workflow that
+# backs the default URL is never created here. Left at the default, every alert
+# POSTs to a path that answers 404 — and that failure happens inside SYS Error
+# Handler, the one workflow whose job is to make sure a failure reaches a
+# person. The stack would run for weeks looking healthy while nothing that
+# broke was ever reported.
 alert=$(env_get ALERT_WEBHOOK_URL)
+hook_help="Google Chat: a space → Apps & integrations → Webhooks → copy the URL. Slack: an incoming webhook. Anything that accepts {\"text\": \"...\"}"
 case "$alert" in
-  *alert-sink*) warn "ALERT_WEBHOOK_URL" "still the local dev sink — real alerts would be swallowed" ;;
-  "")           warn "ALERT_WEBHOOK_URL" "not set — failures will be recorded but nobody notified" ;;
+  *alert-sink*) bad "ALERT_WEBHOOK_URL" "still the local dev sink, which is not deployed on a server — every alert would 404 inside the error handler. $hook_help" ;;
+  "")           bad "ALERT_WEBHOOK_URL" "not set — failures would be recorded in the CRM and nobody notified. $hook_help" ;;
   *)            ok   "ALERT_WEBHOOK_URL" "configured" ;;
 esac
+
+# Not a blocker: unassigned leads are still captured, scored and acknowledged,
+# and the sales notification still fires. Worth saying out loud, though —
+# "nothing is being assigned" is easy to miss for a week.
+reps=$(env_get ASPIRE_REP_IDS)
+if [[ -n "$reps" ]]; then
+  ok "ASPIRE_REP_IDS" "$(awk -F, '{print NF}' <<<"$reps") rep(s) in the round-robin"
+else
+  warn "ASPIRE_REP_IDS" "empty — new leads will be created with no owner. Fill in once the workspace members exist: Twenty → Settings → Members"
+fi
 
 # --------------------------------------------------------------- the network
 printf "\n${D}Network${O}\n"

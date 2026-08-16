@@ -52,7 +52,9 @@ EMAIL_SMTP_PORT=587
 EMAIL_SMTP_USER=<workspace user>
 EMAIL_SMTP_PASSWORD=<app password>
 
-ALERT_WEBHOOK_URL=<real chat webhook, or leave blank>
+# Required. The default in .env.example points at a workflow that only exists
+# on a dev machine, so on a server every alert 404s inside the error handler.
+ALERT_WEBHOOK_URL=<real chat webhook>
 ```
 
 Then:
@@ -82,6 +84,7 @@ the form, webhooks and OAuth callback stay public.
 | DNS | Both A records added **and resolving** — `dig +short crm.aspiretss.com` |
 | SMTP | Host, user, app password. Without it the deploy stops rather than half-working |
 | Office IP range | `N8N_EDITOR_ALLOWED_IPS`. Run `curl ifconfig.me` **from the office**. Without it the proxy will not start |
+| Chat webhook | `ALERT_WEBHOOK_URL`. Google Chat: a space → Apps & integrations → Webhooks. Two minutes, and without it no failure ever reaches a person |
 
 ### Three things immediately after
 
