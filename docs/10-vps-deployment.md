@@ -43,6 +43,10 @@ CRM_DOMAIN=crm.aspiretss.com
 AUTOMATION_DOMAIN=auto.aspiretss.com
 ACME_EMAIL=it@aspiretss.com
 
+# Office/VPN ranges allowed to open the n8n editor. Unset, the proxy will
+# not start — see step 2. From inside the office: curl ifconfig.me
+N8N_EDITOR_ALLOWED_IPS=203.0.113.0/24
+
 EMAIL_SMTP_HOST=smtp-relay.gmail.com
 EMAIL_SMTP_PORT=587
 EMAIL_SMTP_USER=<workspace user>
@@ -77,13 +81,13 @@ the form, webhooks and OAuth callback stay public.
 |---|---|
 | DNS | Both A records added **and resolving** — `dig +short crm.aspiretss.com` |
 | SMTP | Host, user, app password. Without it the deploy stops rather than half-working |
-| Office IP range | For the editor allowlist in step 3 below |
+| Office IP range | `N8N_EDITOR_ALLOWED_IPS`. Run `curl ifconfig.me` **from the office**. Without it the proxy will not start |
 
 ### Three things immediately after
 
 1. **Change both default passwords** — CRM and automation. They are in a public repository.
 2. **Check the padlock** on the CRM. A warning means Let's Encrypt could not reach port 80.
-3. **Edit the editor allowlist** in `infra/Caddyfile` — it ships matching nothing, so the editor currently refuses everyone including you. Put your office and VPN ranges in, then recreate Caddy.
+3. **Check you can open the automation editor.** If `N8N_EDITOR_ALLOWED_IPS` does not include the address you are browsing from, it refuses you too — by design. Fix the value in `infra/.env` and recreate Caddy.
 
 ---
 
@@ -204,6 +208,7 @@ N8N_PUBLIC_URL=https://auto.aspiretss.com
 CRM_DOMAIN=crm.aspiretss.com
 AUTOMATION_DOMAIN=auto.aspiretss.com
 ACME_EMAIL=it@aspiretss.com
+N8N_EDITOR_ALLOWED_IPS=<your office range — step 2>
 
 ALERT_WEBHOOK_URL=<the real chat webhook>
 ```
@@ -216,13 +221,20 @@ ALERT_WEBHOOK_URL=<the real chat webhook>
 `SERVER_URL` must match how people actually reach the CRM, scheme included. A
 mismatch produces a login redirect loop that looks like an auth bug.
 
-## Step 2 — Edit the editor allowlist
+## Step 2 — Set the editor allowlist
 
-Open `infra/Caddyfile` and replace the two placeholder ranges with your real
-office and VPN ranges:
+This is one line in `infra/.env`, not an edit to a tracked file — so it will not
+fight the next `git pull`:
 
+```ini
+N8N_EDITOR_ALLOWED_IPS=203.0.113.0/24 198.51.100.42/32
 ```
-@untrusted not remote_ip 203.0.113.0/24 198.51.100.0/24
+
+Space separated, CIDR notation. A single address is `/32`. To find the office's
+public address, run this **from inside the office**, not on the server:
+
+```bash
+curl ifconfig.me
 ```
 
 Public forms and inbound webhooks stay open — they have to be. Everything else
@@ -230,10 +242,14 @@ on `auto.` is the n8n editor, **which holds every credential in the stack**.
 Exposing it to the internet is the single largest avoidable risk in this
 deployment.
 
-The placeholders match nothing routable, so if you forget this step you lock
-yourself out rather than letting the world in. That is the safer direction to
-fail in. If you do lock yourself out, `docker compose exec caddy` still works
-over SSH.
+Leave it unset and the proxy refuses to start at all, rather than starting with
+the editor open. Set it wrong and you lock yourself out rather than letting the
+world in. Both are the safer direction to fail in, and `docker compose exec
+caddy` still works over SSH either way.
+
+Step 11 of the deploy proves this rule actually behaves: it checks the editor is
+refused from outside the range and served from inside it, and that the form,
+webhooks and OAuth callback are unaffected.
 
 ## Step 3 — Rehearse the certificate
 

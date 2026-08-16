@@ -19,10 +19,11 @@ the kind of thing to assert rather than assume.
 The two modes are checked differently, because the honest test differs:
 
   VPS       a throwaway Caddy runs the real infra/Caddyfile against the running
-            stack. A rehearsal has no public DNS, so ACME cannot run and the
-            file needs two mechanical edits — `auto_https off`, and the
-            allowlist line the operator is told to replace anyway. Swapping
-            that one line is how both branches of the rule get tested.
+            stack. A rehearsal has no public DNS, so ACME cannot run, so the
+            file needs one mechanical edit: `auto_https off`. Nothing else is
+            touched. The allowlist comes from N8N_EDITOR_ALLOWED_IPS, so both
+            branches are tested by starting the proxy with a different value —
+            the same knob an operator turns.
 
   internal  the real proxy is already running with real certificates from
             Caddy's own CA, so it is tested directly. Nothing is rewritten.
@@ -141,10 +142,14 @@ def fetch(opener, url: str, host: str | None = None):
 
 
 # ---------------------------------------------------------------- VPS mode
-def rewrite(allowlist: str) -> str:
-    """The real Caddyfile with two mechanical edits, and nothing else.
+def rewrite() -> str:
+    """The real Caddyfile with one mechanical edit, and nothing else.
 
-    Every matcher, handler and directive under test stays byte-identical to
+    A rehearsal has no public DNS, so ACME cannot run: `auto_https off` is the
+    only change to the rules. The allowlist itself is not rewritten — it reads
+    N8N_EDITOR_ALLOWED_IPS from the environment, so both branches are tested by
+    starting the proxy with a different value, exactly as an operator changes
+    it. Every matcher, handler and directive under test stays byte-identical to
     the file that ships.
     """
     src = CADDYFILE.read_text()
@@ -153,10 +158,9 @@ def rewrite(allowlist: str) -> str:
     if n != 1:
         sys.exit("could not find the global options block in infra/Caddyfile")
 
-    src, n = re.subn(
-        r"not remote_ip [\d./ ]+", f"not remote_ip {allowlist}", src, count=1)
-    if n != 1:
-        sys.exit("could not find the editor allowlist in infra/Caddyfile")
+    if "{$N8N_EDITOR_ALLOWED_IPS}" not in src:
+        sys.exit("infra/Caddyfile no longer reads N8N_EDITOR_ALLOWED_IPS — "
+                 "this check tests the allowlist by varying that value")
 
     # Placeholder domains: the real ones do not resolve here, which would make
     # the Host header meaningless. The http:// scheme pins each site to port 80
@@ -166,11 +170,12 @@ def rewrite(allowlist: str) -> str:
                .replace("{$AUTOMATION_DOMAIN}", f"http://{AUTO}"))
 
 
-def start_proxy(conf: Path, net: str, op) -> None:
+def start_proxy(conf: Path, net: str, op, allowlist: str) -> None:
     sh("docker", "rm", "-f", CONTAINER, check_rc=False)
     sh("docker", "run", "-d", "--name", CONTAINER, "--network", net,
        "-p", f"127.0.0.1:{HOST_PORT}:80",
        "-v", f"{conf}:/etc/caddy/Caddyfile:ro",
+       "-e", f"N8N_EDITOR_ALLOWED_IPS={allowlist}",
        # `email` with an empty value is a Caddyfile PARSE error, not a warning:
        # an unset ACME_EMAIL takes the whole proxy down at startup. The compose
        # overlay guards it with :? and preflight checks it; here it only has to
@@ -200,8 +205,8 @@ def run_vps() -> None:
     tmp = ROOT / "infra" / ".Caddyfile.ruletest"
     try:
         # ---- client OUTSIDE the allowlist: the internet's view -------------
-        tmp.write_text(rewrite("203.0.113.0/24 198.51.100.0/24"))
-        start_proxy(tmp, net, op)
+        tmp.write_text(rewrite())
+        start_proxy(tmp, net, op, "203.0.113.0/24 198.51.100.0/24")
         print(f"{D}Client outside the allowlist — this is what the internet sees{O}")
 
         check("editor refused", get("/", AUTO), 403,
@@ -229,8 +234,7 @@ def run_vps() -> None:
 
         # ---- client INSIDE the allowlist: the office view ------------------
         print(f"\n{D}Same file, allowlist widened to the client — the office view{O}")
-        tmp.write_text(rewrite(subnet))
-        start_proxy(tmp, net, op)
+        start_proxy(tmp, net, op, subnet)
 
         check("editor served to a trusted range", get("/", AUTO), 200,
               "the allowlist refuses even a client inside it — the office would "

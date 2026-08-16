@@ -3,7 +3,7 @@
     "VPS": {
       "caddyfile": "infra/Caddyfile",
       "checks_passed": true,
-      "verified_utc": "2026-08-16T03:56:25Z"
+      "verified_utc": "2026-08-16T03:58:12Z"
     },
     "internal": {
       "caddyfile": "infra/Caddyfile.internal",

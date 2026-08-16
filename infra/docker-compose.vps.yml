@@ -24,6 +24,10 @@ services:
       CRM_DOMAIN: ${CRM_DOMAIN:?set CRM_DOMAIN in infra/.env}
       AUTOMATION_DOMAIN: ${AUTOMATION_DOMAIN:?set AUTOMATION_DOMAIN in infra/.env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in infra/.env}
+      # Space-separated CIDRs allowed to reach the n8n editor. No default on
+      # purpose: an empty value is a Caddyfile parse error that takes the proxy
+      # down, so this fails at compose time with a message instead.
+      N8N_EDITOR_ALLOWED_IPS: ${N8N_EDITOR_ALLOWED_IPS:?set N8N_EDITOR_ALLOWED_IPS in infra/.env — the office/VPN ranges allowed to open the n8n editor}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # Certificates and ACME account keys. Losing this volume means

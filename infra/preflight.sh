@@ -196,12 +196,18 @@ if [[ $INTERNAL -eq 1 ]]; then
   # Caddyfile.internal has no allowlist on purpose: the host is unreachable
   # from outside the office, so the network is the control.
   ok "editor allowlist" "not used internally — the office network is the boundary"
-elif [[ -f "$HERE/Caddyfile" ]]; then
-  if grep -qE 'remote_ip .*(203\.0\.113\.|198\.51\.100\.|192\.0\.2\.)' "$HERE/Caddyfile"; then
-    warn "editor allowlist" "Caddyfile still has the RFC 5737 placeholder ranges — safe, but nobody can reach the automation editor until your office range replaces them"
-  else
-    ok "editor allowlist" "customised"
-  fi
+else
+  allow=$(env_get N8N_EDITOR_ALLOWED_IPS)
+  case "$allow" in
+    "")
+      bad "N8N_EDITOR_ALLOWED_IPS" "not set — the proxy will not start. These are the office/VPN ranges allowed to open the n8n editor, space separated, e.g. 203.0.113.0/24 198.51.100.42/32" ;;
+    *203.0.113.*|*198.51.100.*|*192.0.2.*)
+      # RFC 5737 documentation ranges. They match nothing routable, so the
+      # editor refuses everyone — safe, but you cannot get in either.
+      warn "N8N_EDITOR_ALLOWED_IPS" "still an RFC 5737 example range ($allow) — nobody, including you, can open the automation editor" ;;
+    *)
+      ok "N8N_EDITOR_ALLOWED_IPS" "$allow" ;;
+  esac
 fi
 
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
