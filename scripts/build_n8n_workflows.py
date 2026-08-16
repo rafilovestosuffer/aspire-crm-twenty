@@ -143,7 +143,7 @@ ROW_DY = 190         # vertical step between branch rows inside a phase
 BAND_DY = 620        # vertical step between wrapped bands
 WRAP_AT = 1300       # start a new band once a band is this wide
 NOTE_PAD = 40        # sticky note margin around its nodes
-MIN_NOTE_W = 470     # a note narrower than this wraps its text into a column
+MIN_NOTE_W = 560     # a note narrower than this wraps its text into a column
                      # so tall it runs down over the nodes it is labelling
 
 # n8n sticky note colours, by index. Chosen so a reader can tell the phases
@@ -166,11 +166,14 @@ def _caption_height(title: str, body: str, width: int) -> int:
     so it errs generous. Too much space leaves a gap; too little puts the text
     on top of the nodes, which is what a fixed value did.
     """
-    chars = max(int((width - 28) / 6.6), 20)
+    # 9px per character, measured off a real render rather than assumed: at
+    # 6.6 the estimate was a third short, every caption wrapped further than
+    # predicted, and the text sat on the nodes.
+    chars = max(int((width - 32) / 9.0), 16)
     lines = 0
     for para in body.split("\n"):
         lines += max(1, -(-len(para) // chars))     # ceil
-    return 52 + lines * 19 + 16                     # title + body + padding
+    return 60 + lines * 20 + 20                     # title + body + padding
 
 
 class Flow:

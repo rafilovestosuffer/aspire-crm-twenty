@@ -319,7 +319,7 @@
     {
       "parameters": {
         "content": "## Every morning, check what is coming up\nNothing happens when a renewal approaches \u2014 no system emits an\nevent for a date getting nearer. So we go and look, every day,\nand work out how many days are left on each subscription.\nGoHighLevel cannot do this at all.",
-        "height": 304,
+        "height": 320,
         "width": 860,
         "color": 5
       },
@@ -329,13 +329,13 @@
       "typeVersion": 1,
       "position": [
         -20,
-        156
+        140
       ]
     },
     {
       "parameters": {
         "content": "## Escalate at 90, 60, 30 and 7 days\nEach milestone does something different and more urgent: start\nthe conversation, confirm they intend to renew, open a renewal\nopportunity in the pipeline, then escalate. A renewal is never\nlost because nobody remembered it.",
-        "height": 874,
+        "height": 890,
         "width": 640,
         "color": 6
       },
@@ -345,7 +345,7 @@
       "typeVersion": 1,
       "position": [
         860,
-        156
+        140
       ]
     }
   ],

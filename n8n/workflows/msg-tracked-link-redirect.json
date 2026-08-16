@@ -160,7 +160,7 @@
     {
       "parameters": {
         "content": "## Someone clicks a link we sent\nOur emails use a link that points here rather than straight at\nthe destination. That is how click tracking works in every\nmarketing tool; this is the same idea without the vendor.",
-        "height": 285,
+        "height": 300,
         "width": 860,
         "color": 5
       },
@@ -170,13 +170,13 @@
       "typeVersion": 1,
       "position": [
         -20,
-        175
+        160
       ]
     },
     {
       "parameters": {
         "content": "## Count it, then get out of the way\nAdd one to the click count and send the visitor on to where\nthey were going. An unrecognised link gets a 404 rather than a\nredirect, so a guessed or edited URL cannot bounce someone\nthrough our domain to a site of their choosing.",
-        "height": 494,
+        "height": 510,
         "width": 640,
         "color": 4
       },
@@ -186,7 +186,7 @@
       "typeVersion": 1,
       "position": [
         860,
-        156
+        140
       ]
     }
   ],

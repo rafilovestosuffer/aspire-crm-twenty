@@ -227,7 +227,7 @@
     {
       "parameters": {
         "content": "## Look for what did NOT happen\nThe hardest thing to automate is absence. No event fires when a\ndeal goes quiet, a customer misses a meeting, or an invoice is\nnot paid \u2014 so once a day we ask the CRM those three questions\ndirectly.",
-        "height": 684,
+        "height": 700,
         "width": 1080,
         "color": 5
       },
@@ -237,13 +237,13 @@
       "typeVersion": 1,
       "position": [
         -20,
-        156
+        140
       ]
     },
     {
       "parameters": {
         "content": "## Only speak up if there is something to say\nA digest goes to the team when there is something in it. A\nquiet day sends nothing, because a daily message that is\nusually empty is one people stop opening.",
-        "height": 475,
+        "height": 490,
         "width": 860,
         "color": 2
       },
@@ -253,7 +253,7 @@
       "typeVersion": 1,
       "position": [
         1080,
-        175
+        160
       ]
     }
   ],

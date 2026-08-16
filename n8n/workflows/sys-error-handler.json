@@ -47,7 +47,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        470,
+        560,
         300
       ],
       "credentials": {
@@ -78,7 +78,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        940,
+        1120,
         300
       ],
       "credentials": {
@@ -99,7 +99,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1160,
+        1340,
         300
       ]
     },
@@ -129,7 +129,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1380,
+        1560,
         300
       ]
     },
@@ -147,7 +147,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1600,
+        1780,
         300
       ],
       "retryOnFail": true,
@@ -162,15 +162,15 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        1820,
+        2000,
         490
       ]
     },
     {
       "parameters": {
         "content": "## When any automation fails\nEvery other workflow points its failures here, so there is one\nplace that knows something went wrong. Without it a workflow\ncan fail quietly for weeks and the first anyone hears is a\ncustomer asking why nobody replied.",
-        "height": 304,
-        "width": 450,
+        "height": 380,
+        "width": 540,
         "color": 5
       },
       "id": "702810777662",
@@ -179,14 +179,14 @@
       "typeVersion": 1,
       "position": [
         -20,
-        156
+        80
       ]
     },
     {
       "parameters": {
         "content": "## Write it down in the CRM\nThe failure becomes a record in Twenty \u2014 which workflow, when,\nand the error. It lives with the business data rather than in a\nlog file nobody opens, so failures can be reported on like\nanything else.",
-        "height": 304,
-        "width": 450,
+        "height": 380,
+        "width": 540,
         "color": 4
       },
       "id": "012521374989",
@@ -194,14 +194,14 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        450,
-        156
+        540,
+        80
       ]
     },
     {
       "parameters": {
         "content": "## Alert, but do not spam\nIf the same workflow already failed several times in the last\nhour, log it but stay quiet. One broken integration can\notherwise produce hundreds of messages overnight, and the team\nlearns to ignore the channel \u2014 worse than no alerting at all.",
-        "height": 494,
+        "height": 510,
         "width": 1080,
         "color": 2
       },
@@ -210,8 +210,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        920,
-        156
+        1100,
+        140
       ]
     }
   ],

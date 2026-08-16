@@ -237,7 +237,7 @@
     {
       "parameters": {
         "content": "## Every email in the system starts here\nNo other workflow is allowed to send email directly. They all\ncall this one. That is deliberate: it means the consent check\nbelow cannot be forgotten by whoever builds the next workflow,\nbecause they never touch the mail server themselves.",
-        "height": 304,
+        "height": 320,
         "width": 640,
         "color": 5
       },
@@ -247,13 +247,13 @@
       "typeVersion": 1,
       "position": [
         -20,
-        156
+        140
       ]
     },
     {
       "parameters": {
         "content": "## The consent gate\nRead this person's most recent consent record for this channel.\nOpted in: the mail goes. Anything else \u2014 opted out, bounced,\nnever asked \u2014 it does not, and we write down why. There is no\nsetting to skip this and no way around it.",
-        "height": 304,
+        "height": 320,
         "width": 640,
         "color": 3
       },
@@ -263,13 +263,13 @@
       "typeVersion": 1,
       "position": [
         640,
-        156
+        140
       ]
     },
     {
       "parameters": {
         "content": "## Send, and keep the receipt\nFill in the template and hand it to the mail server. Whether it\nwas sent or refused, a message log record is written either way,\nso a refusal is evidence rather than silence. That log is what\nwe would show if someone asked whether we emailed a contact.",
-        "height": 494,
+        "height": 510,
         "width": 640,
         "color": 2
       },
@@ -279,7 +279,7 @@
       "typeVersion": 1,
       "position": [
         -20,
-        776
+        760
       ]
     }
   ],
