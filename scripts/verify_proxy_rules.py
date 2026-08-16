@@ -83,13 +83,34 @@ def read_env() -> dict[str, str]:
     return env
 
 
+def compose(*args: str, check_rc: bool = True) -> subprocess.CompletedProcess:
+    """docker compose with this deployment's overlay, so container names are
+    never guessed from a project name that could differ per checkout."""
+    overlay = "docker-compose.internal.yml" if INTERNAL else "docker-compose.vps.yml"
+    return sh("docker", "compose",
+              "-f", str(ROOT / "infra" / "docker-compose.yml"),
+              "-f", str(ROOT / "infra" / overlay),
+              *args, check_rc=check_rc)
+
+
 def compose_network() -> str:
     """The network the stack is on, so the proxy can reach server: and n8n:."""
-    out = sh("docker", "inspect", "aspire-crm-n8n-1",
+    got = compose("ps", "-q", "n8n", check_rc=False)
+    cid = got.stdout.strip().splitlines()
+    if not cid:
+        # Distinguish "nothing is running" from "the compose files would not
+        # resolve" — the overlay's :? guards fail the command outright when a
+        # required variable is unset, and reporting that as a stopped stack
+        # sends you looking in the wrong place.
+        err = got.stderr.strip()
+        if err:
+            sys.exit(f"could not read the stack:\n  {err}")
+        sys.exit("the stack is not running — start it before running this")
+    out = sh("docker", "inspect", cid[0],
              "--format", "{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{end}}")
     net = out.stdout.strip()
     if not net:
-        sys.exit("the stack is not running — start it before running this")
+        sys.exit("could not determine the compose network")
     return net
 
 
@@ -233,11 +254,8 @@ def run_internal(env: dict[str, str]) -> None:
     # -k would prove only that something answered on 443.
     ca = ROOT / "out" / "caddy-root.crt"
     ca.parent.mkdir(exist_ok=True)
-    got = sh("docker", "compose",
-             "-f", str(ROOT / "infra" / "docker-compose.yml"),
-             "-f", str(ROOT / "infra" / "docker-compose.internal.yml"),
-             "exec", "-T", "caddy",
-             "cat", "/data/caddy/pki/authorities/local/root.crt", check_rc=False)
+    got = compose("exec", "-T", "caddy",
+                  "cat", "/data/caddy/pki/authorities/local/root.crt", check_rc=False)
     if not got.stdout.strip():
         sys.exit("could not read Caddy's local CA root — is the internal stack up?")
     ca.write_text(got.stdout)
