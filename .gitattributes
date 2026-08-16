@@ -1,0 +1,26 @@
+# Keep LF line endings on everything that gets executed or parsed by a Linux
+# tool, whatever platform it was checked out on.
+#
+# Windows git defaults to core.autocrlf=true and rewrites text files to CRLF on
+# checkout. A shell script that has been through that fails in bash with
+#
+#     ./infra/rebuild.sh: /bin/bash^M: bad interpreter: No such file or directory
+#
+# which names neither line endings nor Windows, and happens even inside WSL
+# where the script is otherwise perfectly runnable. The same carriage returns
+# break a Caddyfile directive and a .env value silently — a trailing \r ends up
+# inside the password.
+*.sh        text eol=lf
+*.py        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.csv       text eol=lf
+Caddyfile*  text eol=lf
+.env*       text eol=lf
+Dockerfile* text eol=lf
+
+# Binary: never touch these.
+*.png binary
+*.pdf binary
