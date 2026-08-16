@@ -157,8 +157,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        0,
-        920
+        1320,
+        300
       ],
       "credentials": {
         "smtp": {
@@ -188,8 +188,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        220,
-        920
+        1540,
+        300
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -222,8 +222,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        440,
-        1110
+        1760,
+        490
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -278,8 +278,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -20,
-        760
+        1300,
+        140
       ]
     }
   ],

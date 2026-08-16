@@ -141,7 +141,8 @@ def _js_literal(value) -> str:
 NODE_DX = 220        # horizontal step between nodes
 ROW_DY = 190         # vertical step between branch rows inside a phase
 BAND_DY = 620        # vertical step between wrapped bands
-WRAP_AT = 1300       # start a new band once a band is this wide
+WRAP_AT = 1300       # band width to use WHEN a workflow needs wrapping
+MAX_FLAT_W = 2400    # wider than this and the canvas stops fitting a screen
 NOTE_PAD = 40        # sticky note margin around its nodes
 MIN_NOTE_W = 560     # a note narrower than this wraps its text into a column
                      # so tall it runs down over the nodes it is labelling
@@ -176,6 +177,12 @@ def _caption_height(title: str, body: str, width: int) -> int:
     return 60 + lines * 20 + 20                     # title + body + padding
 
 
+# Set for the second pass over a workflow that came out too wide to read flat.
+# Most workflows never need it: wrapping a 1,980px flow onto two bands adds long
+# return lines across the canvas and reads worse than the straight line did.
+_WRAP_OVERRIDE: int | None = None
+
+
 class Flow:
     """Builds one n8n workflow.
 
@@ -195,6 +202,7 @@ class Flow:
         self._band = 0
         self._phases: list[dict] = []
         self._fan: int | None = None
+        self.wrap_at = _WRAP_OVERRIDE or 10 ** 6
         self._phase: dict | None = None
 
     # ---- visual grouping ---------------------------------------------------
@@ -215,7 +223,7 @@ class Flow:
         # nodes they label.
         if prev and prev["nodes"]:
             self._x = max(self._x, prev["x0"] + MIN_NOTE_W)
-        if self._x >= WRAP_AT:          # wrap between phases, never inside one
+        if self._x >= self.wrap_at:     # wrap between phases, never inside one
             self._band += 1
             self._x = 0
         self._phase = {"title": title, "body": body,
@@ -1309,12 +1317,36 @@ def lint(flow: Flow) -> list[str]:
     return problems
 
 
+def _flat_width(fl: "Flow") -> int:
+    xs = [n["position"][0] for n in fl.nodes]
+    return (max(xs) - min(xs) + NODE_DX) if xs else 0
+
+
+def _build(builder) -> "Flow":
+    """Build a workflow, and only wrap it if it is too wide to read flat.
+
+    Wrapping is not free — the connection from the end of one band to the start
+    of the next runs back across the whole canvas. Worth it for a twenty-node
+    flow that would otherwise be 3,000px of straight line; not worth it for a
+    nine-node one that already fits.
+    """
+    global _WRAP_OVERRIDE
+    fl = builder()
+    if _flat_width(fl) > MAX_FLAT_W:
+        _WRAP_OVERRIDE = WRAP_AT
+        try:
+            fl = builder()
+        finally:
+            _WRAP_OVERRIDE = None
+    return fl
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Generate the n8n workflow library")
     ap.add_argument("--list", action="store_true", help="list workflows, write nothing")
     args = ap.parse_args()
 
-    flows = [b() for b in BUILDERS]
+    flows = [_build(b) for b in BUILDERS]
 
     if args.list:
         for fl in flows:
