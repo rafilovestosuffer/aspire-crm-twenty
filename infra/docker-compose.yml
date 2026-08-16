@@ -162,7 +162,7 @@ services:
   # ------------------------------------------------------------------ ASPIRE
   # n8n — the automation layer. Separate database on the same Postgres.
   n8n:
-    image: n8nio/n8n:${N8N_TAG:-latest}
+    image: n8nio/n8n:${N8N_TAG:-2.34.6}
     restart: always
     depends_on:
       db:
