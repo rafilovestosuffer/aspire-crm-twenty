@@ -277,6 +277,19 @@ class Twenty:
         return (status < 400), err
 
 
+# The create helpers answer (True, "already present") when Twenty rejects a
+# duplicate, because the thing being there is what was wanted. That is a
+# different outcome from having made it, and reporting both as "created" makes
+# every re-run of an unchanged schema claim it changed something. It also hides
+# the real signal: these are the fields and relations the metadata API does not
+# list, so they are invented on every pass and only the duplicate rejection
+# stops them — worth being able to see.
+def _outcome(ok: bool, err: str) -> str:
+    if not ok:
+        return f"FAILED {err[:160]}"
+    return "existed" if err == "already present" else "created"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Provision the Aspire model into Twenty")
     ap.add_argument("--dry-run", action="store_true", help="print payloads, send nothing")
@@ -324,7 +337,7 @@ def main() -> int:
         print(f"  create {name}")
         ok, err = api.create_object(spec)
         report.append({"kind": "object", "name": name,
-                       "result": "created" if ok else f"FAILED {err[:160]}"})
+                       "result": _outcome(ok, err)})
         if not ok:
             failures += 1
             print(f"         FAILED  {err[:200]}")
@@ -353,7 +366,7 @@ def main() -> int:
                 continue
             ok, err = api.create_field(obj_id, f)
             report.append({"kind": "field", "name": f"{name}.{f['name']}",
-                           "result": "created" if ok else f"FAILED {err[:160]}"})
+                           "result": _outcome(ok, err)})
             if not ok:
                 failures += 1
                 print(f"    FAILED {name}.{f['name']}  {err[:180]}")
@@ -391,7 +404,7 @@ def main() -> int:
                     src_id, (tgt or {}).get("id", "DRY-RUN-ID"), rel,
                     spec.get("icon", "IconLink"))
                 report.append({"kind": "relation", "name": f"{name}.{target}",
-                               "result": "created" if ok else f"FAILED {err[:160]}"})
+                               "result": _outcome(ok, err)})
                 if not ok:
                     failures += 1
                     print(f"    FAILED {name}.{target}  {err[:180]}")
