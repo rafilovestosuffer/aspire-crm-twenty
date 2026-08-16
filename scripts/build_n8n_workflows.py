@@ -1007,10 +1007,25 @@ def wf_renewal() -> Flow:
                      "/rest/serviceSubscriptions"
                      "?filter=status[in]:[ACTIVE,RENEWAL_DUE],"
                      "renewalDate[lte]:{{ encodeURIComponent($now.plus({ days: 90 }).toISO()) }}"
-                     "&order_by=renewalDate[AscNullsLast]&limit=200")
+                     "&order_by=renewalDate[AscNullsLast]&limit=500")
 
     window = f.code("Days until renewal", """
-const subs = $input.first().json.data?.serviceSubscriptions || [];
+const body = $input.first().json;
+const subs = body.data?.serviceSubscriptions || [];
+
+// Twenty returns totalCount alongside the page. If the read was truncated,
+// some subscription sitting exactly on a 90/60/30/7 day milestone is invisible
+// today and its renewal is missed — the one thing this workflow exists to
+// prevent. Silently processing the first page would hide that forever, so fail
+// loudly: SYS Error Handler records it and alerts, and someone adds paging.
+const total = body.totalCount;
+if (typeof total === 'number' && total > subs.length) {
+  throw new Error(
+    `Read ${subs.length} of ${total} subscriptions — the query limit is too low. ` +
+    `Renewals beyond the first page were NOT checked today. ` +
+    `Raise the limit in this workflow, or add cursor paging.`);
+}
+
 const today = new Date(); today.setHours(0,0,0,0);
 const out = [];
 
@@ -1125,13 +1140,13 @@ def wf_sweeps() -> Flow:
     stale = f.twenty("Stale opportunities", "GET",
                      # Twenty's default pipeline ends at CUSTOMER; there is
                      # no WON stage, and the wrong enum is a 400 at runtime.
-                     "/rest/opportunities?filter=stage[neq]:CUSTOMER&limit=200")
+                     "/rest/opportunities?filter=stage[neq]:CUSTOMER&limit=500")
     noshow = f.twenty("Possible no-shows", "GET",
-                      "/rest/appointments?filter=status[eq]:BOOKED&limit=200", row=1)
+                      "/rest/appointments?filter=status[eq]:BOOKED&limit=500", row=1)
     overdue = f.twenty("Overdue invoices", "GET",
                        # `in` takes a bracketed array; a bare comma list 400s.
                        "/rest/invoices?filter=status[in]:[SENT,PARTIALLY_PAID]"
-                       "&limit=200", row=2)
+                       "&limit=500", row=2)
 
     assess = f.code("Assess", """
 // Three absence checks in one pass. None of these emit an event anywhere —
@@ -1139,9 +1154,24 @@ def wf_sweeps() -> Flow:
 const now = Date.now();
 const days = (d) => (now - new Date(d).getTime()) / 86400000;
 
-const opps    = $('Stale opportunities').first().json.data?.opportunities || [];
-const appts   = $('Possible no-shows').first().json.data?.appointments || [];
-const invoices= $('Overdue invoices').first().json.data?.invoices || [];
+// Each read is one page. If Twenty says there were more rows than came back,
+// this sweep is looking at part of the picture and reporting it as the whole —
+// an "all clear" that is not one. Better to fail and be told.
+const page = (nodeName, key) => {
+  const body = $(nodeName).first().json;
+  const rows = body.data?.[key] || [];
+  const total = body.totalCount;
+  if (typeof total === 'number' && total > rows.length) {
+    throw new Error(
+      `${nodeName}: read ${rows.length} of ${total} ${key} — query limit too low. ` +
+      `This sweep would have reported on part of the data as if it were all of it.`);
+  }
+  return rows;
+};
+
+const opps    = page('Stale opportunities', 'opportunities');
+const appts   = page('Possible no-shows', 'appointments');
+const invoices= page('Overdue invoices', 'invoices');
 
 const staleOpps = opps.filter(o => days(o.updatedAt) > 14);
 const noShows   = appts.filter(a => new Date(a.scheduledAt).getTime() < now - 3600_000);
