@@ -115,7 +115,15 @@ def main() -> int:
     # absent, and defaulting to it would create a credential pointing at a
     # host that does not resolve — every send would fail at delivery time,
     # long after anyone was watching. Refuse instead.
-    if not env.get("EMAIL_SMTP_HOST") and not _reachable("mailpit", 1025):
+    #
+    # Probe the published UI port on localhost, NOT mailpit:1025. This script
+    # runs on the HOST: the service name only resolves inside the compose
+    # network, and the SMTP port is deliberately not published — only the UI
+    # is. Checking mailpit:1025 therefore fails on a perfectly good dev stack
+    # and stops the local build at this step, which is what it did.
+    # n8n reaches mailpit:1025 from inside the network; that is unaffected.
+    mailpit_ui = int(env.get("MAILPIT_UI_PORT") or 8025)
+    if not env.get("EMAIL_SMTP_HOST") and not _reachable("127.0.0.1", mailpit_ui):
         print("ERROR: EMAIL_SMTP_HOST is not set and no Mailpit is running.\n"
               "       On a server, set the real relay in infra/.env before "
               "creating credentials:\n"

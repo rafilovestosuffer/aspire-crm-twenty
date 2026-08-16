@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import re
@@ -134,8 +135,52 @@ def _js_literal(value) -> str:
     return json.dumps(value)
 
 
+# Canvas geometry. These exist because the workflows get shown to people who do
+# not read n8n: a correct workflow that renders as one 4,400px strip of
+# unlabelled nodes cannot be explained in a meeting.
+NODE_DX = 220        # horizontal step between nodes
+ROW_DY = 190         # vertical step between branch rows inside a phase
+BAND_DY = 620        # vertical step between wrapped bands
+WRAP_AT = 1300       # start a new band once a band is this wide
+NOTE_PAD = 40        # sticky note margin around its nodes
+MIN_NOTE_W = 470     # a note narrower than this wraps its text into a column
+                     # so tall it runs down over the nodes it is labelling
+
+# n8n sticky note colours, by index. Chosen so a reader can tell the phases
+# apart at a glance and so the two that matter — consent, and failure — do not
+# look like ordinary steps.
+NOTE_COLOR = {
+    "capture": 5,    # blue    — something arrives
+    "record": 4,     # green   — the CRM is written
+    "consent": 3,    # red     — the compliance gate
+    "decide": 6,     # purple  — logic, scoring, routing
+    "notify": 2,     # orange  — something leaves the system
+    "plumbing": 7,   # grey    — bookkeeping, error handling
+}
+
+
+def _caption_height(title: str, body: str, width: int) -> int:
+    """Space a sticky note needs above its nodes for the caption to fit.
+
+    Guessed rather than measured — n8n renders the markdown, not this script —
+    so it errs generous. Too much space leaves a gap; too little puts the text
+    on top of the nodes, which is what a fixed value did.
+    """
+    chars = max(int((width - 28) / 6.6), 20)
+    lines = 0
+    for para in body.split("\n"):
+        lines += max(1, -(-len(para) // chars))     # ceil
+    return 52 + lines * 19 + 16                     # title + body + padding
+
+
 class Flow:
-    """Builds one n8n workflow: nodes laid out left to right, wired in order."""
+    """Builds one n8n workflow.
+
+    Nodes run left to right. `phase()` groups them under a labelled sticky note
+    and wraps the canvas onto a new band when a band gets too wide, so the whole
+    workflow fits a screen and reads as a sequence of named steps rather than a
+    wall of nodes.
+    """
 
     def __init__(self, name: str, description: str, error_workflow: bool = True):
         self.name = name
@@ -144,6 +189,90 @@ class Flow:
         self.connections: dict = {}
         self.error_workflow = error_workflow
         self._x = 0
+        self._band = 0
+        self._phases: list[dict] = []
+        self._fan: int | None = None
+        self._phase: dict | None = None
+
+    # ---- visual grouping ---------------------------------------------------
+
+    def phase(self, title: str, body: str, kind: str = "plumbing") -> None:
+        """Open a labelled group. Everything added until the next phase() sits
+        inside it, under a sticky note explaining what this part does.
+
+        `body` is read by people who have never seen n8n. Write what the step
+        achieves for the business, not which node performs it — the node names
+        are already on screen underneath.
+        """
+        prev = self._phase
+        self._close_phase()
+        # A phase of one or two nodes is narrower than its own caption. Push the
+        # cursor along so the note that is about to close has room for its text,
+        # otherwise the words wrap into a tall column and run down over the
+        # nodes they label.
+        if prev and prev["nodes"]:
+            self._x = max(self._x, prev["x0"] + MIN_NOTE_W)
+        if self._x >= WRAP_AT:          # wrap between phases, never inside one
+            self._band += 1
+            self._x = 0
+        self._phase = {"title": title, "body": body,
+                       "color": NOTE_COLOR.get(kind, 7),
+                       "x0": self._x, "band": self._band, "nodes": []}
+
+    @contextlib.contextmanager
+    def fan(self):
+        """Nodes added in this block are alternatives, not consecutive steps.
+
+        They share one column and stack downwards. Without it, a switch's four
+        branches each advance the cursor as well as the row, so they cascade
+        diagonally across the canvas and every line back to the join crosses
+        the whole workflow. Compact and readable is the difference between a
+        diagram someone can follow in a meeting and one they cannot.
+        """
+        start = self._x
+        self._fan = start
+        try:
+            yield
+        finally:
+            self._fan = None
+            self._x = start + NODE_DX
+
+    def _close_phase(self) -> None:
+        if self._phase and self._phase["nodes"]:
+            self._phases.append(self._phase)
+        self._phase = None
+
+    def _base_y(self) -> int:
+        return 300 + self._band * BAND_DY
+
+    def sticky_notes(self) -> list[dict]:
+        """Render each phase as a sticky note sized to the nodes it contains."""
+        self._close_phase()
+        notes = []
+        for i, p in enumerate(self._phases):
+            xs = [n["position"][0] for n in p["nodes"]]
+            ys = [n["position"][1] for n in p["nodes"]]
+            # Half the padding on each side, so consecutive notes leave a gap
+            # instead of overlapping. A note that laps the next one puts a node
+            # visibly inside two groups, which is exactly the confusion these
+            # are meant to remove.
+            width = max((max(xs) - min(xs)) + NODE_DX, MIN_NOTE_W) - NOTE_PAD // 2
+            head = _caption_height(p["title"], p["body"], width)
+            x0, y0 = min(xs) - NOTE_PAD // 2, min(ys) - head
+            height = (max(ys) - min(ys)) + head + ROW_DY - 30
+            notes.append({
+                # No "{{" anywhere in this text: the lint reads every string
+                # parameter looking for expressions, and prose is not one.
+                "parameters": {"content": f"## {p['title']}\n{p['body']}",
+                               "height": height, "width": width,
+                               "color": p["color"]},
+                "id": _stable_id(self.name, f"note:{p['title']}"),
+                "name": f"{i + 1}. {p['title']}",
+                "type": "n8n-nodes-base.stickyNote",
+                "typeVersion": 1,
+                "position": [x0, y0],
+            })
+        return notes
 
     def add(self, name: str, ntype: str, params: dict, *, version: int = 1,
             creds: dict | None = None, row: int = 0) -> str:
@@ -157,12 +286,16 @@ class Flow:
             "name": name,
             "type": ntype,
             "typeVersion": version,
-            "position": [self._x, 300 + row * 180],
+            "position": [self._x if self._fan is None else self._fan,
+                         self._base_y() + row * ROW_DY],
         }
         if creds:
             node["credentials"] = creds
         self.nodes.append(node)
-        self._x += 220
+        if self._phase is not None:
+            self._phase["nodes"].append(node)
+        if self._fan is None:      # inside a fan the column is held
+            self._x += NODE_DX
         return name
 
     def connect(self, src: str, dst: str, *, out: int = 0) -> None:
@@ -279,7 +412,10 @@ class Flow:
             settings["errorWorkflow"] = "SYS Error Handler"
         return {
             "name": self.name,
-            "nodes": self.nodes,
+            # Sticky notes last so they paint behind the nodes, not over them.
+            # They are never connected and never execute — they exist only to
+            # make the canvas readable to someone who does not use n8n.
+            "nodes": self.nodes + self.sticky_notes(),
             "connections": self.connections,
             "settings": settings,
             "meta": {"description": self.description},
@@ -296,6 +432,12 @@ def wf_error_handler() -> Flow:
              "Catches any failed workflow. Logs to Twenty automationRun and "
              "alerts Slack. Set as the error workflow on every other workflow.",
              error_workflow=False)
+
+    f.phase("When any automation fails",
+            "Every other workflow points its failures here, so there is one\n"
+            "place that knows something went wrong. Without it a workflow\n"
+            "can fail quietly for weeks and the first anyone hears is a\n"
+            "customer asking why nobody replied.", "capture")
 
     trig = f.add("Error Trigger", "n8n-nodes-base.errorTrigger", {})
     extract = f.code("Extract failure", """
@@ -315,6 +457,12 @@ return [{ json: {
 }}];
 """.strip())
 
+    f.phase("Write it down in the CRM",
+            "The failure becomes a record in Twenty — which workflow, when,\n"
+            "and the error. It lives with the business data rather than in a\n"
+            "log file nobody opens, so failures can be reported on like\n"
+            "anything else.", "record")
+
     log = f.twenty("Log failure", "POST", "/rest/automationRuns", {
         "workflowName": "={{ $json.workflowName }}",
         "status": "FAILED",
@@ -322,6 +470,13 @@ return [{ json: {
         "n8nExecutionId": "={{ $json.executionId }}",
         "startedAt": "={{ $now.toISO() }}",
     })
+
+    f.phase("Alert, but do not spam",
+            "If the same workflow already failed several times in the last\n"
+            "hour, log it but stay quiet. One broken integration can\n"
+            "otherwise produce hundreds of messages overnight, and the team\n"
+            "learns to ignore the channel — worse than no alerting at all.",
+            "notify")
 
     recent = f.twenty("Recent failures?", "GET",
                       "/rest/automationRuns?filter=workflowName[eq]:"
@@ -363,6 +518,12 @@ def wf_send_email() -> Flow:
              "Checks consent, renders the template, sends by SMTP, logs a "
              "messageLog. No other workflow may call SMTP directly.")
 
+    f.phase("Every email in the system starts here",
+            "No other workflow is allowed to send email directly. They all\n"
+            "call this one. That is deliberate: it means the consent check\n"
+            "below cannot be forgotten by whoever builds the next workflow,\n"
+            "because they never touch the mail server themselves.", "capture")
+
     trig = f.add("When called", "n8n-nodes-base.executeWorkflowTrigger",
                  {"workflowInputs": {"values": [
                      {"name": "personId"}, {"name": "templateKey"},
@@ -376,6 +537,12 @@ def wf_send_email() -> Flow:
                        "{{ encodeURIComponent($('When called').first().json.personId) }}"
                        ",channel[eq]:EMAIL"
                        "&order_by=effectiveAt[DescNullsLast]&limit=1")
+
+    f.phase("The consent gate",
+            "Read this person's most recent consent record for this channel.\n"
+            "Opted in: the mail goes. Anything else — opted out, bounced,\n"
+            "never asked — it does not, and we write down why. There is no\n"
+            "setting to skip this and no way around it.", "consent")
 
     check = f.code("Consent gate", """
 // The whole point of routing every send through this sub-workflow: a workflow
@@ -435,6 +602,13 @@ const fill = (s) => s.replace(/\\{\\{(\\w+)\\}\\}/g, (_, k) => vars[k] ?? '');
 return [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];
 """.strip())
 
+    f.phase("Send, and keep the receipt",
+            "Fill in the template and hand it to the mail server. Whether it\n"
+            "was sent or refused, a message log record is written either way,\n"
+            "so a refusal is evidence rather than silence. That log is what\n"
+            "we would show if someone asked whether we emailed a contact.",
+            "notify")
+
     send = f.add("Send by SMTP", "n8n-nodes-base.emailSend", {
         "fromEmail": "={{ $env.ASPIRE_FROM_EMAIL }}",
         "toEmail": "={{ $json.email }}",
@@ -485,6 +659,13 @@ def wf_lead_form() -> Flow:
     # just one and the other version silently falls through to $webhookId — the
     # form still works, at an unguessable UUID URL that no campaign can link to.
     # Both are the same value, so whichever the running version reads is right.
+    f.phase("A lead arrives",
+            "Someone fills in the form on our website. n8n hosts that form\n"
+            "itself, so there is no third-party form tool to pay for or to\n"
+            "trust with our data. The next step cleans up what they typed —\n"
+            "lower-cases the email, strips spaces from the phone — so the\n"
+            "same person is recognised however they type it.", "capture")
+
     trig = f.add("Public form", "n8n-nodes-base.formTrigger", {
         "path": FORM_PATH,
         "formTitle": "Talk to Aspire Tech",
@@ -532,6 +713,12 @@ return [{ json: {
 }}];
 """.strip())
 
+    f.phase("Is this person already known?",
+            "Look them up by email before creating anything. Without this,\n"
+            "a contact who fills in the form twice becomes two records and\n"
+            "the sales history is split across both. Known: update them.\n"
+            "New: create them. Either way, one record per human.", "record")
+
     find = f.twenty("Find person", "GET",
                     "/rest/people?filter=emails.primaryEmail[eq]:"
                     "{{ encodeURIComponent($json.email) }}&limit=1")
@@ -554,14 +741,18 @@ return [{ json: { ...$('Normalise').first().json,
     person_id = ("={{ $('Exists?').first().json.existingId || "
                  "$('Create person').first().json.data.createPerson.id }}")
 
-    create = f.twenty("Create person", "POST", "/rest/people", {
-        "name": {"firstName": "={{ $json.firstName }}",
-                 "lastName": "={{ $json.lastName }}"},
-        "emails": {"primaryEmail": "={{ $json.email }}"},
-        "phones": {"primaryPhoneNumber": "={{ $json.phone }}"},
-    })
-    update = f.twenty("Update person", "PATCH", "/rest/people/{{ $json.existingId }}",
-                      {"phones": {"primaryPhoneNumber": "={{ $json.phone }}"}}, row=1)
+    # Two alternatives, one column: new person or existing person, never both.
+    with f.fan():
+        create = f.twenty("Create person", "POST", "/rest/people", {
+            "name": {"firstName": "={{ $json.firstName }}",
+                     "lastName": "={{ $json.lastName }}"},
+            "emails": {"primaryEmail": "={{ $json.email }}"},
+            "phones": {"primaryPhoneNumber": "={{ $json.phone }}"},
+        })
+        update = f.twenty("Update person", "PATCH",
+                          "/rest/people/{{ $json.existingId }}",
+                          {"phones": {"primaryPhoneNumber": "={{ $json.phone }}"}},
+                          row=1)
 
     merge = f.add("Merge", "n8n-nodes-base.merge",
                   {"mode": "append", "options": {}}, version=3)
@@ -569,6 +760,12 @@ return [{ json: { ...$('Normalise').first().json,
     # Match the company on email domain, not on typed company name: people
     # write "Meridian", "Meridian Defense" and "meridian defense systems" for
     # the same account, and each spelling would create another record.
+    f.phase("Attach them to the right company",
+            "Match on the email domain, not the company name they typed.\n"
+            "People write Meridian, Meridian Defense and meridian defense\n"
+            "systems for the same account, and each spelling would create\n"
+            "another company. The domain is the same every time.", "record")
+
     find_co = f.twenty("Find company", "GET",
                        "/rest/companies"
                        "?filter=domainName.primaryLinkUrl[ilike]:"
@@ -594,6 +791,13 @@ return [{ json: { ...$('Normalise').first().json, companyId: found?.id || null }
     link_co = f.twenty("Link person to company", "PATCH",
                        "/rest/people/" + person_id.replace("={{ ", "{{ "),
                        {"companyId": company_id})
+
+    f.phase("Record consent — the compliance step",
+            "We write down that this person agreed to be contacted: when,\n"
+            "through which channel, and what they were shown. Nothing in\n"
+            "this system may email anyone without a record like this. It is\n"
+            "the evidence we would produce if a regulator ever asked, and\n"
+            "we sell compliance, so we hold ourselves to it.", "consent")
 
     consent = f.twenty("Record consent", "POST", "/rest/consentRecords", {
         "channel": "EMAIL",
@@ -635,6 +839,12 @@ return [{ json: { ...d, score,
   assigneeId: REPS.length ? REPS[hash % REPS.length] : null }}];
 """.strip())
 
+    f.phase("Score it and give it an owner",
+            "Rate the lead against rules anyone can read — company size,\n"
+            "what they asked for, whether it is a work email — then hand it\n"
+            "to the next sales rep in turn and raise a task with a due date.\n"
+            "Nothing sits in an inbox waiting to be noticed.", "decide")
+
     task = f.twenty("Create task", "POST", "/rest/tasks", {
         "title": "={{ 'Follow up: ' + $json.firstName + ' ' + $json.lastName + "
                  "' (' + $json.band + ', score ' + $json.score + ')' }}",
@@ -645,6 +855,12 @@ return [{ json: { ...d, score,
         # `body` key is silently not a field at all.
         "bodyV2": {"markdown": "={{ $json.interest + '\\n\\n' + $json.message }}"},
     })
+
+    f.phase("Reply, tell sales, keep the receipt",
+            "Send the acknowledgement (through the one workflow allowed to\n"
+            "touch email, which checks consent again first), ping the sales\n"
+            "channel, and log that this run happened. If any step above had\n"
+            "failed, that log is how we would know.", "notify")
 
     ack = f.add("Send acknowledgement", "n8n-nodes-base.executeWorkflow", {
         "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
@@ -694,6 +910,12 @@ def wf_tracked_link() -> Flow:
     # n8n registers `t/:slug` in the database but will not match `t/abc`
     # against it — every request 404s with "webhook is not registered".
     # Tracked links conventionally look like /t?s=abc123 anyway.
+    f.phase("Someone clicks a link we sent",
+            "Our emails use a link that points here rather than straight at\n"
+            "the destination. That is how click tracking works in every\n"
+            "marketing tool; this is the same idea without the vendor.",
+            "capture")
+
     trig = f.add("Click", "n8n-nodes-base.webhook", {
         "path": "t",
         "httpMethod": "GET",
@@ -718,6 +940,12 @@ return [{ json: {
 """.strip())
 
     gate = f.iff("Known link?", "={{ $json.found }}", "equals", "true")
+
+    f.phase("Count it, then get out of the way",
+            "Add one to the click count and send the visitor on to where\n"
+            "they were going. An unrecognised link gets a 404 rather than a\n"
+            "redirect, so a guessed or edited URL cannot bounce someone\n"
+            "through our domain to a site of their choosing.", "record")
 
     count = f.twenty("Count click", "PATCH", "/rest/trackedLinks/{{ $json.id }}",
                      {"clickCount": "={{ $json.clickCount }}"})
@@ -750,6 +978,12 @@ def wf_renewal() -> Flow:
              "Daily. Walks active subscriptions and escalates at 90/60/30/7 "
              "days before renewal. Impossible in GHL — it has no subscription "
              "object. Build this first: it needs no vendor.")
+
+    f.phase("Every morning, check what is coming up",
+            "Nothing happens when a renewal approaches — no system emits an\n"
+            "event for a date getting nearer. So we go and look, every day,\n"
+            "and work out how many days are left on each subscription.\n"
+            "GoHighLevel cannot do this at all.", "capture")
 
     trig = f.add("Daily 06:00 UTC", "n8n-nodes-base.scheduleTrigger",
                  {"rule": {"interval": [{"field": "cronExpression",
@@ -787,6 +1021,12 @@ return out;
     batch = f.add("Batch 20", "n8n-nodes-base.splitInBatches",
                   {"batchSize": 20, "options": {}}, version=3)
 
+    f.phase("Escalate at 90, 60, 30 and 7 days",
+            "Each milestone does something different and more urgent: start\n"
+            "the conversation, confirm they intend to renew, open a renewal\n"
+            "opportunity in the pipeline, then escalate. A renewal is never\n"
+            "lost because nobody remembered it.", "decide")
+
     route = f.add("Which milestone?", "n8n-nodes-base.switch", {
         "rules": {"values": [
             {"conditions": {"options": {"caseSensitive": True, "typeValidation": "loose"},
@@ -812,26 +1052,30 @@ return out;
         "options": {"fallbackOutput": "extra"},
     }, version=3)
 
-    t90 = f.twenty("Task: begin renewal", "POST", "/rest/tasks", {
-        "title": "={{ 'Renewal in 90 days — ' + $json.name }}",
-        "status": "TODO",
-        "dueAt": "={{ $now.plus({ days: 3 }).toISO() }}",
-    })
-    t60 = f.twenty("Task: confirm intent", "POST", "/rest/tasks", {
-        "title": "={{ 'Renewal in 60 days — confirm intent — ' + $json.name }}",
-        "status": "TODO",
-        "dueAt": "={{ $now.plus({ days: 2 }).toISO() }}",
-    }, row=1)
-    o30 = f.twenty("Create renewal opportunity", "POST", "/rest/opportunities", {
-        "name": "={{ 'Renewal — ' + $json.name }}",
-        "stage": "NEW",
-        "closeDate": "={{ $json.renewalDate }}",
-        "companyId": "={{ $json.companyId }}",
-    }, row=2)
-    a7 = f.notify("Urgent escalation", ALERT_CHANNEL,
-                  "=:warning: *Renewal in 7 days, still no opportunity*\n"
-                 "{{ $json.name }} — {{ $json.serviceLine }}\n"
-                 "Renews {{ $json.renewalDate }}", row=3)
+    # One column, four rows: these are alternatives, not consecutive steps.
+    # Laid out in sequence they march diagonally across the canvas and every
+    # line back to the batch loop crosses the whole workflow.
+    with f.fan():
+        t90 = f.twenty("Task: begin renewal", "POST", "/rest/tasks", {
+            "title": "={{ 'Renewal in 90 days — ' + $json.name }}",
+            "status": "TODO",
+            "dueAt": "={{ $now.plus({ days: 3 }).toISO() }}",
+        })
+        t60 = f.twenty("Task: confirm intent", "POST", "/rest/tasks", {
+            "title": "={{ 'Renewal in 60 days — confirm intent — ' + $json.name }}",
+            "status": "TODO",
+            "dueAt": "={{ $now.plus({ days: 2 }).toISO() }}",
+        }, row=1)
+        o30 = f.twenty("Create renewal opportunity", "POST", "/rest/opportunities", {
+            "name": "={{ 'Renewal — ' + $json.name }}",
+            "stage": "NEW",
+            "closeDate": "={{ $json.renewalDate }}",
+            "companyId": "={{ $json.companyId }}",
+        }, row=2)
+        a7 = f.notify("Urgent escalation", ALERT_CHANNEL,
+                      "=:warning: *Renewal in 7 days, still no opportunity*\n"
+                     "{{ $json.name }} — {{ $json.serviceLine }}\n"
+                     "Renews {{ $json.renewalDate }}", row=3)
 
     log = f.log_run("Log run", "SUB Renewal Escalation")
 
@@ -856,6 +1100,12 @@ def wf_sweeps() -> Flow:
              "Daily. Detects the absences no system emits an event for: stale "
              "opportunities, appointment no-shows, overdue invoices. Replaces "
              "GHL's Stale Opportunity and No-Show triggers.")
+
+    f.phase("Look for what did NOT happen",
+            "The hardest thing to automate is absence. No event fires when a\n"
+            "deal goes quiet, a customer misses a meeting, or an invoice is\n"
+            "not paid — so once a day we ask the CRM those three questions\n"
+            "directly.", "capture")
 
     trig = f.add("Daily 07:00 UTC", "n8n-nodes-base.scheduleTrigger",
                  {"rule": {"interval": [{"field": "cronExpression",
@@ -896,6 +1146,11 @@ return [{ json: {
   ].filter(Boolean).join('\\n') || 'Nothing outstanding.',
 }}];
 """.strip())
+
+    f.phase("Only speak up if there is something to say",
+            "A digest goes to the team when there is something in it. A\n"
+            "quiet day sends nothing, because a daily message that is\n"
+            "usually empty is one people stop opening.", "notify")
 
     gate = f.iff("Anything to report?", "={{ $json.summary }}", "notEquals",
                  "Nothing outstanding.")

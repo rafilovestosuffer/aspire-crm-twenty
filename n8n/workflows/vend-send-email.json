@@ -157,8 +157,8 @@
       "type": "n8n-nodes-base.emailSend",
       "typeVersion": 2.1,
       "position": [
-        1320,
-        300
+        0,
+        920
       ],
       "credentials": {
         "smtp": {
@@ -188,8 +188,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1540,
-        300
+        220,
+        920
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -222,8 +222,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1760,
-        480
+        440,
+        1110
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -233,6 +233,54 @@
       "retryOnFail": true,
       "maxTries": 5,
       "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## Every email in the system starts here\nNo other workflow is allowed to send email directly. They all\ncall this one. That is deliberate: it means the consent check\nbelow cannot be forgotten by whoever builds the next workflow,\nbecause they never touch the mail server themselves.",
+        "height": 304,
+        "width": 640,
+        "color": 5
+      },
+      "id": "382506837339",
+      "name": "1. Every email in the system starts here",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        156
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## The consent gate\nRead this person's most recent consent record for this channel.\nOpted in: the mail goes. Anything else \u2014 opted out, bounced,\nnever asked \u2014 it does not, and we write down why. There is no\nsetting to skip this and no way around it.",
+        "height": 304,
+        "width": 640,
+        "color": 3
+      },
+      "id": "531582393942",
+      "name": "2. The consent gate",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        640,
+        156
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Send, and keep the receipt\nFill in the template and hand it to the mail server. Whether it\nwas sent or refused, a message log record is written either way,\nso a refusal is evidence rather than silence. That log is what\nwe would show if someone asked whether we emailed a contact.",
+        "height": 494,
+        "width": 640,
+        "color": 2
+      },
+      "id": "525436825770",
+      "name": "3. Send, and keep the receipt",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        776
+      ]
     }
   ],
   "connections": {

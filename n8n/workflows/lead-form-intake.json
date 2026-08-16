@@ -111,7 +111,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        440,
+        470,
         300
       ],
       "credentials": {
@@ -132,7 +132,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        660,
+        690,
         300
       ]
     },
@@ -162,7 +162,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        880,
+        910,
         300
       ]
     },
@@ -188,7 +188,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1100,
+        1130,
         300
       ],
       "credentials": {
@@ -222,8 +222,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1320,
-        480
+        1130,
+        490
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -244,7 +244,7 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
       "position": [
-        1540,
+        1350,
         300
       ]
     },
@@ -267,8 +267,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1760,
-        300
+        0,
+        920
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -288,8 +288,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1980,
-        300
+        220,
+        920
       ]
     },
     {
@@ -318,8 +318,8 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        2200,
-        300
+        440,
+        920
       ]
     },
     {
@@ -344,8 +344,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2420,
-        300
+        660,
+        920
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -366,8 +366,8 @@
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
       "position": [
-        2640,
-        480
+        880,
+        1110
       ]
     },
     {
@@ -392,8 +392,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2860,
-        300
+        1100,
+        920
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -426,8 +426,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        3080,
-        300
+        0,
+        1540
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -460,8 +460,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        3300,
-        300
+        220,
+        1540
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -481,8 +481,8 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3520,
-        300
+        440,
+        1540
       ]
     },
     {
@@ -507,8 +507,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        3740,
-        300
+        660,
+        1540
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -540,8 +540,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        3960,
-        300
+        1130,
+        1540
       ]
     },
     {
@@ -558,8 +558,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        4180,
-        300
+        1350,
+        1540
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -588,8 +588,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        4400,
-        300
+        1570,
+        1540
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -599,6 +599,102 @@
       "retryOnFail": true,
       "maxTries": 5,
       "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## A lead arrives\nSomeone fills in the form on our website. n8n hosts that form\nitself, so there is no third-party form tool to pay for or to\ntrust with our data. The next step cleans up what they typed \u2014\nlower-cases the email, strips spaces from the phone \u2014 so the\nsame person is recognised however they type it.",
+        "height": 323,
+        "width": 450,
+        "color": 5
+      },
+      "id": "950251385988",
+      "name": "1. A lead arrives",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        137
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Is this person already known?\nLook them up by email before creating anything. Without this,\na contact who fills in the form twice becomes two records and\nthe sales history is split across both. Known: update them.\nNew: create them. Either way, one record per human.",
+        "height": 494,
+        "width": 1080,
+        "color": 4
+      },
+      "id": "701603129505",
+      "name": "2. Is this person already known?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        450,
+        156
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Attach them to the right company\nMatch on the email domain, not the company name they typed.\nPeople write Meridian, Meridian Defense and meridian defense\nsystems for the same account, and each spelling would create\nanother company. The domain is the same every time.",
+        "height": 494,
+        "width": 1300,
+        "color": 4
+      },
+      "id": "665977484784",
+      "name": "3. Attach them to the right company",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        776
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Record consent \u2014 the compliance step\nWe write down that this person agreed to be contacted: when,\nthrough which channel, and what they were shown. Nothing in\nthis system may email anyone without a record like this. It is\nthe evidence we would produce if a regulator ever asked, and\nwe sell compliance, so we hold ourselves to it.",
+        "height": 323,
+        "width": 640,
+        "color": 3
+      },
+      "id": "515749686888",
+      "name": "4. Record consent \u2014 the compliance step",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        1377
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Score it and give it an owner\nRate the lead against rules anyone can read \u2014 company size,\nwhat they asked for, whether it is a work email \u2014 then hand it\nto the next sales rep in turn and raise a task with a due date.\nNothing sits in an inbox waiting to be noticed.",
+        "height": 304,
+        "width": 450,
+        "color": 6
+      },
+      "id": "827258568942",
+      "name": "5. Score it and give it an owner",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        640,
+        1396
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Reply, tell sales, keep the receipt\nSend the acknowledgement (through the one workflow allowed to\ntouch email, which checks consent again first), ping the sales\nchannel, and log that this run happened. If any step above had\nfailed, that log is how we would know.",
+        "height": 304,
+        "width": 640,
+        "color": 2
+      },
+      "id": "035821587029",
+      "name": "6. Reply, tell sales, keep the receipt",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1110,
+        1396
+      ]
     }
   ],
   "connections": {
