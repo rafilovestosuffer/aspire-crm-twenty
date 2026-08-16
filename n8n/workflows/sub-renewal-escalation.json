@@ -24,13 +24,32 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/serviceSubscriptions?filter=status[in]:[ACTIVE,RENEWAL_DUE],renewalDate[lte]:{{ encodeURIComponent($now.plus({ days: 90 }).toISO()) }}&order_by=renewalDate[AscNullsLast]&limit=500",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/serviceSubscriptions?filter=status[in]:[ACTIVE,RENEWAL_DUE],renewalDate[lte]:{{ encodeURIComponent($now.plus({ days: 90 }).toUTC().toISO()) }}&order_by=renewalDate[AscNullsLast]&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
           "response": {
             "response": {
               "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
             }
           }
         }
@@ -54,7 +73,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json;\nconst subs = body.data?.serviceSubscriptions || [];\n\n// Twenty returns totalCount alongside the page. If the read was truncated,\n// some subscription sitting exactly on a 90/60/30/7 day milestone is invisible\n// today and its renewal is missed \u2014 the one thing this workflow exists to\n// prevent. Silently processing the first page would hide that forever, so fail\n// loudly: SYS Error Handler records it and alerts, and someone adds paging.\nconst total = body.totalCount;\nif (typeof total === 'number' && total > subs.length) {\n  throw new Error(\n    `Read ${subs.length} of ${total} subscriptions \u2014 the query limit is too low. ` +\n    `Renewals beyond the first page were NOT checked today. ` +\n    `Raise the limit in this workflow, or add cursor paging.`);\n}\n\nconst today = new Date(); today.setHours(0,0,0,0);\nconst out = [];\n\nfor (const s of subs) {\n  if (!s.renewalDate) continue;\n  const d = new Date(s.renewalDate); d.setHours(0,0,0,0);\n  const days = Math.round((d - today) / 86400000);\n  // Only act on the exact milestones, so a subscription is not chased daily\n  // for three months.\n  if ([90, 60, 30, 7].includes(days)) {\n    out.push({ json: { id: s.id, days, name: s.name,\n                       serviceLine: s.serviceLine, mrr: s.mrr,\n                       renewalDate: s.renewalDate, companyId: s.companyId }});\n  }\n}\nreturn out;"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};// A subscription sitting exactly on a 90/60/30/7 day milestone that is not in\n// this list is a renewal nobody chases \u2014 the one thing this workflow exists to\n// prevent \u2014 so pageAll throws rather than let a short read pass as a full one.\nconst subs = pageAll('Get active subscriptions', 'serviceSubscriptions');\n\n// Day counting in UTC, deliberately. Twenty stores renewalDate as UTC\n// midnight; measuring it against a local midnight shifts every date by the\n// container's offset and lands the whole run one day out west of Greenwich \u2014\n// so the 30-day notice goes out on day 29 and the 7-day notice on day 6.\nconst startOfUTCDay = (v) => {\n  const d = new Date(v);\n  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());\n};\nconst today = startOfUTCDay(new Date());\nconst out = [];\n\nfor (const s of subs) {\n  if (!s.renewalDate) continue;\n  const days = Math.round((startOfUTCDay(s.renewalDate) - today) / 86400000);\n  // Only act on the exact milestones, so a subscription is not chased daily\n  // for three months.\n  if ([90, 60, 30, 7].includes(days)) {\n    out.push({ json: { id: s.id, days, name: s.name,\n                       serviceLine: s.serviceLine, mrr: s.mrr,\n                       renewalDate: s.renewalDate, companyId: s.companyId }});\n  }\n}\nreturn out;"
       },
       "id": "443118479346",
       "name": "Days until renewal",
@@ -173,7 +192,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"title\": 'Renewal in 90 days \u2014 ' + $json.name, \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 3 }).toISO() }) }}"
+        "jsonBody": "={{ JSON.stringify({\"title\": 'Renewal in 90 days \u2014 ' + $json.name, \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 3 }).toUTC().toISO() }) }}"
       },
       "id": "079741746625",
       "name": "Task: begin renewal",
@@ -207,7 +226,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"title\": 'Renewal in 60 days \u2014 confirm intent \u2014 ' + $json.name, \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 2 }).toISO() }) }}"
+        "jsonBody": "={{ JSON.stringify({\"title\": 'Renewal in 60 days \u2014 confirm intent \u2014 ' + $json.name, \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 2 }).toUTC().toISO() }) }}"
       },
       "id": "239745607967",
       "name": "Task: confirm intent",

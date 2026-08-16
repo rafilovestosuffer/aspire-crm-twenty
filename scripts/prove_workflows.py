@@ -102,11 +102,25 @@ def twenty_post(obj: str, body: dict) -> dict:
 
 
 def rows(obj: str, query: str = "") -> list[dict]:
+    """One page of records. 200 is Twenty's hard ceiling, not a choice.
+
+    Asking for more returns 200 anyway, with HTTP 200 and no warning, so a
+    check written as "fetch everything and count what matches" quietly stops
+    being true the day the table passes 200 rows — which is how the alert check
+    below started failing on a stack where alerting worked perfectly. Anything
+    counting occurrences must filter server-side and read `count()`.
+    """
     parts = [q for q in query.split("&") if q]
     if not any(q.startswith("limit=") for q in parts):
         parts.append("limit=200")
     d = twenty(f"/rest/{obj}?" + "&".join(parts))
     return d.get("data", {}).get(obj, [])
+
+
+def count(obj: str, query: str = "") -> int:
+    """How many records match, server-side — independent of any page size."""
+    parts = [q for q in query.split("&") if q] + ["limit=1"]
+    return twenty(f"/rest/{obj}?" + "&".join(parts)).get("totalCount", 0)
 
 
 class N8nSession:
@@ -357,9 +371,14 @@ def prove_error_handler(sess: N8nSession, ids: dict) -> None:
                         redirect=False)
     check("unknown slug does not 5xx", status < 500, f"HTTP {status}")
 
-    before = len(rows("automationRuns", "filter=status[eq]:FAILED"))
-    alerts_before = len([r for r in rows("automationRuns")
-                         if (r.get("workflowName") or "").startswith("ALERT")])
+    # Counted server-side, both of them. Reading a page and filtering it here
+    # worked until automationRuns passed 200 rows, at which point the alerts
+    # fell outside the page and this check reported "0 new alert(s)" against a
+    # stack where alerting was working — a false alarm indistinguishable from
+    # the real failure it exists to catch.
+    ALERTS = "filter=workflowName[ilike]:ALERT%25"
+    before = count("automationRuns", "filter=status[eq]:FAILED")
+    alerts_before = count("automationRuns", ALERTS)
 
     have_probe = bool(ids.get("SYS Failure Probe (dev)"))
     if not check("failure probe deployed", have_probe,
@@ -373,25 +392,25 @@ def prove_error_handler(sess: N8nSession, ids: dict) -> None:
     check("failure probe fired", status < 400, f"HTTP {status}")
 
     # The error workflow runs after the failing execution finishes.
-    failed, alerts = [], []
+    failed, now_failed, now_alerts = [], before, alerts_before
     for _ in range(15):
         time.sleep(2)
-        failed = rows("automationRuns", "filter=status[eq]:FAILED"
-                                        "&order_by=createdAt[DescNullsLast]")
-        alerts = [r for r in rows("automationRuns")
-                  if (r.get("workflowName") or "").startswith("ALERT")]
-        if len(failed) > before and len(alerts) > alerts_before:
+        now_failed = count("automationRuns", "filter=status[eq]:FAILED")
+        now_alerts = count("automationRuns", ALERTS)
+        if now_failed > before and now_alerts > alerts_before:
             break
+    failed = rows("automationRuns", "filter=status[eq]:FAILED"
+                                    "&order_by=createdAt[DescNullsLast]&limit=1")
 
     check("failure recorded in Twenty as automationRun FAILED",
-          len(failed) > before,
+          now_failed > before,
           failed[0].get("workflowName", "") if failed else "none")
     check("failure message captured, not swallowed",
           bool(failed) and "deliberate failure probe" in
           (failed[0].get("errorMessage") or ""),
           (failed[0].get("errorMessage") or "")[:60] if failed else "")
-    check("alert delivered for the failure", len(alerts) > alerts_before,
-          f"{len(alerts) - alerts_before} new alert(s)")
+    check("alert delivered for the failure", now_alerts > alerts_before,
+          f"{now_alerts - alerts_before} new alert(s)")
 
 
 def prove_inbound_events() -> None:

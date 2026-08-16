@@ -24,13 +24,32 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/opportunities?filter=stage[neq]:CUSTOMER&limit=500",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/opportunities?filter=stage[neq]:CUSTOMER,updatedAt[lte]:{{ encodeURIComponent($now.minus({ days: 14 }).toUTC().toISO()) }}&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
           "response": {
             "response": {
               "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
             }
           }
         }
@@ -55,13 +74,32 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/appointments?filter=status[eq]:BOOKED&limit=500",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/appointments?filter=status[eq]:BOOKED,scheduledAt[lte]:{{ encodeURIComponent($now.minus({ hours: 1 }).toUTC().toISO()) }}&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
           "response": {
             "response": {
               "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
             }
           }
         }
@@ -86,13 +124,32 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/invoices?filter=status[in]:[SENT,PARTIALLY_PAID]&limit=500",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/invoices?filter=status[in]:[SENT,PARTIALLY_PAID],dueDate[lte]:{{ encodeURIComponent($now.toUTC().toISO()) }}&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
           "response": {
             "response": {
               "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
             }
           }
         }
@@ -116,7 +173,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Three absence checks in one pass. None of these emit an event anywhere \u2014\n// they are all \"this did not happen by now\", which only a query can find.\nconst now = Date.now();\nconst days = (d) => (now - new Date(d).getTime()) / 86400000;\n\n// Each read is one page. If Twenty says there were more rows than came back,\n// this sweep is looking at part of the picture and reporting it as the whole \u2014\n// an \"all clear\" that is not one. Better to fail and be told.\nconst page = (nodeName, key) => {\n  const body = $(nodeName).first().json;\n  const rows = body.data?.[key] || [];\n  const total = body.totalCount;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} \u2014 query limit too low. ` +\n      `This sweep would have reported on part of the data as if it were all of it.`);\n  }\n  return rows;\n};\n\nconst opps    = page('Stale opportunities', 'opportunities');\nconst appts   = page('Possible no-shows', 'appointments');\nconst invoices= page('Overdue invoices', 'invoices');\n\nconst staleOpps = opps.filter(o => days(o.updatedAt) > 14);\nconst noShows   = appts.filter(a => new Date(a.scheduledAt).getTime() < now - 3600_000);\nconst late      = invoices.filter(i => i.dueDate && new Date(i.dueDate).getTime() < now);\n\nreturn [{ json: {\n  staleCount: staleOpps.length, noShowCount: noShows.length, lateCount: late.length,\n  noShowIds: noShows.map(a => a.id),\n  summary: [\n    staleOpps.length ? `${staleOpps.length} opportunity(s) untouched >14 days` : null,\n    noShows.length   ? `${noShows.length} appointment(s) past with status still Booked` : null,\n    late.length      ? `${late.length} invoice(s) overdue` : null,\n  ].filter(Boolean).join('\\n') || 'Nothing outstanding.',\n}}];"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};// Three absence checks in one pass. None of these emit an event anywhere \u2014\n// they are all \"this did not happen by now\", which only a query can find.\nconst now = Date.now();\nconst days = (d) => (now - new Date(d).getTime()) / 86400000;\n\nconst opps    = pageAll('Stale opportunities', 'opportunities');\nconst appts   = pageAll('Possible no-shows', 'appointments');\nconst invoices= pageAll('Overdue invoices', 'invoices');\n\nconst staleOpps = opps.filter(o => days(o.updatedAt) > 14);\nconst noShows   = appts.filter(a => new Date(a.scheduledAt).getTime() < now - 3600_000);\nconst late      = invoices.filter(i => i.dueDate && new Date(i.dueDate).getTime() < now);\n\nreturn [{ json: {\n  staleCount: staleOpps.length, noShowCount: noShows.length, lateCount: late.length,\n  noShowIds: noShows.map(a => a.id),\n  summary: [\n    staleOpps.length ? `${staleOpps.length} opportunity(s) untouched >14 days` : null,\n    noShows.length   ? `${noShows.length} appointment(s) past with status still Booked` : null,\n    late.length      ? `${late.length} invoice(s) overdue` : null,\n  ].filter(Boolean).join('\\n') || 'Nothing outstanding.',\n}}];"
       },
       "id": "430719254849",
       "name": "Assess",

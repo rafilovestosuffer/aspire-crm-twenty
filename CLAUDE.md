@@ -87,6 +87,25 @@ Getting these wrong is usually **silent**, not an error. Enforced by
 | substring | `?filter=domainName.primaryLinkUrl[ilike]:%acme%` | — |
 | order | `?order_by=field[DescNullsLast]` | `orderBy=` — **silently ignored** |
 | relation | `?filter=personId[eq]:<uuid>` | the relation is `person`, the filter key is `personId` |
+| page size | `?limit=200` is the **hard ceiling** | `?limit=500` — **returns 200, HTTP 200, no warning** |
+| datetime | `2026-08-16T21:12:12.072Z` or `2026-08-16` | `…-05:00` / `…+00:00` — **400, in filters *and* write bodies** |
+
+**A page is 200 rows and nothing raises that.** Any scan that can outgrow 200
+must page: `?starting_after=<pageInfo.endCursor>` until `pageInfo.hasNextPage`
+is false. Verified live — pages do not overlap and sum to `totalCount` exactly.
+Compare what you hold against `totalCount` and fail if they differ; a sweep
+reporting "all clear" over the first page of a larger table is worse than one
+that errors. In n8n this is the HTTP Request node's pagination option, which
+emits **one item per page** (`PAGE_ALL_JS` reads them). `scripts/prove_paging.py`
+pushes a table past 200 and asserts the generated node read every row.
+
+**Dates go to Twenty as UTC with a `Z`, always.** Luxon's `toISO()` renders in
+the workflow's zone, so `$now.toISO()` is only a `Z` while `TZ=UTC`. Set
+`TZ=America/New_York` in `infra/.env` — a reasonable thing for a US company to
+do — and every `automationRun` write, every `sentAt`, every task `dueAt` and the
+renewal scan start failing at once, on a stack that passed every test.
+`.toUTC().toISO()` is byte-identical today and correct in any zone. The
+generator refuses to build without it.
 
 **Every interpolated filter value must be `encodeURIComponent`-wrapped.** A
 space, bracket or colon in the value corrupts the query into a 400. This broke

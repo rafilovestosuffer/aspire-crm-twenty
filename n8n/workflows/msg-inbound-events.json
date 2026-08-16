@@ -119,7 +119,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $json.status, \"source\": $json.source, \"effectiveAt\": $now.toISO(), \"proof\": $json.proof, \"vendorReference\": $json.vendorReference, \"personId\": $json.personId }) }}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $json.status, \"source\": $json.source, \"effectiveAt\": $now.toUTC().toISO(), \"proof\": $json.proof, \"vendorReference\": $json.vendorReference, \"personId\": $json.personId }) }}"
       },
       "id": "391193117608",
       "name": "Write consent record",

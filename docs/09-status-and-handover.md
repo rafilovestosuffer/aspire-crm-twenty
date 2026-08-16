@@ -45,15 +45,15 @@ patches and backs up.
 | Objects in the CRM | **53** — 28 Twenty standard, **25 custom** |
 | Fields and relations provisioned | **177**, from a version-controlled schema, 0 failures |
 | Demo dataset | **448** records, deterministic — identical on every rebuild |
-| Automations | **6** live workflows, plus 2 that exist only to test the other six |
-| Automated checks against the running system | **25**, all passing |
+| Automations | **9** live workflows, plus 2 that exist only to test the others |
+| Automated checks against the running system | **37**, all passing |
 
 The four objects that carry the business: `serviceSubscription`,
 `complianceEngagement`, `trainingAccount`, `phishingBaseline`. Two more carry
 the discipline: `consentRecord` (who may be contacted, on which channel, with
 proof) and `automationRun` (the execution history GHL never exposed).
 
-### The six workflows
+### The nine workflows
 
 | Workflow | What it does |
 |---|---|
@@ -63,6 +63,9 @@ proof) and `automationRun` (the execution history GHL never exposed).
 | `MSG Tracked Link Redirect` | Click tracking; counts the click, then redirects |
 | `OPS Scheduled Sweeps` | Finds what did *not* happen — stale opportunities, no-shows, overdue invoices |
 | `SYS Error Handler` | Catches any failure, records it, alerts, and suppresses alert storms |
+| `MSG Inbound Events` | Closes the consent loop: an unsubscribe or bounce from the mail provider flips the consent record, and a later form submission cannot quietly undo it |
+| `LEAD Nurture Sequence` | Day 3, 7 and 14 after an enquiry, then stops. Stops early on a reply, an opt-out, or a real opportunity |
+| `SYS Daily Health Check` | Asks every morning whether the stack is still alive — worker processing, schedules firing, failure rate, backup freshness — because nothing else notices a dead worker after deploy day |
 
 ## 4. What "proven" means here
 
@@ -84,6 +87,25 @@ the real schedules, and then asks the CRM whether the records are there.
 | Scheduled work | Renewals and sweeps run clean against the seeded data |
 
 Run it any time. If something breaks later, it says so.
+
+### What a passing suite still does not prove
+
+A check only proves the code it actually executed. Two of the worst defects
+found in this build passed every check before they were found:
+
+- The nurture sequence asked for email templates that did not exist. On a fresh
+  database no lead is old enough to be nudged, so the send path never ran and
+  the suite went green over code that would have thrown on every send.
+- Every scheduled scan asked Twenty for 500 records. Twenty's ceiling is **200**
+  and it returns 200 with HTTP 200 and no warning. With 32 form submissions in
+  the test data, nothing noticed. The workflows now page, and
+  `scripts/prove_paging.py` pushes a table past 200 and asserts the scan read
+  every row — the only check here that costs a few minutes, and the only one
+  that can catch this.
+
+Both were volume-dependent: correct on a demo dataset, broken in production some
+months in. When adding a check, ask what data would have to exist for it to
+execute at all.
 
 ## 5. Honest status
 

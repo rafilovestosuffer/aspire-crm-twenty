@@ -1,0 +1,276 @@
+{
+  "name": "SYS Daily Health Check",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "514793872925",
+      "name": "Daily 09:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?order_by=startedAt[DescNullsLast]&limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "503252026463",
+      "name": "CRM answering?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const runs = $input.first().json.data?.automationRuns || [];\n\n// 26 hours, not 24: a daily job that drifts by an hour must not raise a false\n// alarm every single morning. An alert people learn to ignore is worthless.\nconst cutoff = Date.now() - 26 * 3600_000;\nconst recent = runs.filter(r => new Date(r.startedAt).getTime() > cutoff);\n\nconst EXPECTED = ['SUB Renewal Escalation', 'OPS Scheduled Sweeps'];\nconst seen = new Set(recent.map(r => r.workflowName));\nconst missing = EXPECTED.filter(w => !seen.has(w));\nconst failed = recent.filter(r => r.status === 'FAILED');\n\nconst problems = [];\nif (missing.length) {\n  problems.push(`did not run in the last 26h: ${missing.join(', ')}`);\n}\nif (failed.length) {\n  problems.push(`${failed.length} failed run(s): ` +\n                failed.slice(0, 3).map(r => r.workflowName).join(', '));\n}\n\nreturn [{ json: {\n  healthy: problems.length === 0,\n  problems: problems.join(' | '),\n  checked: recent.length,\n}}];"
+      },
+      "id": "865011195768",
+      "name": "Anything missing?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.healthy }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "301401503943",
+      "name": "All well?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"SYS Daily Health Check\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "436664829027",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1120,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"#crm-alerts\", \"text\": `:rotating_light: *CRM automation health check failed*\n${$json.problems}\nCheck the worker first: docker compose ps worker` }) }}",
+        "options": {}
+      },
+      "id": "380984391167",
+      "name": "Health alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1120,
+        490
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "content": "## Ask whether yesterday actually happened\ndeploy.sh checks the worker once, on the day you deploy. Nothing\nchecks it on day forty. A dead worker means no scheduled workflow\nand no mailbox sync, and the interface stays perfectly healthy the\nwhole time \u2014 so the only way to find it is to go and look.",
+        "height": 400,
+        "width": 540,
+        "color": 5
+      },
+      "id": "648238124152",
+      "name": "1. Ask whether yesterday actually happened",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Did the daily automations run?\nThree workflows are supposed to run every morning. If none of them\nleft a record in the last twenty-six hours, either the worker is\ndead, n8n's scheduler is stuck, or the CRM stopped accepting\nwrites. All three are invisible from the outside.",
+        "height": 380,
+        "width": 540,
+        "color": 6
+      },
+      "id": "490030893347",
+      "name": "2. Did the daily automations run?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        540,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Say something only when something is wrong\nA green tick every morning trains people to stop reading. This\nsends nothing on a good day, and names exactly what is missing on\na bad one.",
+        "height": 530,
+        "width": 540,
+        "color": 2
+      },
+      "id": "346905413336",
+      "name": "3. Say something only when something is wrong",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1100,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 09:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "CRM answering?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM answering?": {
+      "main": [
+        [
+          {
+            "node": "Anything missing?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything missing?": {
+      "main": [
+        [
+          {
+            "node": "All well?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All well?": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Health alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Health alert": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Every morning, checks that the CRM answers and that the scheduled automations actually ran yesterday. Silence is the failure mode this catches \u2014 nothing else in the stack notices absence."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

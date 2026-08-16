@@ -77,6 +77,41 @@ ALERT_HOOK = "={{ $env.ALERT_WEBHOOK_URL }}"
 SALES_HOOK = "={{ $env.SALES_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL }}"
 
 
+# Email templates, and the ONLY list of them. The send workflow renders from
+# this and the nurture workflow picks keys out of NURTURE_KEYS, so a workflow
+# cannot ask for a template that was never written — which is exactly what
+# happened the first time: nurture requested nurture_1, the renderer threw
+# "Unknown templateKey", and every single nudge failed. The proof suite did not
+# catch it because no lead was due on a freshly seeded database, so the send
+# path was never executed. A green check that never ran the code is not a check.
+NURTURE_KEYS = ["nurture_1", "nurture_2", "nurture_3"]
+TEMPLATE_KEYS = ["lead_ack", "renewal_60d", "appt_reminder_24h", *NURTURE_KEYS]
+
+# Reads every page of a paginated scan node and proves nothing was left behind.
+#
+# Two separate ceilings make a scan lie about how much it read, and neither
+# announces itself: Twenty silently clamps `limit` to 200, and the pagination
+# option stops at maxRequests pages. Either way the workflow gets a clean HTTP
+# 200 holding part of the data, and a sweep that reports "all clear" on a
+# subset is worse than one that fails. totalCount comes back with every page,
+# so compare against it and throw when they disagree.
+PAGE_ALL_JS = """
+const pageAll = (nodeName, key) => {
+  const pages = $(nodeName).all();
+  const rows = [];
+  for (const p of pages) rows.push(...(p.json.data?.[key] || []));
+  const total = pages.length ? pages[0].json.totalCount : 0;
+  if (typeof total === 'number' && total > rows.length) {
+    throw new Error(
+      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) — ` +
+      `the scan stopped early, so this run saw only part of the data. ` +
+      `Raise maxRequests on that node.`);
+  }
+  return rows;
+};
+""".strip()
+
+
 # --------------------------------------------------------------------------
 # Node helpers
 # --------------------------------------------------------------------------
@@ -322,8 +357,15 @@ class Flow:
     # ---- reusable node factories -------------------------------------------
 
     def twenty(self, name: str, method: str, path: str, body: dict | None = None,
-               *, row: int = 0) -> str:
-        """An authenticated call to Twenty's REST API, with retry on 429."""
+               *, row: int = 0, paginate: bool = False) -> str:
+        """An authenticated call to Twenty's REST API, with retry on 429.
+
+        `paginate=True` walks every page with the cursor instead of reading the
+        first one. Twenty caps a page at 200 rows whatever `limit` says — ask
+        for 500 and you get 200, with HTTP 200 and no warning anywhere — so any
+        scan that can outgrow 200 records needs this or it quietly reports on a
+        subset. The node emits one item per page; read them with `pageAll()`.
+        """
         params: dict = {
             "method": method,
             "url": f"={{{{ $env.TWENTY_BASE_URL }}}}{path}",
@@ -331,6 +373,27 @@ class Flow:
             "genericAuthType": "httpHeaderAuth",
             "options": {"response": {"response": {"neverError": False}}},
         }
+        if paginate:
+            # Verified against the live instance: `starting_after` takes
+            # pageInfo.endCursor, pages do not overlap, and the pages sum to
+            # totalCount exactly. completeExpression is parsed by slicing off
+            # "={{" and "}}", so it has to be written in exactly that form.
+            # 700ms between pages keeps a long scan inside Twenty's 100/min.
+            params["options"]["pagination"] = {"pagination": {
+                "paginationMode": "updateAParameterInEachRequest",
+                "parameters": {"parameters": [
+                    {"type": "qs", "name": "starting_after",
+                     "value": "={{ $response.body.pageInfo.endCursor }}"}]},
+                "paginationCompleteWhen": "other",
+                "completeExpression":
+                    "={{ !$response.body.pageInfo.hasNextPage }}",
+                # A stop, not a limit: 50 pages is 10,000 records. If a scan
+                # ever hits it the totalCount check in pageAll() throws, which
+                # is the loud failure we want instead of a silent half-read.
+                "limitPagesFetched": True,
+                "maxRequests": 50,
+                "requestInterval": 700,
+            }}
         if body is not None:
             params["sendBody"] = True
             params["specifyBody"] = "json"
@@ -479,7 +542,7 @@ return [{ json: {
         "status": "FAILED",
         "errorMessage": "={{ $json.message }}",
         "n8nExecutionId": "={{ $json.executionId }}",
-        "startedAt": "={{ $now.toISO() }}",
+        "startedAt": "={{ $now.toUTC().toISO() }}",
     })
 
     f.phase("Alert, but do not spam",
@@ -601,6 +664,33 @@ We will reach out shortly to confirm.</p>
 <p>A reminder of your {{appointmentType}} at {{scheduledAt}}.</p>
 <p>{{meetingUrl}}</p>`,
   },
+  nurture_1: {
+    subject: 'Following up on your enquiry, {{firstName}}',
+    body: `<p>Hi {{firstName}},</p>
+<p>You got in touch with us a few days ago and I wanted to make sure your
+question did not get lost.</p>
+<p>If it would help to talk it through, just reply to this email and we will
+find a time.</p>
+<p>— Aspire Tech</p>`,
+  },
+  nurture_2: {
+    subject: 'Anything we can help with, {{firstName}}?',
+    body: `<p>Hi {{firstName}},</p>
+<p>Still happy to help with what you asked about. Most people come to us
+with one of three things: a CMMC assessment deadline, a security monitoring
+gap, or training that needs to actually change behaviour.</p>
+<p>If any of those is on your list, reply and tell me which.</p>
+<p>— Aspire Tech</p>`,
+  },
+  nurture_3: {
+    subject: 'Last note from me, {{firstName}}',
+    body: `<p>Hi {{firstName}},</p>
+<p>I do not want to keep filling your inbox, so this is my last note about
+your enquiry.</p>
+<p>If the timing is wrong, that is completely fine — reply whenever it
+changes and we will pick it up.</p>
+<p>— Aspire Tech</p>`,
+  },
 };
 
 const d = $input.first().json;
@@ -633,8 +723,12 @@ return [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];
         "direction": "OUTBOUND",
         "status": "SENT",
         "subject": "={{ $('Render template').first().json.subject }}",
-        "vendor": "smtp",
-        "sentAt": "={{ $now.toISO() }}",
+        # Not just "smtp": the template that was used. Nurture counts how many
+        # nudges a person has already had by asking this field, and without it
+        # the count is always zero — so everyone would be nudged every single
+        # day until they aged out. Also makes the message log far more useful.
+        "vendor": "={{ 'smtp/' + $('Render template').first().json.templateKey }}",
+        "sentAt": "={{ $now.toUTC().toISO() }}",
         "personId": "={{ $('Render template').first().json.personId }}",
     })
 
@@ -649,7 +743,7 @@ return [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];
         "status": "FAILED",
         "subject": "={{ 'Blocked: ' + $json.reason }}",
         "vendor": "consent-gate",
-        "sentAt": "={{ $now.toISO() }}",
+        "sentAt": "={{ $now.toUTC().toISO() }}",
         "personId": "={{ $('When called').first().json.personId }}",
     }, row=1)
 
@@ -853,13 +947,13 @@ return [{ json: {
         "channel": "EMAIL",
         "status": "={{ $('Consent status').first().json.status }}",
         "source": "FORM_SUBMISSION",
-        "effectiveAt": "={{ $now.toISO() }}",
+        "effectiveAt": "={{ $now.toUTC().toISO() }}",
         "proof": "={{ $('Consent status').first().json.proof }}",
         "personId": person_id,
     })
 
     submission = f.twenty("Log submission", "POST", "/rest/formSubmissions", {
-        "submittedAt": "={{ $now.toISO() }}",
+        "submittedAt": "={{ $now.toUTC().toISO() }}",
         "consentGiven": "={{ $('Normalise').first().json.consent }}",
         "payload": "={{ JSON.stringify($('Normalise').first().json) }}",
         "personId": person_id,
@@ -899,7 +993,7 @@ return [{ json: { ...d, score,
         "title": "={{ 'Follow up: ' + $json.firstName + ' ' + $json.lastName + "
                  "' (' + $json.band + ', score ' + $json.score + ')' }}",
         "status": "TODO",
-        "dueAt": "={{ $now.plus({ days: 1 }).toISO() }}",
+        "dueAt": "={{ $now.plus({ days: 1 }).toUTC().toISO() }}",
         # Twenty's task body is `bodyV2`, a RICH_TEXT composite: it takes
         # {"markdown": ...} and rejects a bare string with a 400. A plain
         # `body` key is silently not a field at all.
@@ -1046,33 +1140,31 @@ def wf_renewal() -> Flow:
                      # which is a full table scan every morning forever.
                      "/rest/serviceSubscriptions"
                      "?filter=status[in]:[ACTIVE,RENEWAL_DUE],"
-                     "renewalDate[lte]:{{ encodeURIComponent($now.plus({ days: 90 }).toISO()) }}"
-                     "&order_by=renewalDate[AscNullsLast]&limit=500")
+                     "renewalDate[lte]:{{ encodeURIComponent($now.plus({ days: 90 }).toUTC().toISO()) }}"
+                     "&order_by=renewalDate[AscNullsLast]&limit=200",
+                     paginate=True)
 
-    window = f.code("Days until renewal", """
-const body = $input.first().json;
-const subs = body.data?.serviceSubscriptions || [];
+    window = f.code("Days until renewal", PAGE_ALL_JS + """
 
-// Twenty returns totalCount alongside the page. If the read was truncated,
-// some subscription sitting exactly on a 90/60/30/7 day milestone is invisible
-// today and its renewal is missed — the one thing this workflow exists to
-// prevent. Silently processing the first page would hide that forever, so fail
-// loudly: SYS Error Handler records it and alerts, and someone adds paging.
-const total = body.totalCount;
-if (typeof total === 'number' && total > subs.length) {
-  throw new Error(
-    `Read ${subs.length} of ${total} subscriptions — the query limit is too low. ` +
-    `Renewals beyond the first page were NOT checked today. ` +
-    `Raise the limit in this workflow, or add cursor paging.`);
-}
+// A subscription sitting exactly on a 90/60/30/7 day milestone that is not in
+// this list is a renewal nobody chases — the one thing this workflow exists to
+// prevent — so pageAll throws rather than let a short read pass as a full one.
+const subs = pageAll('Get active subscriptions', 'serviceSubscriptions');
 
-const today = new Date(); today.setHours(0,0,0,0);
+// Day counting in UTC, deliberately. Twenty stores renewalDate as UTC
+// midnight; measuring it against a local midnight shifts every date by the
+// container's offset and lands the whole run one day out west of Greenwich —
+// so the 30-day notice goes out on day 29 and the 7-day notice on day 6.
+const startOfUTCDay = (v) => {
+  const d = new Date(v);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+};
+const today = startOfUTCDay(new Date());
 const out = [];
 
 for (const s of subs) {
   if (!s.renewalDate) continue;
-  const d = new Date(s.renewalDate); d.setHours(0,0,0,0);
-  const days = Math.round((d - today) / 86400000);
+  const days = Math.round((startOfUTCDay(s.renewalDate) - today) / 86400000);
   // Only act on the exact milestones, so a subscription is not chased daily
   // for three months.
   if ([90, 60, 30, 7].includes(days)) {
@@ -1125,12 +1217,12 @@ return out;
         t90 = f.twenty("Task: begin renewal", "POST", "/rest/tasks", {
             "title": "={{ 'Renewal in 90 days — ' + $json.name }}",
             "status": "TODO",
-            "dueAt": "={{ $now.plus({ days: 3 }).toISO() }}",
+            "dueAt": "={{ $now.plus({ days: 3 }).toUTC().toISO() }}",
         })
         t60 = f.twenty("Task: confirm intent", "POST", "/rest/tasks", {
             "title": "={{ 'Renewal in 60 days — confirm intent — ' + $json.name }}",
             "status": "TODO",
-            "dueAt": "={{ $now.plus({ days: 2 }).toISO() }}",
+            "dueAt": "={{ $now.plus({ days: 2 }).toUTC().toISO() }}",
         }, row=1)
         o30 = f.twenty("Create renewal opportunity", "POST", "/rest/opportunities", {
             "name": "={{ 'Renewal — ' + $json.name }}",
@@ -1177,41 +1269,35 @@ def wf_sweeps() -> Flow:
                  {"rule": {"interval": [{"field": "cronExpression",
                                          "expression": "0 7 * * *"}]}}, version=1.2)
 
+    # Each scan asks only for the rows it will actually act on. The code below
+    # applies the same cut-offs again, so the query narrowing changes the volume
+    # read, never the outcome — and every one of these tables grows forever.
     stale = f.twenty("Stale opportunities", "GET",
                      # Twenty's default pipeline ends at CUSTOMER; there is
                      # no WON stage, and the wrong enum is a 400 at runtime.
-                     "/rest/opportunities?filter=stage[neq]:CUSTOMER&limit=500")
+                     "/rest/opportunities?filter=stage[neq]:CUSTOMER,"
+                     "updatedAt[lte]:{{ encodeURIComponent($now.minus({ days: 14 }).toUTC().toISO()) }}"
+                     "&limit=200", paginate=True)
     noshow = f.twenty("Possible no-shows", "GET",
-                      "/rest/appointments?filter=status[eq]:BOOKED&limit=500", row=1)
+                      "/rest/appointments?filter=status[eq]:BOOKED,"
+                      "scheduledAt[lte]:{{ encodeURIComponent($now.minus({ hours: 1 }).toUTC().toISO()) }}"
+                      "&limit=200", row=1, paginate=True)
     overdue = f.twenty("Overdue invoices", "GET",
                        # `in` takes a bracketed array; a bare comma list 400s.
-                       "/rest/invoices?filter=status[in]:[SENT,PARTIALLY_PAID]"
-                       "&limit=500", row=2)
+                       "/rest/invoices?filter=status[in]:[SENT,PARTIALLY_PAID],"
+                       "dueDate[lte]:{{ encodeURIComponent($now.toUTC().toISO()) }}"
+                       "&limit=200", row=2, paginate=True)
 
-    assess = f.code("Assess", """
+    assess = f.code("Assess", PAGE_ALL_JS + """
+
 // Three absence checks in one pass. None of these emit an event anywhere —
 // they are all "this did not happen by now", which only a query can find.
 const now = Date.now();
 const days = (d) => (now - new Date(d).getTime()) / 86400000;
 
-// Each read is one page. If Twenty says there were more rows than came back,
-// this sweep is looking at part of the picture and reporting it as the whole —
-// an "all clear" that is not one. Better to fail and be told.
-const page = (nodeName, key) => {
-  const body = $(nodeName).first().json;
-  const rows = body.data?.[key] || [];
-  const total = body.totalCount;
-  if (typeof total === 'number' && total > rows.length) {
-    throw new Error(
-      `${nodeName}: read ${rows.length} of ${total} ${key} — query limit too low. ` +
-      `This sweep would have reported on part of the data as if it were all of it.`);
-  }
-  return rows;
-};
-
-const opps    = page('Stale opportunities', 'opportunities');
-const appts   = page('Possible no-shows', 'appointments');
-const invoices= page('Overdue invoices', 'invoices');
+const opps    = pageAll('Stale opportunities', 'opportunities');
+const appts   = pageAll('Possible no-shows', 'appointments');
+const invoices= pageAll('Overdue invoices', 'invoices');
 
 const staleOpps = opps.filter(o => days(o.updatedAt) > 14);
 const noShows   = appts.filter(a => new Date(a.scheduledAt).getTime() < now - 3600_000);
@@ -1286,7 +1372,7 @@ return [{ json: {
     record = f.twenty("Record alert", "POST", "/rest/automationRuns", {
         "workflowName": "={{ 'ALERT ' + $json.channel }}",
         "status": "SUCCESS",
-        "startedAt": "={{ $now.toISO() }}",
+        "startedAt": "={{ $now.toUTC().toISO() }}",
         "n8nExecutionId": "={{ $execution.id }}",
         # errorMessage is automationRun's only free-text field; the alert body
         # goes there rather than adding a column used by one dev-only workflow.
@@ -1426,7 +1512,7 @@ return [{ json: { ...ev, personId: rows[0]?.id || null, known: rows.length > 0 }
             "channel": "EMAIL",
             "status": "={{ $json.status }}",
             "source": "={{ $json.source }}",
-            "effectiveAt": "={{ $now.toISO() }}",
+            "effectiveAt": "={{ $now.toUTC().toISO() }}",
             "proof": "={{ $json.proof }}",
             "vendorReference": "={{ $json.vendorReference }}",
             "personId": "={{ $json.personId }}",
@@ -1487,16 +1573,36 @@ def wf_nurture() -> Flow:
             "than one per person, so it stays well inside the CRM's rate limit.",
             "capture")
 
-    trig = f.add("Daily 08:00 UTC", "n8n-nodes-base.scheduleTrigger",
+    # 13:00 UTC is 09:00 on the US east coast, where the people receiving these
+    # actually are. The other scheduled workflows run early because they only
+    # produce internal tasks and digests — nobody outside sees them. This one
+    # sends real email to a prospect, and at the old 08:00 UTC it landed at 3am
+    # their time: bad for open rates, and it reads as machinery rather than a
+    # person following up.
+    trig = f.add("Daily 13:00 UTC", "n8n-nodes-base.scheduleTrigger",
                  {"rule": {"interval": [{"field": "cronExpression",
-                                         "expression": "0 8 * * *"}]}}, version=1)
+                                         "expression": "0 13 * * *"}]}}, version=1)
 
+    # Only the last 21 days can be due for a nudge — the code below discards
+    # anything older — so say that in the query. Unbounded, this read every form
+    # submission the company has ever taken, every morning, forever, to nudge
+    # the handful from the past three weeks.
     subs = f.twenty("Recent form submissions", "GET",
-                    "/rest/formSubmissions?order_by=createdAt[DescNullsLast]&limit=500")
+                    "/rest/formSubmissions?filter=createdAt[gte]:"
+                    "{{ encodeURIComponent($now.minus({ days: 21 }).toUTC().toISO()) }}"
+                    "&order_by=createdAt[DescNullsLast]&limit=200", paginate=True)
 
+    # Counts on `vendor`, which the send workflow fills with "smtp/<template>".
+    # The first version matched on a "[nurture]" marker in the subject line that
+    # nothing ever wrote, so the count came back zero for everybody and the
+    # sequence would have restarted at touch one every single morning.
+    # 30 days covers the 21-day sequence with room to spare; older sends can no
+    # longer change anyone's touch count.
     sent = f.twenty("Nurture already sent", "GET",
-                    "/rest/messageLogs?filter=subject[ilike]:%25%5Bnurture%5D%25"
-                    "&order_by=createdAt[DescNullsLast]&limit=500")
+                    "/rest/messageLogs?filter=vendor[ilike]:%25nurture%25,"
+                    "createdAt[gte]:"
+                    "{{ encodeURIComponent($now.minus({ days: 30 }).toUTC().toISO()) }}"
+                    "&order_by=createdAt[DescNullsLast]&limit=200", paginate=True)
 
     f.phase("Decide who is due, and stop when you should",
             "Day 3, day 7, day 14 — then never again. It stops early if they\n"
@@ -1504,25 +1610,17 @@ def wf_nurture() -> Flow:
             "opportunity. A sequence that does not know how to stop is how\n"
             "companies end up in spam folders.", "decide")
 
-    plan = f.code("Who is due today", """
+    plan = f.code("Who is due today", PAGE_ALL_JS + """
+
+const KEYS = ["nurture_1", "nurture_2", "nurture_3"];  // generated from TEMPLATE_KEYS
 const TOUCHES = [3, 7, 14];      // days after the enquiry
 const MAX_AGE = 21;              // past this, stop looking entirely
 
-const subBody  = $('Recent form submissions').first().json;
-const sentBody = $('Nurture already sent').first().json;
-
-// Same truncation guard as the other scheduled reads: a partial page here
-// means some lead silently never gets followed up.
-const guard = (body, key, label) => {
-  const rows = body.data?.[key] || [];
-  if (typeof body.totalCount === 'number' && body.totalCount > rows.length) {
-    throw new Error(`${label}: read ${rows.length} of ${body.totalCount} — query limit too low.`);
-  }
-  return rows;
-};
-
-const submissions = guard(subBody,  'formSubmissions', 'form submissions');
-const messages    = guard(sentBody, 'messageLogs',     'nurture messages');
+// A short read here is a lead that silently never gets followed up, or — worse
+// — a missing send record that makes an already-nudged person look untouched
+// and start the sequence again.
+const submissions = pageAll('Recent form submissions', 'formSubmissions');
+const messages    = pageAll('Nurture already sent',    'messageLogs');
 
 // How many nurture messages has each person already had, and did any reply?
 const touches = new Map();
@@ -1552,7 +1650,7 @@ for (const s of submissions) {
 
   if (age >= TOUCHES[done]) {
     out.push({ json: { personId: pid, touch: done + 1, ageDays: age,
-                       templateKey: 'nurture_' + (done + 1) } });
+                       templateKey: KEYS[done] } });
   }
 }
 return out;
@@ -1561,8 +1659,15 @@ return out;
     # Opted-out people are NOT filtered here on purpose. The send sub-workflow
     # is the single place consent is decided; filtering early would put a second
     # copy of that rule in a second file, and the two would drift.
-    batch = f.add("Batch 20", "n8n-nodes-base.splitInBatches",
-                  {"batchSize": 20, "options": {}}, version=3)
+    # Batch size and the pause below are a rate-limit calculation, not a guess.
+    # Twenty allows 100 requests per MINUTE. Each nudge costs 3 calls inside the
+    # send sub-workflow (get person, get consent, log the outcome), so a batch of
+    # 20 was 60 calls fired back to back — and two batches in the same minute put
+    # us over the limit. n8n retries a 429, so the symptom would not be lost mail;
+    # it would be a slow, noisy run that trips the error handler on a busy day.
+    # 10 per batch, one batch every 30 seconds, is a steady 60 calls a minute.
+    batch = f.add("Batch 10", "n8n-nodes-base.splitInBatches",
+                  {"batchSize": 10, "options": {}}, version=3)
 
     f.phase("Send it the only way anything can be sent",
             "Each nudge goes through the send sub-workflow, so the consent gate\n"
@@ -1580,19 +1685,170 @@ return out;
         "options": {},
     }, version=1)
 
+    pace = f.add("Pace the batches", "n8n-nodes-base.wait",
+                 {"amount": 30, "unit": "seconds"}, version=1.1)
+
     log = f.log_run("Log run", "LEAD Nurture Sequence")
 
     f.chain(trig, subs, sent, plan, batch)
     f.connect(batch, log, out=0)          # done
     f.connect(batch, send, out=1)         # loop
-    f.connect(send, batch)
+    f.connect(send, pace)                 # wait before asking for the next batch
+    f.connect(pace, batch)
+    return f
+
+
+# --------------------------------------------------------------------------
+# 11. Daily health check — the thing that notices when nothing is happening
+# --------------------------------------------------------------------------
+
+def wf_health_check() -> Flow:
+    f = Flow("SYS Daily Health Check",
+             "Every morning, checks that the CRM answers and that the scheduled "
+             "automations actually ran yesterday. Silence is the failure mode "
+             "this catches — nothing else in the stack notices absence.")
+
+    f.phase("Ask whether yesterday actually happened",
+            "deploy.sh checks the worker once, on the day you deploy. Nothing\n"
+            "checks it on day forty. A dead worker means no scheduled workflow\n"
+            "and no mailbox sync, and the interface stays perfectly healthy the\n"
+            "whole time — so the only way to find it is to go and look.",
+            "capture")
+
+    trig = f.add("Daily 09:00 UTC", "n8n-nodes-base.scheduleTrigger",
+                 {"rule": {"interval": [{"field": "cronExpression",
+                                         "expression": "0 9 * * *"}]}}, version=1)
+
+    # Reaching the CRM at all is the first thing to establish: every check after
+    # this one would fail for the same reason, and report a different cause.
+    alive = f.add("CRM answering?", "n8n-nodes-base.httpRequest", {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns"
+               "?order_by=startedAt[DescNullsLast]&limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {"response": {"response": {"neverError": False}}},
+    }, version=4.2, creds={"httpHeaderAuth": {"name": CRED_TWENTY}})
+
+    f.phase("Did the daily automations run?",
+            "Three workflows are supposed to run every morning. If none of them\n"
+            "left a record in the last twenty-six hours, either the worker is\n"
+            "dead, n8n's scheduler is stuck, or the CRM stopped accepting\n"
+            "writes. All three are invisible from the outside.", "decide")
+
+    judge = f.code("Anything missing?", """
+const runs = $input.first().json.data?.automationRuns || [];
+
+// 26 hours, not 24: a daily job that drifts by an hour must not raise a false
+// alarm every single morning. An alert people learn to ignore is worthless.
+const cutoff = Date.now() - 26 * 3600_000;
+const recent = runs.filter(r => new Date(r.startedAt).getTime() > cutoff);
+
+const EXPECTED = ['SUB Renewal Escalation', 'OPS Scheduled Sweeps'];
+const seen = new Set(recent.map(r => r.workflowName));
+const missing = EXPECTED.filter(w => !seen.has(w));
+const failed = recent.filter(r => r.status === 'FAILED');
+
+const problems = [];
+if (missing.length) {
+  problems.push(`did not run in the last 26h: ${missing.join(', ')}`);
+}
+if (failed.length) {
+  problems.push(`${failed.length} failed run(s): ` +
+                failed.slice(0, 3).map(r => r.workflowName).join(', '));
+}
+
+return [{ json: {
+  healthy: problems.length === 0,
+  problems: problems.join(' | '),
+  checked: recent.length,
+}}];
+""".strip())
+
+    gate = f.iff("All well?", "={{ $json.healthy }}", "equals", "true")
+
+    f.phase("Say something only when something is wrong",
+            "A green tick every morning trains people to stop reading. This\n"
+            "sends nothing on a good day, and names exactly what is missing on\n"
+            "a bad one.", "notify")
+
+    with f.fan():
+        quiet = f.log_run("Log run", "SYS Daily Health Check")
+        shout = f.notify("Health alert", ALERT_CHANNEL,
+                         "=:rotating_light: *CRM automation health check failed*\n"
+                         "{{ $json.problems }}\n"
+                         "Check the worker first: docker compose ps worker",
+                         row=1)
+
+    f.chain(trig, alive, judge, gate)
+    f.connect(gate, quiet, out=0)
+    f.connect(gate, shout, out=1)
+    f.connect(shout, quiet)
     return f
 
 
 BUILDERS = [wf_error_handler, wf_send_email, wf_lead_form,
             wf_tracked_link, wf_renewal, wf_sweeps,
-            wf_inbound_events, wf_nurture,
+            wf_inbound_events, wf_nurture, wf_health_check,
             wf_alert_sink, wf_failure_probe]
+
+
+def _check_templates(flows: list["Flow"]) -> list[str]:
+    """Every template a workflow can ask for must exist in the renderer.
+
+    This is a whole-library check, not a per-workflow one: the request lives in
+    one workflow and the definition in another, so nothing looking at a single
+    file could ever see the mismatch. It exists because the first nurture build
+    asked for nurture_1, the renderer had never heard of it, and every nudge
+    threw "Unknown templateKey" — while the test suite reported success, because
+    on a fresh database no lead was old enough to be nudged and the code never
+    ran.
+    """
+    problems: list[str] = []
+    rendered = ""
+    for fl in flows:
+        for n in fl.nodes:
+            if n["name"] == "Render template":
+                rendered = n["parameters"]["jsCode"]
+    if not rendered:
+        return ["no Render template node found — the send workflow is missing"]
+
+    defined = set(re.findall(r"^  (\w+): \{", rendered, re.M))
+    missing = [k for k in TEMPLATE_KEYS if k not in defined]
+    if missing:
+        problems.append("templateKey(s) referenced but never defined in "
+                        f"Render template: {', '.join(missing)}")
+    unused = sorted(defined - set(TEMPLATE_KEYS))
+    if unused:
+        problems.append(f"template(s) defined but not in TEMPLATE_KEYS: "
+                        f"{', '.join(unused)} — the lists have drifted")
+    return problems
+
+
+def _check_utc_dates(flows: list["Flow"]) -> list[str]:
+    """Every date sent to Twenty must be UTC with a `Z`, never an offset.
+
+    Twenty rejects `2026-08-16T16:12:12-05:00` with HTTP 400 — in a filter and
+    in a write body alike. Luxon's `toISO()` renders in the workflow's zone, so
+    `$now.toISO()` is a `Z` only while GENERIC_TIMEZONE is UTC. Set TZ to
+    America/New_York in infra/.env — an entirely reasonable thing for a US
+    company to do, and the schedule crons are documented in a way that invites
+    it — and every automationRun write, every sentAt, every task dueAt and the
+    renewal scan all start failing at once, on a stack that passed every test.
+
+    `.toUTC().toISO()` is the same string today and correct in any zone.
+    """
+    problems = []
+    for fl in flows:
+        for n in fl.nodes:
+            for site in re.findall(r"[^\s\"']*\.toISO\(\)",
+                                   json.dumps(n["parameters"])):
+                if not site.endswith(".toUTC().toISO()"):
+                    problems.append(
+                        f"{fl.name} / {n['name']}: {site} renders in the "
+                        f"workflow timezone — Twenty 400s on a UTC offset. "
+                        f"Use .toUTC().toISO().")
+    return problems
 
 
 def lint(flow: Flow) -> list[str]:
@@ -1678,6 +1934,8 @@ def main() -> int:
         return 0
 
     problems = [p for fl in flows for p in lint(fl)]
+    problems += _check_templates(flows)
+    problems += _check_utc_dates(flows)
     if problems:
         print("Refusing to write — generated workflows would fail at runtime:\n",
               file=sys.stderr)

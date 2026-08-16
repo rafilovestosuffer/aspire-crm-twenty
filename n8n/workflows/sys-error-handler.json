@@ -40,7 +40,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"workflowName\": $json.workflowName, \"status\": \"FAILED\", \"errorMessage\": $json.message, \"n8nExecutionId\": $json.executionId, \"startedAt\": $now.toISO() }) }}"
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": $json.workflowName, \"status\": \"FAILED\", \"errorMessage\": $json.message, \"n8nExecutionId\": $json.executionId, \"startedAt\": $now.toUTC().toISO() }) }}"
       },
       "id": "239445548592",
       "name": "Log failure",

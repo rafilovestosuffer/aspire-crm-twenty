@@ -463,7 +463,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $('Consent status').first().json.status, \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": $now.toISO(), \"proof\": $('Consent status').first().json.proof, \"personId\": $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $('Consent status').first().json.status, \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": $now.toUTC().toISO(), \"proof\": $('Consent status').first().json.proof, \"personId\": $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
       },
       "id": "236835264970",
       "name": "Record consent",
@@ -497,7 +497,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"submittedAt\": $now.toISO(), \"consentGiven\": $('Normalise').first().json.consent, \"payload\": JSON.stringify($('Normalise').first().json), \"personId\": $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
+        "jsonBody": "={{ JSON.stringify({\"submittedAt\": $now.toUTC().toISO(), \"consentGiven\": $('Normalise').first().json.consent, \"payload\": JSON.stringify($('Normalise').first().json), \"personId\": $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
       },
       "id": "561430842408",
       "name": "Log submission",
@@ -544,7 +544,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"title\": 'Follow up: ' + $json.firstName + ' ' + $json.lastName + ' (' + $json.band + ', score ' + $json.score + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 1 }).toISO(), \"bodyV2\": {\"markdown\": $json.interest + '\\n\\n' + $json.message } }) }}"
+        "jsonBody": "={{ JSON.stringify({\"title\": 'Follow up: ' + $json.firstName + ' ' + $json.lastName + ' (' + $json.band + ', score ' + $json.score + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 1 }).toUTC().toISO(), \"bodyV2\": {\"markdown\": $json.interest + '\\n\\n' + $json.message } }) }}"
       },
       "id": "423306921783",
       "name": "Create task",

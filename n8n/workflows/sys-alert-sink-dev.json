@@ -45,7 +45,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"workflowName\": 'ALERT ' + $json.channel, \"status\": \"SUCCESS\", \"startedAt\": $now.toISO(), \"n8nExecutionId\": $execution.id, \"errorMessage\": $json.text }) }}"
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": 'ALERT ' + $json.channel, \"status\": \"SUCCESS\", \"startedAt\": $now.toUTC().toISO(), \"n8nExecutionId\": $execution.id, \"errorMessage\": $json.text }) }}"
       },
       "id": "104765219520",
       "name": "Record alert",

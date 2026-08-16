@@ -7,13 +7,13 @@
           "interval": [
             {
               "field": "cronExpression",
-              "expression": "0 8 * * *"
+              "expression": "0 13 * * *"
             }
           ]
         }
       },
-      "id": "950690627581",
-      "name": "Daily 08:00 UTC",
+      "id": "690300806607",
+      "name": "Daily 13:00 UTC",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
       "position": [
@@ -24,13 +24,32 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/formSubmissions?order_by=createdAt[DescNullsLast]&limit=500",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/formSubmissions?filter=createdAt[gte]:{{ encodeURIComponent($now.minus({ days: 21 }).toUTC().toISO()) }}&order_by=createdAt[DescNullsLast]&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
           "response": {
             "response": {
               "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
             }
           }
         }
@@ -55,13 +74,32 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/messageLogs?filter=subject[ilike]:%25%5Bnurture%5D%25&order_by=createdAt[DescNullsLast]&limit=500",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/messageLogs?filter=vendor[ilike]:%25nurture%25,createdAt[gte]:{{ encodeURIComponent($now.minus({ days: 30 }).toUTC().toISO()) }}&order_by=createdAt[DescNullsLast]&limit=200",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
           "response": {
             "response": {
               "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
             }
           }
         }
@@ -85,7 +123,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const TOUCHES = [3, 7, 14];      // days after the enquiry\nconst MAX_AGE = 21;              // past this, stop looking entirely\n\nconst subBody  = $('Recent form submissions').first().json;\nconst sentBody = $('Nurture already sent').first().json;\n\n// Same truncation guard as the other scheduled reads: a partial page here\n// means some lead silently never gets followed up.\nconst guard = (body, key, label) => {\n  const rows = body.data?.[key] || [];\n  if (typeof body.totalCount === 'number' && body.totalCount > rows.length) {\n    throw new Error(`${label}: read ${rows.length} of ${body.totalCount} \u2014 query limit too low.`);\n  }\n  return rows;\n};\n\nconst submissions = guard(subBody,  'formSubmissions', 'form submissions');\nconst messages    = guard(sentBody, 'messageLogs',     'nurture messages');\n\n// How many nurture messages has each person already had, and did any reply?\nconst touches = new Map();\nconst replied = new Set();\nfor (const m of messages) {\n  const pid = m.personId;\n  if (!pid) continue;\n  touches.set(pid, (touches.get(pid) || 0) + 1);\n  if (m.status === 'REPLIED') replied.add(pid);\n}\n\nconst now = Date.now();\nconst out = [];\nconst seen = new Set();\n\nfor (const s of submissions) {\n  const pid = s.personId;\n  if (!pid || seen.has(pid)) continue;        // one nudge per person per day\n  seen.add(pid);\n\n  const age = Math.floor((now - new Date(s.createdAt).getTime()) / 86400000);\n  if (age > MAX_AGE) continue;                // too old, let it go\n  if (replied.has(pid)) continue;             // they answered \u2014 stop\n\n  const done = touches.get(pid) || 0;\n  if (done >= TOUCHES.length) continue;       // sequence finished\n\n  if (age >= TOUCHES[done]) {\n    out.push({ json: { personId: pid, touch: done + 1, ageDays: age,\n                       templateKey: 'nurture_' + (done + 1) } });\n  }\n}\nreturn out;"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const KEYS = [\"nurture_1\", \"nurture_2\", \"nurture_3\"];  // generated from TEMPLATE_KEYS\nconst TOUCHES = [3, 7, 14];      // days after the enquiry\nconst MAX_AGE = 21;              // past this, stop looking entirely\n\n// A short read here is a lead that silently never gets followed up, or \u2014 worse\n// \u2014 a missing send record that makes an already-nudged person look untouched\n// and start the sequence again.\nconst submissions = pageAll('Recent form submissions', 'formSubmissions');\nconst messages    = pageAll('Nurture already sent',    'messageLogs');\n\n// How many nurture messages has each person already had, and did any reply?\nconst touches = new Map();\nconst replied = new Set();\nfor (const m of messages) {\n  const pid = m.personId;\n  if (!pid) continue;\n  touches.set(pid, (touches.get(pid) || 0) + 1);\n  if (m.status === 'REPLIED') replied.add(pid);\n}\n\nconst now = Date.now();\nconst out = [];\nconst seen = new Set();\n\nfor (const s of submissions) {\n  const pid = s.personId;\n  if (!pid || seen.has(pid)) continue;        // one nudge per person per day\n  seen.add(pid);\n\n  const age = Math.floor((now - new Date(s.createdAt).getTime()) / 86400000);\n  if (age > MAX_AGE) continue;                // too old, let it go\n  if (replied.has(pid)) continue;             // they answered \u2014 stop\n\n  const done = touches.get(pid) || 0;\n  if (done >= TOUCHES.length) continue;       // sequence finished\n\n  if (age >= TOUCHES[done]) {\n    out.push({ json: { personId: pid, touch: done + 1, ageDays: age,\n                       templateKey: KEYS[done] } });\n  }\n}\nreturn out;"
       },
       "id": "471645779552",
       "name": "Who is due today",
@@ -98,11 +136,11 @@
     },
     {
       "parameters": {
-        "batchSize": 20,
+        "batchSize": 10,
         "options": {}
       },
-      "id": "067573624773",
-      "name": "Batch 20",
+      "id": "934129958156",
+      "name": "Batch 10",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
@@ -137,6 +175,20 @@
     },
     {
       "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "240593881700",
+      "name": "Pace the batches",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
         "authentication": "genericCredentialType",
@@ -157,7 +209,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1440,
+        1660,
         300
       ],
       "credentials": {
@@ -204,8 +256,8 @@
     {
       "parameters": {
         "content": "## Send it the only way anything can be sent\nEach nudge goes through the send sub-workflow, so the consent gate\napplies exactly as it does everywhere else. Someone who opted out\nyesterday is refused here today, without this workflow needing to\nknow the rule.",
-        "height": 380,
-        "width": 540,
+        "height": 320,
+        "width": 640,
         "color": 2
       },
       "id": "611570152186",
@@ -214,12 +266,12 @@
       "typeVersion": 1,
       "position": [
         1200,
-        80
+        140
       ]
     }
   ],
   "connections": {
-    "Daily 08:00 UTC": {
+    "Daily 13:00 UTC": {
       "main": [
         [
           {
@@ -256,14 +308,14 @@
       "main": [
         [
           {
-            "node": "Batch 20",
+            "node": "Batch 10",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Batch 20": {
+    "Batch 10": {
       "main": [
         [
           {
@@ -285,7 +337,18 @@
       "main": [
         [
           {
-            "node": "Batch 20",
+            "node": "Pace the batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pace the batches": {
+      "main": [
+        [
+          {
+            "node": "Batch 10",
             "type": "main",
             "index": 0
           }

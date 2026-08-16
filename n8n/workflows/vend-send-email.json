@@ -133,7 +133,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Templates live here, in version control, not in a vendor UI nobody can diff.\nconst TEMPLATES = {\n  lead_ack: {\n    subject: 'Thanks for getting in touch, {{firstName}}',\n    body: `<p>Hi {{firstName}},</p>\n<p>Thanks for reaching out to Aspire. One of our security specialists\nwill be in touch within one business day.</p>\n<p>\u2014 Aspire Tech</p>`,\n  },\n  renewal_60d: {\n    subject: 'Your {{serviceLine}} renewal \u2014 {{renewalDate}}',\n    body: `<p>Hi {{firstName}},</p>\n<p>Your {{serviceLine}} subscription renews on {{renewalDate}}.\nWe will reach out shortly to confirm.</p>\n<p>\u2014 Aspire Tech</p>`,\n  },\n  appt_reminder_24h: {\n    subject: 'Reminder: {{appointmentType}} tomorrow',\n    body: `<p>Hi {{firstName}},</p>\n<p>A reminder of your {{appointmentType}} at {{scheduledAt}}.</p>\n<p>{{meetingUrl}}</p>`,\n  },\n};\n\nconst d = $input.first().json;\nconst t = TEMPLATES[d.templateKey];\nif (!t) throw new Error(`Unknown templateKey: ${d.templateKey}`);\n\nconst vars = { firstName: d.firstName, ...d.mergeData };\nconst fill = (s) => s.replace(/\\{\\{(\\w+)\\}\\}/g, (_, k) => vars[k] ?? '');\n\nreturn [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];"
+        "jsCode": "// Templates live here, in version control, not in a vendor UI nobody can diff.\nconst TEMPLATES = {\n  lead_ack: {\n    subject: 'Thanks for getting in touch, {{firstName}}',\n    body: `<p>Hi {{firstName}},</p>\n<p>Thanks for reaching out to Aspire. One of our security specialists\nwill be in touch within one business day.</p>\n<p>\u2014 Aspire Tech</p>`,\n  },\n  renewal_60d: {\n    subject: 'Your {{serviceLine}} renewal \u2014 {{renewalDate}}',\n    body: `<p>Hi {{firstName}},</p>\n<p>Your {{serviceLine}} subscription renews on {{renewalDate}}.\nWe will reach out shortly to confirm.</p>\n<p>\u2014 Aspire Tech</p>`,\n  },\n  appt_reminder_24h: {\n    subject: 'Reminder: {{appointmentType}} tomorrow',\n    body: `<p>Hi {{firstName}},</p>\n<p>A reminder of your {{appointmentType}} at {{scheduledAt}}.</p>\n<p>{{meetingUrl}}</p>`,\n  },\n  nurture_1: {\n    subject: 'Following up on your enquiry, {{firstName}}',\n    body: `<p>Hi {{firstName}},</p>\n<p>You got in touch with us a few days ago and I wanted to make sure your\nquestion did not get lost.</p>\n<p>If it would help to talk it through, just reply to this email and we will\nfind a time.</p>\n<p>\u2014 Aspire Tech</p>`,\n  },\n  nurture_2: {\n    subject: 'Anything we can help with, {{firstName}}?',\n    body: `<p>Hi {{firstName}},</p>\n<p>Still happy to help with what you asked about. Most people come to us\nwith one of three things: a CMMC assessment deadline, a security monitoring\ngap, or training that needs to actually change behaviour.</p>\n<p>If any of those is on your list, reply and tell me which.</p>\n<p>\u2014 Aspire Tech</p>`,\n  },\n  nurture_3: {\n    subject: 'Last note from me, {{firstName}}',\n    body: `<p>Hi {{firstName}},</p>\n<p>I do not want to keep filling your inbox, so this is my last note about\nyour enquiry.</p>\n<p>If the timing is wrong, that is completely fine \u2014 reply whenever it\nchanges and we will pick it up.</p>\n<p>\u2014 Aspire Tech</p>`,\n  },\n};\n\nconst d = $input.first().json;\nconst t = TEMPLATES[d.templateKey];\nif (!t) throw new Error(`Unknown templateKey: ${d.templateKey}`);\n\nconst vars = { firstName: d.firstName, ...d.mergeData };\nconst fill = (s) => s.replace(/\\{\\{(\\w+)\\}\\}/g, (_, k) => vars[k] ?? '');\n\nreturn [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];"
       },
       "id": "786026086433",
       "name": "Render template",
@@ -181,7 +181,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"SENT\", \"subject\": $('Render template').first().json.subject, \"vendor\": \"smtp\", \"sentAt\": $now.toISO(), \"personId\": $('Render template').first().json.personId }) }}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"SENT\", \"subject\": $('Render template').first().json.subject, \"vendor\": 'smtp/' + $('Render template').first().json.templateKey, \"sentAt\": $now.toUTC().toISO(), \"personId\": $('Render template').first().json.personId }) }}"
       },
       "id": "373407929265",
       "name": "Log message",
@@ -215,7 +215,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"FAILED\", \"subject\": 'Blocked: ' + $json.reason, \"vendor\": \"consent-gate\", \"sentAt\": $now.toISO(), \"personId\": $('When called').first().json.personId }) }}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"FAILED\", \"subject\": 'Blocked: ' + $json.reason, \"vendor\": \"consent-gate\", \"sentAt\": $now.toUTC().toISO(), \"personId\": $('When called').first().json.personId }) }}"
       },
       "id": "743782176045",
       "name": "Log suppressed",
