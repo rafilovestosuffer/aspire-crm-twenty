@@ -43,8 +43,51 @@ for arg in "$@"; do
   esac
 done
 
-command -v docker >/dev/null || { echo "docker not found"; exit 1; }
-docker compose version >/dev/null 2>&1 || { echo "docker compose v2 required"; exit 1; }
+# These two messages used to be four words each, which is fine on a Linux
+# server and useless on a Windows laptop — where the cause is almost always
+# Docker Desktop's WSL integration being off, and nothing on screen says so.
+if ! command -v docker >/dev/null; then
+  cat >&2 <<'EOF'
+docker not found.
+
+  Windows (WSL):  install Docker Desktop, then turn on
+                  Settings -> Resources -> WSL Integration -> your distro,
+                  Apply & Restart, and open a NEW terminal.
+  Linux:          curl -fsSL https://get.docker.com | sudo sh
+  macOS:          install Docker Desktop.
+EOF
+  exit 1
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+docker compose v2 required — the `docker` command works but `docker compose`
+does not, so the Compose plugin is missing or not on this shell's path.
+
+  Windows (WSL):  this is what a half-finished Docker Desktop setup looks
+                  like. Docker Desktop -> Settings -> Resources ->
+                  WSL Integration -> enable your distro -> Apply & Restart,
+                  then close this terminal and open a new one.
+                  Do NOT `apt install docker.io` inside WSL — that gives you
+                  a docker CLI with no Compose plugin, which is exactly this.
+  Linux:          sudo apt install -y docker-compose-plugin
+
+Check what you have:
+  docker --version
+  docker compose version      # v2, note the SPACE
+  docker-compose --version    # v1, obsolete, not enough
+EOF
+  exit 1
+fi
+
+# The daemon can be absent even when both commands exist — Docker Desktop not
+# started is the usual reason, and every later error is then a red herring.
+if ! docker info >/dev/null 2>&1; then
+  echo "docker is installed but the daemon is not reachable." >&2
+  echo "  Start Docker Desktop (whale icon in the tray) and wait for it to" >&2
+  echo "  say Running, then try again." >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------- .env setup
 if [[ ! -f "$ENV_FILE" ]]; then
