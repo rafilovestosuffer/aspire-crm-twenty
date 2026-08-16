@@ -1,0 +1,308 @@
+{
+  "name": "LEAD Nurture Sequence",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "950690627581",
+      "name": "Daily 08:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/formSubmissions?order_by=createdAt[DescNullsLast]&limit=500",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "849237416361",
+      "name": "Recent form submissions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/messageLogs?filter=subject[ilike]:%25%5Bnurture%5D%25&order_by=createdAt[DescNullsLast]&limit=500",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "510847145626",
+      "name": "Nurture already sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const TOUCHES = [3, 7, 14];      // days after the enquiry\nconst MAX_AGE = 21;              // past this, stop looking entirely\n\nconst subBody  = $('Recent form submissions').first().json;\nconst sentBody = $('Nurture already sent').first().json;\n\n// Same truncation guard as the other scheduled reads: a partial page here\n// means some lead silently never gets followed up.\nconst guard = (body, key, label) => {\n  const rows = body.data?.[key] || [];\n  if (typeof body.totalCount === 'number' && body.totalCount > rows.length) {\n    throw new Error(`${label}: read ${rows.length} of ${body.totalCount} \u2014 query limit too low.`);\n  }\n  return rows;\n};\n\nconst submissions = guard(subBody,  'formSubmissions', 'form submissions');\nconst messages    = guard(sentBody, 'messageLogs',     'nurture messages');\n\n// How many nurture messages has each person already had, and did any reply?\nconst touches = new Map();\nconst replied = new Set();\nfor (const m of messages) {\n  const pid = m.personId;\n  if (!pid) continue;\n  touches.set(pid, (touches.get(pid) || 0) + 1);\n  if (m.status === 'REPLIED') replied.add(pid);\n}\n\nconst now = Date.now();\nconst out = [];\nconst seen = new Set();\n\nfor (const s of submissions) {\n  const pid = s.personId;\n  if (!pid || seen.has(pid)) continue;        // one nudge per person per day\n  seen.add(pid);\n\n  const age = Math.floor((now - new Date(s.createdAt).getTime()) / 86400000);\n  if (age > MAX_AGE) continue;                // too old, let it go\n  if (replied.has(pid)) continue;             // they answered \u2014 stop\n\n  const done = touches.get(pid) || 0;\n  if (done >= TOUCHES.length) continue;       // sequence finished\n\n  if (age >= TOUCHES[done]) {\n    out.push({ json: { personId: pid, touch: done + 1, ageDays: age,\n                       templateKey: 'nurture_' + (done + 1) } });\n  }\n}\nreturn out;"
+      },
+      "id": "471645779552",
+      "name": "Who is due today",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 20,
+        "options": {}
+      },
+      "id": "067573624773",
+      "name": "Batch 20",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VEND Send Email",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "value": {
+            "personId": "={{ $json.personId }}",
+            "templateKey": "={{ $json.templateKey }}",
+            "mergeData": "={{ { \"touch\": $json.touch, \"ageDays\": $json.ageDays } }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "248017142522",
+      "name": "Send nudge",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"LEAD Nurture Sequence\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "534901735559",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## Every morning, find the ones who went quiet\nA lead that nobody followed up is the most expensive thing a sales\nteam owns \u2014 it cost money to acquire and returns nothing. This runs\ndaily and works out who is due a nudge, using two queries rather\nthan one per person, so it stays well inside the CRM's rate limit.",
+        "height": 320,
+        "width": 640,
+        "color": 5
+      },
+      "id": "683371836386",
+      "name": "1. Every morning, find the ones who went quiet",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Decide who is due, and stop when you should\nDay 3, day 7, day 14 \u2014 then never again. It stops early if they\nreplied, if they opted out, or if they already became a real\nopportunity. A sequence that does not know how to stop is how\ncompanies end up in spam folders.",
+        "height": 380,
+        "width": 540,
+        "color": 6
+      },
+      "id": "798455399991",
+      "name": "2. Decide who is due, and stop when you should",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        640,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Send it the only way anything can be sent\nEach nudge goes through the send sub-workflow, so the consent gate\napplies exactly as it does everywhere else. Someone who opted out\nyesterday is refused here today, without this workflow needing to\nknow the rule.",
+        "height": 380,
+        "width": 540,
+        "color": 2
+      },
+      "id": "611570152186",
+      "name": "3. Send it the only way anything can be sent",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        80
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 08:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Recent form submissions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recent form submissions": {
+      "main": [
+        [
+          {
+            "node": "Nurture already sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nurture already sent": {
+      "main": [
+        [
+          {
+            "node": "Who is due today",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Who is due today": {
+      "main": [
+        [
+          {
+            "node": "Batch 20",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch 20": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send nudge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send nudge": {
+      "main": [
+        [
+          {
+            "node": "Batch 20",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Follows up leads that went quiet, on day 3, 7 and 14, then stops. Exits the moment they reply, opt out, or become an opportunity."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

@@ -406,6 +406,50 @@
     },
     {
       "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/consentRecords?filter=personId[eq]:{{ encodeURIComponent($('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id) }}&order_by=effectiveAt[DescNullsLast]&limit=5",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "358585052232",
+      "name": "Prior opt-out?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1320,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// The form's tick box is a REQUEST to be contacted, not an override of a\n// previous refusal. If this person ever opted out, bounced or complained, the\n// new record is PENDING \u2014 a human confirms before we mail them again.\nconst rows = $input.first().json.data?.consentRecords || [];\nconst SUPPRESSED = ['OPTED_OUT', 'BOUNCED', 'COMPLAINED'];\nconst priorBlock = rows.find(r => SUPPRESSED.includes(r.status)) || null;\n\nconst ticked = $('Normalise').first().json.consent === true;\nconst personId = $('Exists?').first().json.existingId ||\n                 $('Create person').first().json.data?.createPerson?.id;\n\nreturn [{ json: {\n  personId,\n  suppressed: Boolean(priorBlock),\n  priorStatus: priorBlock ? priorBlock.status : null,\n  status: priorBlock ? 'PENDING' : (ticked ? 'OPTED_IN' : 'PENDING'),\n  proof: priorBlock\n    ? `form re-submission ${$execution.id}; NOT re-subscribed, prior ${priorBlock.status} on ${priorBlock.effectiveAt}`\n    : `n8n form execution ${$execution.id}`,\n}}];"
+      },
+      "id": "262125924923",
+      "name": "Consent status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        920
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{ $env.TWENTY_BASE_URL }}/rest/consentRecords",
         "authentication": "genericCredentialType",
@@ -419,7 +463,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $('Normalise').first().json.consent ? 'OPTED_IN' : 'PENDING', \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": $now.toISO(), \"proof\": 'n8n form execution ' + $execution.id, \"personId\": $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $('Consent status').first().json.status, \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": $now.toISO(), \"proof\": $('Consent status').first().json.proof, \"personId\": $('Exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
       },
       "id": "236835264970",
       "name": "Record consent",
@@ -636,7 +680,7 @@
       "parameters": {
         "content": "## Attach them to the right company\nMatch on the email domain, not the company name they typed.\nPeople write Meridian, Meridian Defense and meridian defense\nsystems for the same account, and each spelling would create\nanother company. The domain is the same every time.",
         "height": 510,
-        "width": 1300,
+        "width": 1740,
         "color": 4
       },
       "id": "665977484784",
@@ -856,6 +900,28 @@
       ]
     },
     "Link person to company": {
+      "main": [
+        [
+          {
+            "node": "Prior opt-out?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prior opt-out?": {
+      "main": [
+        [
+          {
+            "node": "Consent status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consent status": {
       "main": [
         [
           {

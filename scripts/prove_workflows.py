@@ -394,10 +394,81 @@ def prove_error_handler(sess: N8nSession, ids: dict) -> None:
           f"{len(alerts) - alerts_before} new alert(s)")
 
 
+def prove_inbound_events() -> None:
+    """The consent loop, both halves.
+
+    Recording an opt-out is only half a control; the half that matters is
+    whether a later send actually honours it. So this opts a person IN, proves
+    the acknowledgement really sends, posts an unsubscribe the way a mail
+    provider would, then submits the SAME form again and proves the second
+    acknowledgement is refused. Anything less tests the write and assumes the
+    read.
+    """
+    print(f"\n{BOLD}MSG Inbound Events — the consent loop closes{OFF}")
+    tag = uuid.uuid4().hex[:8]
+    email = f"loop.{tag}@ridgeline-{tag}.com"
+    fields = ["Loop", f"Test{tag}", email, f"Ridgeline {tag}", "555-0144",
+              "CMMC or compliance", "Consent loop proof.", "true"]
+
+    # --- 1. opted in: the acknowledgement must actually send -------------
+    mailpit_clear()
+    if not check("form accepts submission", submit_form(fields) == 200):
+        return
+    time.sleep(7)
+
+    people = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
+    if not check("person created", len(people) == 1):
+        return
+    pid = people[0]["id"]
+    CREATED.append(("people", pid))
+    if people[0].get("companyId"):
+        CREATED.append(("companies", people[0]["companyId"]))
+
+    if not check("acknowledgement sent while opted in",
+                 len(mailpit_messages()) >= 1, f"{len(mailpit_messages())} message(s)"):
+        return
+
+    # --- 2. the mail provider reports an unsubscribe ---------------------
+    posted, _, _ = http("POST", f"{N8N}/webhook/mail-event",
+                        headers={"Content-Type": "application/json"},
+                        data=json.dumps({"type": "unsubscribe", "email": email,
+                                         "messageId": f"msg-{tag}",
+                                         "reason": "clicked the unsubscribe link"}).encode())
+    if not check("unsubscribe event accepted", posted == 200, f"HTTP {posted}"):
+        return
+    time.sleep(7)
+
+    consent = rows("consentRecords",
+                   f"filter=personId[eq]:{pid}&order_by=effectiveAt[DescNullsLast]")
+    latest = consent[0] if consent else {}
+    check("consent flipped to OPTED_OUT", latest.get("status") == "OPTED_OUT",
+          latest.get("status") or "none")
+    check("source recorded as the unsubscribe link",
+          latest.get("source") == "UNSUBSCRIBE_LINK", latest.get("source") or "none")
+    check("raw event kept as proof", bool(latest.get("proof")),
+          (latest.get("proof") or "")[:48])
+
+    # --- 3. the same form again: this time it must be refused ------------
+    mailpit_clear()
+    if not check("second submission accepted", submit_form(fields) == 200):
+        return
+    time.sleep(7)
+
+    check("NO second email sent after opting out",
+          len(mailpit_messages()) == 0, f"{len(mailpit_messages())} message(s)")
+
+    logs = rows("messageLogs", f"filter=personId[eq]:{pid}"
+                               "&order_by=createdAt[DescNullsLast]")
+    blocked = [m for m in logs[:5] if (m.get("subject") or "").startswith("Blocked:")]
+    check("refusal logged against the person", bool(blocked),
+          blocked[0]["subject"] if blocked else "none")
+
+
 def prove_scheduled(sess: N8nSession, ids: dict) -> None:
     print(f"\n{BOLD}Scheduled workflows — renewals and sweeps{OFF}")
     for name, trigger in (("SUB Renewal Escalation", "Every morning"),
-                          ("OPS Scheduled Sweeps", "Every morning")):
+                          ("OPS Scheduled Sweeps", "Every morning"),
+                          ("LEAD Nurture Sequence", "Every morning")):
         wid = ids.get(name)
         if not wid:
             check(f"{name} deployed", False, "not found")
@@ -488,6 +559,7 @@ def main() -> int:
     run("lead", prove_lead_form)
     run("consent", prove_consent_gate)
     run("link", prove_tracked_link)
+    run("inbound", prove_inbound_events)
     run("error", prove_error_handler, sess, ids)
     run("scheduled", prove_scheduled, sess, ids)
 

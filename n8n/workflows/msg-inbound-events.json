@@ -1,0 +1,475 @@
+{
+  "name": "MSG Inbound Events",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mail-event",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "448469217417",
+      "name": "Provider event",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || $input.first().json;\n\nconst email = String(b.email || b.recipient || '').trim().toLowerCase();\nif (!email || !email.includes('@')) {\n  throw new Error('Mail event carried no usable email address: ' + JSON.stringify(b).slice(0, 200));\n}\n\n// One vocabulary in, one vocabulary out. Anything unrecognised is an error,\n// not a default \u2014 defaulting would silently record the wrong consent status.\nconst KIND = {\n  unsubscribe: ['unsubscribe', 'unsubscribed', 'list_unsubscribe', 'optout', 'opt_out'],\n  bounce:      ['bounce', 'bounced', 'hard_bounce', 'permanent_fail', 'failed'],\n  complaint:   ['complaint', 'complained', 'spam', 'abuse', 'spamreport'],\n};\nconst raw = String(b.type || b.event || b.action || '').toLowerCase();\nlet kind = null;\nfor (const [k, words] of Object.entries(KIND)) if (words.includes(raw)) kind = k;\nif (!kind) {\n  throw new Error('Unrecognised mail event type: ' + JSON.stringify(raw) +\n                  '. Add it to the KIND map rather than letting it default.');\n}\n\nconst STATUS = { unsubscribe: 'OPTED_OUT', bounce: 'BOUNCED', complaint: 'COMPLAINED' };\nconst SOURCE = { unsubscribe: 'UNSUBSCRIBE_LINK', bounce: 'VENDOR_WEBHOOK', complaint: 'VENDOR_WEBHOOK' };\n\nreturn [{ json: {\n  email, kind,\n  status: STATUS[kind],\n  source: SOURCE[kind],\n  reason: String(b.reason || b.description || '').slice(0, 500),\n  vendorReference: String(b.messageId || b.message_id || b.id || '').slice(0, 200),\n  proof: JSON.stringify(b).slice(0, 1800),\n}}];"
+      },
+      "id": "412477824215",
+      "name": "Read the event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people?filter=emails.primaryEmail[eq]:{{ encodeURIComponent($json.email) }}&limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "182655773337",
+      "name": "Find person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        560,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.first().json.data?.people || [];\nconst ev = $('Read the event').first().json;\nreturn [{ json: { ...ev, personId: rows[0]?.id || null, known: rows.length > 0 } }];"
+      },
+      "id": "608740434310",
+      "name": "Known person?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.known }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "982355929716",
+      "name": "In the CRM?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/consentRecords",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $json.status, \"source\": $json.source, \"effectiveAt\": $now.toISO(), \"proof\": $json.proof, \"vendorReference\": $json.vendorReference, \"personId\": $json.personId }) }}"
+      },
+      "id": "391193117608",
+      "name": "Write consent record",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"#crm-alerts\", \"text\": `:mag: *Mail event for an address we do not hold*\n${$json.email} \u2014 ${$json.kind}\nNo consent record written: nobody to attach it to.` }) }}",
+        "options": {}
+      },
+      "id": "246706042678",
+      "name": "Unknown address",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1220,
+        490
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/messageLogs?filter=vendorMessageId[eq]:{{ encodeURIComponent($json.vendorReference) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"status\": $('Read the event').first().json.kind === 'bounce' ? 'BOUNCED' : 'FAILED' }) }}"
+      },
+      "id": "317099883681",
+      "name": "Update message log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        0,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Read the event').first().json.kind }}",
+              "rightValue": "unsubscribe",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "712417402528",
+      "name": "Bounce or complaint?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        220,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.ALERT_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"#crm-alerts\", \"text\": `:warning: *${$('Read the event').first().json.kind}* for ${$('Read the event').first().json.email}\n${$('Read the event').first().json.reason}\nRepeated bounces and complaints damage our sending reputation.` }) }}",
+        "options": {}
+      },
+      "id": "782399735669",
+      "name": "Reputation alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        920
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"MSG Inbound Events\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "586026993366",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        660,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## Someone opts out, or mail bounces\nThe mail provider tells us when a person clicks unsubscribe, when\nan address bounces, or when someone marks us as spam. Every one of\nthose is a signal that we must stop emailing them \u2014 and until now\nnothing in the system was listening for it.",
+        "height": 380,
+        "width": 540,
+        "color": 5
+      },
+      "id": "909038761661",
+      "name": "1. Someone opts out, or mail bounces",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Find who it is about\nMatch the address to a person in the CRM. If we have never heard of\nthem there is nothing to record against \u2014 that is worth knowing, so\nit is reported rather than silently dropped.",
+        "height": 300,
+        "width": 640,
+        "color": 4
+      },
+      "id": "321710403358",
+      "name": "2. Find who it is about",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        540,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Record it against them \u2014 permanently\nA consent record is written with the new status, where it came\nfrom, and the raw event as proof. From this moment the send gate\nreads this record and refuses. Nothing has to be remembered by a\nperson, and nothing has to be deleted.",
+        "height": 570,
+        "width": 540,
+        "color": 3
+      },
+      "id": "727106817428",
+      "name": "3. Record it against them \u2014 permanently",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Close the loop\nThe message log entry is marked, and the run is recorded. A bounce\nor a complaint also raises an alert, because those two say\nsomething about our sending reputation, not just about one person.",
+        "height": 300,
+        "width": 860,
+        "color": 2
+      },
+      "id": "355592999923",
+      "name": "4. Close the loop",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        780
+      ]
+    }
+  ],
+  "connections": {
+    "Provider event": {
+      "main": [
+        [
+          {
+            "node": "Read the event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the event": {
+      "main": [
+        [
+          {
+            "node": "Find person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find person": {
+      "main": [
+        [
+          {
+            "node": "Known person?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Known person?": {
+      "main": [
+        [
+          {
+            "node": "In the CRM?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "In the CRM?": {
+      "main": [
+        [
+          {
+            "node": "Write consent record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Unknown address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write consent record": {
+      "main": [
+        [
+          {
+            "node": "Update message log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update message log": {
+      "main": [
+        [
+          {
+            "node": "Bounce or complaint?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bounce or complaint?": {
+      "main": [
+        [
+          {
+            "node": "Reputation alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reputation alert": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Receives unsubscribe, bounce and complaint events from the mail provider and writes them back as consent records. Closes the consent loop: without this, opt-outs only ever go one way."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

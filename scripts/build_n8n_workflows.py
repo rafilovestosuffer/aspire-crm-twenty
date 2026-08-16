@@ -638,6 +638,11 @@ return [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];
         "personId": "={{ $('Render template').first().json.personId }}",
     })
 
+    # personId is not optional here. A refusal is the evidence that the gate
+    # worked, and evidence nobody can find is worth very little: without this,
+    # you cannot open a contact and see that we declined to email them. It comes
+    # from the trigger rather than the gate's output because the gate's refusal
+    # branches return only a reason.
     blocked = f.twenty("Log suppressed", "POST", "/rest/messageLogs", {
         "channel": "EMAIL",
         "direction": "OUTBOUND",
@@ -645,6 +650,7 @@ return [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];
         "subject": "={{ 'Blocked: ' + $json.reason }}",
         "vendor": "consent-gate",
         "sentAt": "={{ $now.toISO() }}",
+        "personId": "={{ $('When called').first().json.personId }}",
     }, row=1)
 
     f.chain(trig, person, consent, check, gate)
@@ -803,6 +809,39 @@ return [{ json: { ...$('Normalise').first().json, companyId: found?.id || null }
                        "/rest/people/" + person_id.replace("={{ ", "{{ "),
                        {"companyId": company_id})
 
+    # An explicit opt-out must not be undone by a form submission. Anyone can
+    # type anyone's address into a public form; treating that as fresh consent
+    # would make the unsubscribe link decorative and hand a stranger the power
+    # to re-subscribe someone. So look for a prior suppression first.
+    prior = f.twenty("Prior opt-out?", "GET",
+                     "/rest/consentRecords?filter=personId[eq]:" +
+                     q("$('Exists?').first().json.existingId || "
+                       "$('Create person').first().json.data.createPerson.id") +
+                     "&order_by=effectiveAt[DescNullsLast]&limit=5")
+
+    decide_consent = f.code("Consent status", """
+// The form's tick box is a REQUEST to be contacted, not an override of a
+// previous refusal. If this person ever opted out, bounced or complained, the
+// new record is PENDING — a human confirms before we mail them again.
+const rows = $input.first().json.data?.consentRecords || [];
+const SUPPRESSED = ['OPTED_OUT', 'BOUNCED', 'COMPLAINED'];
+const priorBlock = rows.find(r => SUPPRESSED.includes(r.status)) || null;
+
+const ticked = $('Normalise').first().json.consent === true;
+const personId = $('Exists?').first().json.existingId ||
+                 $('Create person').first().json.data?.createPerson?.id;
+
+return [{ json: {
+  personId,
+  suppressed: Boolean(priorBlock),
+  priorStatus: priorBlock ? priorBlock.status : null,
+  status: priorBlock ? 'PENDING' : (ticked ? 'OPTED_IN' : 'PENDING'),
+  proof: priorBlock
+    ? `form re-submission ${$execution.id}; NOT re-subscribed, prior ${priorBlock.status} on ${priorBlock.effectiveAt}`
+    : `n8n form execution ${$execution.id}`,
+}}];
+""".strip())
+
     f.phase("Record consent — the compliance step",
             "We write down that this person agreed to be contacted: when,\n"
             "through which channel, and what they were shown. Nothing in\n"
@@ -812,10 +851,10 @@ return [{ json: { ...$('Normalise').first().json, companyId: found?.id || null }
 
     consent = f.twenty("Record consent", "POST", "/rest/consentRecords", {
         "channel": "EMAIL",
-        "status": "={{ $('Normalise').first().json.consent ? 'OPTED_IN' : 'PENDING' }}",
+        "status": "={{ $('Consent status').first().json.status }}",
         "source": "FORM_SUBMISSION",
         "effectiveAt": "={{ $now.toISO() }}",
-        "proof": "={{ 'n8n form execution ' + $execution.id }}",
+        "proof": "={{ $('Consent status').first().json.proof }}",
         "personId": person_id,
     })
 
@@ -904,7 +943,8 @@ return [{ json: { ...d, score,
     f.connect(new_co, create_co, out=0)
     f.connect(create_co, co_merge)
     f.connect(new_co, co_merge, out=1)
-    f.chain(co_merge, link_co, consent, submission, score, task, ack, notify, log)
+    f.chain(co_merge, link_co, prior, decide_consent,
+            consent, submission, score, task, ack, notify, log)
     return f
 
 
@@ -1296,9 +1336,263 @@ throw new Error('deliberate failure probe');
 # production, where the real chat webhook replaces them.
 DEV_ONLY = {"SYS Alert Sink (dev)", "SYS Failure Probe (dev)"}
 
+# --------------------------------------------------------------------------
+# 7. Inbound message events — unsubscribe, bounce, complaint
+# --------------------------------------------------------------------------
+
+def wf_inbound_events() -> Flow:
+    f = Flow("MSG Inbound Events",
+             "Receives unsubscribe, bounce and complaint events from the mail "
+             "provider and writes them back as consent records. Closes the "
+             "consent loop: without this, opt-outs only ever go one way.")
+
+    f.phase("Someone opts out, or mail bounces",
+            "The mail provider tells us when a person clicks unsubscribe, when\n"
+            "an address bounces, or when someone marks us as spam. Every one of\n"
+            "those is a signal that we must stop emailing them — and until now\n"
+            "nothing in the system was listening for it.", "capture")
+
+    trig = f.add("Provider event", "n8n-nodes-base.webhook", {
+        "httpMethod": "POST",
+        "path": "mail-event",
+        "responseMode": "onReceived",
+        "options": {},
+    }, version=2)
+
+    # Map the vendor's vocabulary onto ours, and refuse anything we do not
+    # recognise rather than guessing. A mis-parsed event here writes the wrong
+    # consent status, which is the one record that must never be wrong.
+    parse = f.code("Read the event", """
+const b = $input.first().json.body || $input.first().json;
+
+const email = String(b.email || b.recipient || '').trim().toLowerCase();
+if (!email || !email.includes('@')) {
+  throw new Error('Mail event carried no usable email address: ' + JSON.stringify(b).slice(0, 200));
+}
+
+// One vocabulary in, one vocabulary out. Anything unrecognised is an error,
+// not a default — defaulting would silently record the wrong consent status.
+const KIND = {
+  unsubscribe: ['unsubscribe', 'unsubscribed', 'list_unsubscribe', 'optout', 'opt_out'],
+  bounce:      ['bounce', 'bounced', 'hard_bounce', 'permanent_fail', 'failed'],
+  complaint:   ['complaint', 'complained', 'spam', 'abuse', 'spamreport'],
+};
+const raw = String(b.type || b.event || b.action || '').toLowerCase();
+let kind = null;
+for (const [k, words] of Object.entries(KIND)) if (words.includes(raw)) kind = k;
+if (!kind) {
+  throw new Error('Unrecognised mail event type: ' + JSON.stringify(raw) +
+                  '. Add it to the KIND map rather than letting it default.');
+}
+
+const STATUS = { unsubscribe: 'OPTED_OUT', bounce: 'BOUNCED', complaint: 'COMPLAINED' };
+const SOURCE = { unsubscribe: 'UNSUBSCRIBE_LINK', bounce: 'VENDOR_WEBHOOK', complaint: 'VENDOR_WEBHOOK' };
+
+return [{ json: {
+  email, kind,
+  status: STATUS[kind],
+  source: SOURCE[kind],
+  reason: String(b.reason || b.description || '').slice(0, 500),
+  vendorReference: String(b.messageId || b.message_id || b.id || '').slice(0, 200),
+  proof: JSON.stringify(b).slice(0, 1800),
+}}];
+""".strip())
+
+    f.phase("Find who it is about",
+            "Match the address to a person in the CRM. If we have never heard of\n"
+            "them there is nothing to record against — that is worth knowing, so\n"
+            "it is reported rather than silently dropped.", "record")
+
+    find = f.twenty("Find person", "GET",
+                    "/rest/people?filter=emails.primaryEmail[eq]:" +
+                    q("$json.email") + "&limit=1")
+
+    resolve = f.code("Known person?", """
+const rows = $input.first().json.data?.people || [];
+const ev = $('Read the event').first().json;
+return [{ json: { ...ev, personId: rows[0]?.id || null, known: rows.length > 0 } }];
+""".strip())
+
+    gate = f.iff("In the CRM?", "={{ $json.known }}", "equals", "true")
+
+    f.phase("Record it against them — permanently",
+            "A consent record is written with the new status, where it came\n"
+            "from, and the raw event as proof. From this moment the send gate\n"
+            "reads this record and refuses. Nothing has to be remembered by a\n"
+            "person, and nothing has to be deleted.", "consent")
+
+    with f.fan():
+        write = f.twenty("Write consent record", "POST", "/rest/consentRecords", {
+            "channel": "EMAIL",
+            "status": "={{ $json.status }}",
+            "source": "={{ $json.source }}",
+            "effectiveAt": "={{ $now.toISO() }}",
+            "proof": "={{ $json.proof }}",
+            "vendorReference": "={{ $json.vendorReference }}",
+            "personId": "={{ $json.personId }}",
+        })
+        unknown = f.notify("Unknown address", ALERT_CHANNEL,
+                           "=:mag: *Mail event for an address we do not hold*\n"
+                           "{{ $json.email }} — {{ $json.kind }}\n"
+                           "No consent record written: nobody to attach it to.",
+                           row=1)
+
+    f.phase("Close the loop",
+            "The message log entry is marked, and the run is recorded. A bounce\n"
+            "or a complaint also raises an alert, because those two say\n"
+            "something about our sending reputation, not just about one person.",
+            "notify")
+
+    mark = f.twenty("Update message log", "PATCH",
+                    "/rest/messageLogs?filter=vendorMessageId[eq]:" +
+                    q("$json.vendorReference"),
+                    {"status": "={{ $('Read the event').first().json.kind === 'bounce' "
+                               "? 'BOUNCED' : 'FAILED' }}"})
+
+    warn = f.iff("Bounce or complaint?",
+                 "={{ $('Read the event').first().json.kind }}", "notEquals",
+                 "unsubscribe")
+
+    tell = f.notify("Reputation alert", ALERT_CHANNEL,
+                    "=:warning: *{{ $('Read the event').first().json.kind }}* "
+                    "for {{ $('Read the event').first().json.email }}\n"
+                    "{{ $('Read the event').first().json.reason }}\n"
+                    "Repeated bounces and complaints damage our sending reputation.")
+
+    log = f.log_run("Log run", "MSG Inbound Events")
+
+    f.chain(trig, parse, find, resolve, gate)
+    f.connect(gate, write, out=0)
+    f.connect(gate, unknown, out=1)
+    f.chain(write, mark, warn)
+    f.connect(warn, tell, out=0)
+    f.connect(tell, log)
+    f.connect(warn, log, out=1)
+    return f
+
+
+# --------------------------------------------------------------------------
+# 8. Lead nurture — the follow-up nobody remembers to send
+# --------------------------------------------------------------------------
+
+def wf_nurture() -> Flow:
+    f = Flow("LEAD Nurture Sequence",
+             "Follows up leads that went quiet, on day 3, 7 and 14, then stops. "
+             "Exits the moment they reply, opt out, or become an opportunity.")
+
+    f.phase("Every morning, find the ones who went quiet",
+            "A lead that nobody followed up is the most expensive thing a sales\n"
+            "team owns — it cost money to acquire and returns nothing. This runs\n"
+            "daily and works out who is due a nudge, using two queries rather\n"
+            "than one per person, so it stays well inside the CRM's rate limit.",
+            "capture")
+
+    trig = f.add("Daily 08:00 UTC", "n8n-nodes-base.scheduleTrigger",
+                 {"rule": {"interval": [{"field": "cronExpression",
+                                         "expression": "0 8 * * *"}]}}, version=1)
+
+    subs = f.twenty("Recent form submissions", "GET",
+                    "/rest/formSubmissions?order_by=createdAt[DescNullsLast]&limit=500")
+
+    sent = f.twenty("Nurture already sent", "GET",
+                    "/rest/messageLogs?filter=subject[ilike]:%25%5Bnurture%5D%25"
+                    "&order_by=createdAt[DescNullsLast]&limit=500")
+
+    f.phase("Decide who is due, and stop when you should",
+            "Day 3, day 7, day 14 — then never again. It stops early if they\n"
+            "replied, if they opted out, or if they already became a real\n"
+            "opportunity. A sequence that does not know how to stop is how\n"
+            "companies end up in spam folders.", "decide")
+
+    plan = f.code("Who is due today", """
+const TOUCHES = [3, 7, 14];      // days after the enquiry
+const MAX_AGE = 21;              // past this, stop looking entirely
+
+const subBody  = $('Recent form submissions').first().json;
+const sentBody = $('Nurture already sent').first().json;
+
+// Same truncation guard as the other scheduled reads: a partial page here
+// means some lead silently never gets followed up.
+const guard = (body, key, label) => {
+  const rows = body.data?.[key] || [];
+  if (typeof body.totalCount === 'number' && body.totalCount > rows.length) {
+    throw new Error(`${label}: read ${rows.length} of ${body.totalCount} — query limit too low.`);
+  }
+  return rows;
+};
+
+const submissions = guard(subBody,  'formSubmissions', 'form submissions');
+const messages    = guard(sentBody, 'messageLogs',     'nurture messages');
+
+// How many nurture messages has each person already had, and did any reply?
+const touches = new Map();
+const replied = new Set();
+for (const m of messages) {
+  const pid = m.personId;
+  if (!pid) continue;
+  touches.set(pid, (touches.get(pid) || 0) + 1);
+  if (m.status === 'REPLIED') replied.add(pid);
+}
+
+const now = Date.now();
+const out = [];
+const seen = new Set();
+
+for (const s of submissions) {
+  const pid = s.personId;
+  if (!pid || seen.has(pid)) continue;        // one nudge per person per day
+  seen.add(pid);
+
+  const age = Math.floor((now - new Date(s.createdAt).getTime()) / 86400000);
+  if (age > MAX_AGE) continue;                // too old, let it go
+  if (replied.has(pid)) continue;             // they answered — stop
+
+  const done = touches.get(pid) || 0;
+  if (done >= TOUCHES.length) continue;       // sequence finished
+
+  if (age >= TOUCHES[done]) {
+    out.push({ json: { personId: pid, touch: done + 1, ageDays: age,
+                       templateKey: 'nurture_' + (done + 1) } });
+  }
+}
+return out;
+""".strip())
+
+    # Opted-out people are NOT filtered here on purpose. The send sub-workflow
+    # is the single place consent is decided; filtering early would put a second
+    # copy of that rule in a second file, and the two would drift.
+    batch = f.add("Batch 20", "n8n-nodes-base.splitInBatches",
+                  {"batchSize": 20, "options": {}}, version=3)
+
+    f.phase("Send it the only way anything can be sent",
+            "Each nudge goes through the send sub-workflow, so the consent gate\n"
+            "applies exactly as it does everywhere else. Someone who opted out\n"
+            "yesterday is refused here today, without this workflow needing to\n"
+            "know the rule.", "notify")
+
+    send = f.add("Send nudge", "n8n-nodes-base.executeWorkflow", {
+        "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
+        "workflowInputs": {"value": {
+            "personId": "={{ $json.personId }}",
+            "templateKey": "={{ $json.templateKey }}",
+            "mergeData": "={{ { \"touch\": $json.touch, \"ageDays\": $json.ageDays } }}",
+        }},
+        "options": {},
+    }, version=1)
+
+    log = f.log_run("Log run", "LEAD Nurture Sequence")
+
+    f.chain(trig, subs, sent, plan, batch)
+    f.connect(batch, log, out=0)          # done
+    f.connect(batch, send, out=1)         # loop
+    f.connect(send, batch)
+    return f
+
+
 BUILDERS = [wf_error_handler, wf_send_email, wf_lead_form,
-            wf_tracked_link, wf_renewal, wf_sweeps, wf_alert_sink,
-            wf_failure_probe]
+            wf_tracked_link, wf_renewal, wf_sweeps,
+            wf_inbound_events, wf_nurture,
+            wf_alert_sink, wf_failure_probe]
 
 
 def lint(flow: Flow) -> list[str]:

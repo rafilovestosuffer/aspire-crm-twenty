@@ -215,7 +215,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"FAILED\", \"subject\": 'Blocked: ' + $json.reason, \"vendor\": \"consent-gate\", \"sentAt\": $now.toISO() }) }}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"FAILED\", \"subject\": 'Blocked: ' + $json.reason, \"vendor\": \"consent-gate\", \"sentAt\": $now.toISO(), \"personId\": $('When called').first().json.personId }) }}"
       },
       "id": "743782176045",
       "name": "Log suppressed",
