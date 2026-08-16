@@ -187,7 +187,13 @@ def main() -> int:
     print(f"\n  SMTP -> {smtp['host']}:{smtp['port']}"
           + ("   (Mailpit — nothing leaves this host)"
              if smtp["host"] == "mailpit" else ""))
-    print("\n  Next: python scripts/n8n_deploy.py --dev")
+    # --dev installs an alert sink that swallows real alerts and a probe that
+    # fails on purpose. Fine against Mailpit, wrong on anything with a real
+    # relay behind it — so suggest it only where it belongs.
+    if smtp["host"] == "mailpit":
+        print("\n  Next: python scripts/n8n_deploy.py --dev")
+    else:
+        print("\n  Next: python scripts/n8n_deploy.py --activate")
     return 0
 
 

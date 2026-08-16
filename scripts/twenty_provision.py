@@ -145,9 +145,40 @@ class Twenty:
         """Return {nameSingular: object} for everything already in the workspace."""
         status, body, err = self._request("GET", "/rest/metadata/objects")
         if err or status >= 400:
-            raise SystemExit(f"Cannot read metadata API — {err or status}\n"
-                             "Check the instance is up, the key is valid, and "
-                             "TWENTY_BASE_URL matches the server's SERVER_URL.")
+            msg = [f"Cannot read metadata API — {err or status}"]
+            # A 500 with an empty body is a specific, well-hidden failure, not a
+            # generic server error. /rest/metadata/* is not served in-process:
+            # Twenty makes an HTTP call to ${SERVER_URL}${path} and returns the
+            # result. If the SERVER container cannot resolve, reach or trust its
+            # own SERVER_URL, that call fails and the response is a bare 500 —
+            # with no log line on the server to say so. Nothing about the
+            # request the client made is wrong, which is why the obvious checks
+            # all come back clean.
+            if status == 500:
+                msg += [
+                    "",
+                    "A 500 here almost always means the SERVER cannot reach its",
+                    "own SERVER_URL — not that your request or API key is wrong.",
+                    "Twenty serves /rest/metadata/* by calling ${SERVER_URL}",
+                    "over HTTP from inside the container.",
+                    "",
+                    "Check it directly:",
+                    "  docker compose exec server curl -sS -o /dev/null \\",
+                    "      -w '%{http_code}\\n' \"$SERVER_URL/healthz\"",
+                    "",
+                    "  could not resolve   the compose network has no alias for",
+                    "                      the public name — see the caddy",
+                    "                      service in the vps/internal overlay",
+                    "  certificate error   the CA is not trusted inside the",
+                    "                      container. Internally, deploy.sh",
+                    "                      copies Caddy's root to infra/certs",
+                    "                      and NODE_EXTRA_CA_CERTS points at it",
+                    "  connection refused  the proxy is down, or SERVER_URL",
+                    "                      names a host that is not it",
+                ]
+            else:
+                msg.append("Check the instance is up and the key is valid.")
+            raise SystemExit("\n".join(msg))
         node = body
         for k in ("data", "objects"):
             if isinstance(node, dict) and k in node:

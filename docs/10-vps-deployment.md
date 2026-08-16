@@ -64,10 +64,12 @@ firewall allows them. It exists because each of those otherwise fails later,
 with an error that does not name the cause — and a DNS mistake discovered
 during the real certificate request costs you a Let's Encrypt rate limit.
 
-`deploy.sh` runs ten gated steps and stops at the first failure: stack up,
-worker check, workspace, object model, credentials, query validation, deploy
-and activate, verify every layer, and prove the backup restores on this
-machine's own disk.
+`deploy.sh` runs eleven gated steps and stops at the first failure: stack up,
+worker check, workspace, automation owner, object model, credentials, query
+validation, deploy and activate, verify every layer, prove the backup restores
+on this machine's own disk, and prove the proxy rules hold — that the n8n
+editor is refused from outside the allowlist and served from inside it, while
+the form, webhooks and OAuth callback stay public.
 
 ### Before you start, have these
 
@@ -327,6 +329,39 @@ date of the last success is recorded in `out/restore_verification.json`.
 The worker deserves its own look. Twenty's UI is perfectly healthy while the
 worker is dead — and a dead worker means no scheduled workflows and no mailbox
 sync, silently.
+
+`python3 scripts/verify_proxy_rules.py` runs the real `infra/Caddyfile` against
+the running stack and asserts each rule from a client outside the allowlist:
+editor 403, form and webhooks through, CRM served. Step 11 of the deploy does
+this for you. Re-run it after any edit to the Caddyfile — the file looks
+equally healthy whether the allowlist works or not.
+
+### If the object model step fails with HTTP 500
+
+Not an authentication problem, however much it looks like one. `/rest/metadata/*`
+is **not served in-process**: Twenty makes an HTTP call to `${SERVER_URL}${path}`
+from inside the server container and hands back the result. If the server cannot
+resolve, reach or trust its own `SERVER_URL`, that call fails and you get a bare
+500 with an empty body and **no log line on the server**. The ordinary REST API
+keeps working throughout, which is what sends people looking at the API key.
+
+Ask the server directly:
+
+```bash
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.vps.yml \
+  exec server curl -sS -o /dev/null -w '%{http_code}\n' "$SERVER_URL/healthz"
+```
+
+| What you see | What it means |
+|---|---|
+| `could not resolve host` | The compose network has no alias for the public name. The `caddy` service in the overlay sets one; check it is not commented out. |
+| `certificate verify failed` | On the VPS this usually means **ACME has not finished** — until it does, Caddy answers with a self-signed certificate, which the server does not trust. `docker compose logs caddy` says whether the challenge succeeded. Fix the DNS or port 80, wait for the certificate, then re-run `deploy.sh`; it is idempotent. (Internally the certificate is always Caddy's own, which is why `deploy.sh --internal` copies its root into `infra/certs/` and points `NODE_EXTRA_CA_CERTS` at it.) |
+| `connection refused` | Caddy is down, or `SERVER_URL` names a host that is not it. |
+| `200` | The self-call is fine; the problem is elsewhere. |
+
+The compose alias exists so this call never leaves the host. Without it, the
+server reaches its own public URL only if the provider supports hairpin NAT —
+not something to be finding out mid-deploy.
 
 ---
 

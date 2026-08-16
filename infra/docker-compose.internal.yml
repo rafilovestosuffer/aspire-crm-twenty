@@ -34,6 +34,16 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      default:
+        # See the note in docker-compose.vps.yml: Twenty's REST metadata API is
+        # a server-side HTTP call to ${SERVER_URL}, so the server has to be able
+        # to reach its own public name. Internally that name usually resolves
+        # nowhere at all, so without these aliases every /rest/metadata/*
+        # request answers 500 with an empty body and no log line.
+        aliases:
+          - ${CRM_DOMAIN:?set CRM_DOMAIN in infra/.env}
+          - ${AUTOMATION_DOMAIN:?set AUTOMATION_DOMAIN in infra/.env}
 
   server:
     # !override replaces the base file's port list instead of adding to it.
@@ -44,6 +54,32 @@ services:
     # directly, bypassing the proxy and the editor allowlist.
     ports: !override
       - "127.0.0.1:${TWENTY_PORT:-3000}:3000"
+    # The alias above gets the server to Caddy; this gets it past the
+    # certificate. Caddy issues from its own CA here, which Node does not trust,
+    # so the self-call fails TLS verification and the metadata API still 500s.
+    #
+    # The CA root is NOT mounted straight from caddy-data. Caddy keeps its PKI
+    # at mode 0700 owned by root and this container runs as a non-root user, so
+    # the read is refused and Node prints only a warning before carrying on
+    # untrusting. deploy.sh copies the root out of Caddy into infra/certs/ and
+    # restarts this service — bring the stack up by hand and you have to do
+    # that yourself, or the object model step fails with an empty 500.
+    #
+    # Do NOT reach for NODE_TLS_REJECT_UNAUTHORIZED=0 instead. It would disable
+    # certificate checking for every outbound call the server makes, not just
+    # this one.
+    environment:
+      NODE_EXTRA_CA_CERTS: /certs/caddy-root.crt
+    volumes:
+      - ./certs:/certs:ro
+
+  worker:
+    # The worker runs workflow actions that may address the CRM by its public
+    # name; same CA, same reason.
+    environment:
+      NODE_EXTRA_CA_CERTS: /certs/caddy-root.crt
+    volumes:
+      - ./certs:/certs:ro
 
   n8n:
     ports: !override

@@ -98,6 +98,21 @@ off a public URL. The generator lints for it.
 - `/rest/metadata/*` **rejects every query string**, and `/rest/metadata/objects`
   embeds only a *slice* of each object's fields — so it is not a complete
   schema. Merge it with the keys of a real row from `/rest/{object}?limit=1`.
+- **`/rest/metadata/*` is not served in-process.** Twenty makes an HTTP call to
+  `${SERVER_URL}${path}` from inside the server container and returns the
+  result (`rest-api-metadata.service.js`; `getServerUrl` prefers the env var
+  over the request, so `SERVER_URL` always wins when set). If the *server*
+  cannot resolve, reach or **trust** its own `SERVER_URL`, every metadata
+  request answers **HTTP 500 with an empty body and no server log line** — the
+  provisioner, the query validator and the stack check all fail at once and
+  none of them names the cause. The core API is unaffected, which makes it look
+  like an auth or key problem. Two things make it work behind a proxy:
+  a compose **network alias** putting the public name on the Caddy container
+  (otherwise it depends on the provider's hairpin NAT), and, on an internal CA,
+  `NODE_EXTRA_CA_CERTS`. Caddy's PKI is `0700` root-owned and the app runs
+  non-root, so the root must be **copied out** to `infra/certs/`, not mounted
+  from `caddy-data`. Asserted by `scripts/verify_proxy_rules.py` and gated in
+  `infra/deploy.sh`.
 - Task body is `bodyV2`, a RICH_TEXT composite taking `{"markdown": "..."}`.
   A bare string is a 400; a plain `body` key is not a field.
 - Default opportunity stages are `NEW, SCREENING, MEETING, PROPOSAL, CUSTOMER`.

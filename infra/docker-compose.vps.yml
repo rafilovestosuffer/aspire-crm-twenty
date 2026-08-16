@@ -35,6 +35,22 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      default:
+        # Twenty's REST metadata API is not served in-process: the server makes
+        # an HTTP call to ${SERVER_URL}${path} and returns the result. So the
+        # server container has to be able to reach its own public URL, or every
+        # /rest/metadata/* request answers 500 with an empty body and no log
+        # line — which takes the provisioner, the query validator and the stack
+        # check down together, none of them naming the cause.
+        #
+        # These aliases resolve the public names to Caddy on the compose
+        # network, so that call stays inside the host instead of going out to
+        # the public IP and back. Without them it depends on the provider
+        # supporting hairpin NAT, which is not something to discover at 2am.
+        aliases:
+          - ${CRM_DOMAIN:?set CRM_DOMAIN in infra/.env}
+          - ${AUTOMATION_DOMAIN:?set AUTOMATION_DOMAIN in infra/.env}
 
   server:
     # !override replaces the base file's port list instead of adding to it.

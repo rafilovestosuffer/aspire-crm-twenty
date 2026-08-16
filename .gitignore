@@ -228,9 +228,14 @@ out/*
 !out/feature_audit.csv
 !out/implementation_status.md
 !out/restore_verification.json
+!out/proxy_rule_verification.json
 !out/*.pdf
 docs/migration-guide/_combined.html
 .session_curl.txt
 docs/migration-guide/_combined_bn.html
 infra/.env
 infra/backups/
+
+# Caddy's internal CA root, copied out so the app containers can trust it.
+# Machine-specific: regenerated on each host.
+infra/certs/

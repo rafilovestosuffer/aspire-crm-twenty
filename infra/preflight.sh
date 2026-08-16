@@ -12,6 +12,12 @@
 
 set -uo pipefail   # deliberately not -e: every check should run
 
+# An internal deployment has no public IP and no public DNS by definition, so
+# those checks would fail for a correctly-configured private server. Everything
+# else — memory, disk, Docker, secrets, ports, firewall — still applies.
+INTERNAL=0
+[[ "${1:-}" == "--internal" ]] && INTERNAL=1
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$HERE/.env"
 
@@ -78,7 +84,17 @@ AUTO_DOMAIN=$(env_get AUTOMATION_DOMAIN)
 ACME_EMAIL=$(env_get ACME_EMAIL)
 SERVER_URL=$(env_get SERVER_URL)
 
-for pair in "CRM_DOMAIN:$CRM_DOMAIN" "AUTOMATION_DOMAIN:$AUTO_DOMAIN" "ACME_EMAIL:$ACME_EMAIL"; do
+required=("CRM_DOMAIN:$CRM_DOMAIN" "AUTOMATION_DOMAIN:$AUTO_DOMAIN")
+# Caddyfile.internal issues certificates from Caddy's own CA and never contacts
+# Let's Encrypt, so an ACME email is not just unnecessary there, it is unused.
+# Demanding it would block a correctly-configured internal server.
+if [[ $INTERNAL -eq 0 ]]; then
+  required+=("ACME_EMAIL:$ACME_EMAIL")
+else
+  ok "ACME_EMAIL" "not required — internal CA issues the certificates"
+fi
+
+for pair in "${required[@]}"; do
   k=${pair%%:*}; v=${pair#*:}
   [[ -n "$v" ]] && ok "$k" "$v" || bad "$k" "not set in infra/.env"
 done
@@ -98,10 +114,18 @@ if [[ -n "$SERVER_URL" && -n "$CRM_DOMAIN" ]]; then
     || bad "SERVER_URL" "is '$SERVER_URL', expected 'https://$CRM_DOMAIN' — a mismatch loops the login page forever"
 fi
 
+# A blocker, not a warning: n8n_credentials.py refuses to invent an SMTP
+# credential, so the deploy stops at step 6 without this. Better to know now
+# than eight minutes in.
 smtp_host=$(env_get EMAIL_SMTP_HOST)
-[[ -n "$smtp_host" ]] \
-  && ok "SMTP relay" "$smtp_host" \
-  || warn "SMTP relay" "not set — the CRM cannot send email until EMAIL_SMTP_HOST is configured"
+if [[ -n "$smtp_host" ]]; then
+  ok "SMTP relay" "$smtp_host"
+  for k in EMAIL_SMTP_PORT EMAIL_SMTP_USER EMAIL_SMTP_PASSWORD; do
+    [[ -n "$(env_get "$k")" ]] || warn "$k" "not set — the relay will probably refuse the connection"
+  done
+else
+  bad "SMTP relay" "EMAIL_SMTP_HOST not set — the deploy stops at step 6, because nothing can send email. Google Workspace: smtp-relay.gmail.com:587 with an app password"
+fi
 
 alert=$(env_get ALERT_WEBHOOK_URL)
 case "$alert" in
@@ -113,13 +137,19 @@ esac
 # --------------------------------------------------------------- the network
 printf "\n${D}Network${O}\n"
 
+if [[ $INTERNAL -eq 1 ]]; then
+  ok "mode" "internal — public IP and DNS checks skipped by design"
+fi
+
 public_ip=$(curl -s --max-time 8 https://api.ipify.org 2>/dev/null || true)
 if [[ -n "$public_ip" ]]; then
   ok "outbound internet" "seen as $public_ip"
-  case "$public_ip" in
-    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
-      warn "public address" "$public_ip is private — use docs/11, not the VPS path" ;;
-  esac
+  if [[ $INTERNAL -eq 0 ]]; then
+    case "$public_ip" in
+      10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+        warn "public address" "$public_ip is private — use docs/11, not the VPS path" ;;
+    esac
+  fi
 else
   bad "outbound internet" "no connectivity — the image pull will fail"
 fi
@@ -131,7 +161,13 @@ for pair in "CRM:$CRM_DOMAIN" "AUTOMATION:$AUTO_DOMAIN"; do
   [[ -z "$name" ]] && continue
   resolved=$(getent hosts "$name" 2>/dev/null | awk '{print $1}' | head -1)
   if [[ -z "$resolved" ]]; then
-    bad "DNS $label" "$name does not resolve — add the A record and wait for it"
+    if [[ $INTERNAL -eq 1 ]]; then
+      warn "DNS $label" "$name does not resolve here — every client machine must resolve it"
+    else
+      bad "DNS $label" "$name does not resolve — add the A record and wait for it"
+    fi
+  elif [[ $INTERNAL -eq 1 ]]; then
+    ok "DNS $label" "$name -> $resolved"
   elif [[ -n "$public_ip" && "$resolved" != "$public_ip" ]]; then
     bad "DNS $label" "$name -> $resolved, but this server is $public_ip"
   else
@@ -150,6 +186,22 @@ if command -v ss >/dev/null 2>&1; then
       ok "port $p" "free"
     fi
   done
+fi
+
+# The editor allowlist ships as RFC 5737 documentation ranges, which match no
+# real host. That is the safe default, but left in place it locks the office
+# out of its own automation editor — and the symptom is a flat 403 that looks
+# like a bug in n8n rather than a line nobody edited.
+if [[ $INTERNAL -eq 1 ]]; then
+  # Caddyfile.internal has no allowlist on purpose: the host is unreachable
+  # from outside the office, so the network is the control.
+  ok "editor allowlist" "not used internally — the office network is the boundary"
+elif [[ -f "$HERE/Caddyfile" ]]; then
+  if grep -qE 'remote_ip .*(203\.0\.113\.|198\.51\.100\.|192\.0\.2\.)' "$HERE/Caddyfile"; then
+    warn "editor allowlist" "Caddyfile still has the RFC 5737 placeholder ranges — safe, but nobody can reach the automation editor until your office range replaces them"
+  else
+    ok "editor allowlist" "customised"
+  fi
 fi
 
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then

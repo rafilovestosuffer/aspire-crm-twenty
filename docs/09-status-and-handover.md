@@ -158,6 +158,22 @@ n8n 1,364, restored exactly. The date of the last successful restore is recorded
 in `out/restore_verification.json`. Re-run it monthly; an untested backup is not
 a backup.
 
+**The deploy has been rehearsed, not just written.** `infra/deploy.sh` ran end
+to end — all eleven steps, in order, on a stack brought up from the same compose
+files the server uses. It found two things that would each have stopped the real
+deploy dead, and both are fixed: the reverse proxy config, and Twenty's metadata
+API refusing to answer when the server cannot reach its own public URL (§ the
+troubleshooting table in `docs/10-vps-deployment.md`).
+
+**The proxy rules are proven, not assumed.** `scripts/verify_proxy_rules.py`
+runs the real `infra/Caddyfile` against the running stack and checks each rule
+from a client outside the allowlist: the n8n editor — which holds every
+credential in the stack — answers 403, while the public form, inbound webhooks
+and the OAuth callback go through. Then it widens the allowlist by the one line
+an operator is told to edit and confirms the editor is served. Ten checks, all
+passing; recorded in `out/proxy_rule_verification.json`. This matters because
+the site looks equally healthy whether that rule works or not.
+
 Keep GoHighLevel read-only for 30–60 days after cutover.
 
 ---

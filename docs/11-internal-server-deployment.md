@@ -222,43 +222,49 @@ Save with `Ctrl+O` `Enter`, exit with `Ctrl+X`.
 included. A mismatch produces a login page that loops forever and looks like a
 broken password.
 
-Now start it:
+Now run the whole thing with one command:
 
 ```bash
-docker compose -f infra/docker-compose.yml \
-               -f infra/docker-compose.internal.yml up -d
+./infra/deploy.sh --internal
 ```
 
 First run downloads about 5.5 GB and takes ten to twenty minutes depending on
-the office connection. Watch it:
+the office connection; after that the eleven steps take around twelve minutes.
+Each one is a gate — it stops at the first failure rather than carrying on and
+leaving you to work out later which half worked.
+
+It checks the server first (`preflight.sh --internal`, which skips the public-IP
+and public-DNS checks an internal server is not supposed to pass), brings the
+stack up, and then builds: workspace, automation owner, object model,
+credentials, query validation against the live schema, workflow deploy and
+activate, a full stack check, a real backup restore into a scratch database,
+and a proof that the proxy rules behave as written.
+
+One step in there is invisible but load-bearing. Caddy issues certificates from
+its own CA on an internal network, and the CRM has to *trust* that CA — not for
+the browser's sake, but for its own: Twenty answers `/rest/metadata/*` by
+calling its own `https://` address from inside the container. Untrusted, that
+call fails and every metadata request returns an empty HTTP 500 with nothing in
+the log, which stops the object model dead. `deploy.sh` copies Caddy's root
+certificate into `infra/certs/` and restarts the CRM so it picks it up. You will
+see `internal CA exported to infra/certs — restarting the CRM` go past.
+
+If you would rather watch the CRM start:
 
 ```bash
 docker compose -f infra/docker-compose.yml \
                -f infra/docker-compose.internal.yml logs -f server
 ```
 
-`Nest application successfully started` means the CRM is up. `Ctrl+C` stops
-watching the log; it does not stop the server.
-
-Then build the CRM itself:
-
-```bash
-python3 scripts/bootstrap_workspace.py
-python3 scripts/bootstrap_n8n.py
-python3 scripts/twenty_provision.py
-python3 scripts/n8n_credentials.py
-python3 scripts/validate_workflow_queries.py
-python3 scripts/n8n_deploy.py --activate
-python3 scripts/stack_verify.py
-```
-
-The last one should end `Stack healthy`.
+`Nest application successfully started` means it is up. `Ctrl+C` stops watching
+the log; it does not stop the server.
 
 Two things **not** to do here:
 
 - **Do not run `seed_demo_data.py`.** That is demo data. This is the real system.
-- **Do not pass `--dev` to the deploy.** It installs a test workflow that
-  swallows real alerts, and another that fails on purpose.
+- **Do not pass `--dev` to `n8n_deploy.py`.** It installs a test workflow that
+  swallows real alerts, and another that fails on purpose. `deploy.sh` never
+  passes it.
 
 ## 7. Trust the certificate
 
@@ -269,25 +275,28 @@ a public certificate authority cannot verify a server it cannot reach.
 You can click through the warning for a quick look. To remove it properly, copy
 the server's root certificate to each laptop once.
 
-On the **server**, get the certificate:
+`deploy.sh` already put that certificate on the server for you, at
+`infra/certs/caddy-root.crt` — it is the same root the CRM itself has to trust.
+Fetch it to your **laptop**:
+
+```bash
+scp rafi@192.168.1.50:~/aspire-crm-twenty/infra/certs/caddy-root.crt .
+```
+
+If the file is not there — you brought the stack up by hand rather than with
+`deploy.sh` — get it from Caddy directly:
 
 ```bash
 docker compose -f infra/docker-compose.yml \
                -f infra/docker-compose.internal.yml \
-  exec caddy cat /data/caddy/pki/authorities/local/root.crt > aspire-root.crt
-```
-
-On your **laptop**, fetch and install it:
-
-```bash
-scp rafi@192.168.1.50:~/aspire-crm-twenty/aspire-root.crt .
+  exec caddy cat /data/caddy/pki/authorities/local/root.crt > caddy-root.crt
 ```
 
 - **macOS:** double-click the file → Keychain Access opens → find "Caddy Local
   Authority" → double-click → Trust → *Always Trust*.
 - **Windows:** double-click → Install Certificate → Local Machine → Place all
   certificates in the following store → *Trusted Root Certification Authorities*.
-- **Ubuntu:** `sudo cp aspire-root.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`
+- **Ubuntu:** `sudo cp caddy-root.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates`
 
 Restart the browser. The warning is gone and the padlock is real.
 
