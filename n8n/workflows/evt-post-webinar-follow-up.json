@@ -1,0 +1,416 @@
+{
+  "name": "EVT Post-Webinar Follow-up",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 11 * * *"
+            }
+          ]
+        }
+      },
+      "id": "774505219623",
+      "name": "Daily 11:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarEvents?filter=scheduledAt[gte]:{{ encodeURIComponent($now.minus({ days: 3 }).toUTC().toISO()) }},scheduledAt[lte]:{{ encodeURIComponent($now.toUTC().toISO()) }}&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "614586594985",
+      "name": "Finished webinars",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarRegistrations?filter=registeredAt[gte]:{{ encodeURIComponent($now.minus({ days: 120 }).toUTC().toISO()) }}&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "236319674419",
+      "name": "Registrations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const events = pageAll('Finished webinars', 'webinarEvents');\nconst regs   = pageAll('Registrations',     'webinarRegistrations');\n\nconst byEvent = new Map();\nfor (const r of regs) {\n  if (!r.webinarEventId) continue;\n  if (!byEvent.has(r.webinarEventId)) byEvent.set(r.webinarEventId, []);\n  byEvent.get(r.webinarEventId).push(r);\n}\n\nconst out = [];\nfor (const e of events) {\n  // COMPLETED is the guard against sending the same follow-up on consecutive\n  // mornings \u2014 the three-day window above deliberately overlaps so a failed\n  // run gets another chance, and without this flag that retry becomes a\n  // duplicate send to everyone who already had one.\n  if (e.status === 'COMPLETED') continue;\n  const rows = byEvent.get(e.id) || [];\n  const attended = rows.filter(r => r.attended === true);\n\n  for (const r of rows) {\n    out.push({ json: {\n      personId: r.personId,\n      templateKey: r.attended === true ? 'webinar_survey' : 'webinar_replay',\n      webinarTitle: e.name || e.topic || 'Aspire webinar',\n      eventId: e.id,\n      attendeeCount: attended.length,\n      registrationCount: rows.length,\n    }});\n  }\n}\nreturn out;"
+      },
+      "id": "718643976367",
+      "name": "Split attended from no-show",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "093107287243",
+      "name": "Batch 10",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VEND Send Email",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "value": {
+            "personId": "={{ $json.personId }}",
+            "templateKey": "={{ $json.templateKey }}",
+            "mergeData": "={{ { \"webinarTitle\": $json.webinarTitle } }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "486799015620",
+      "name": "Send follow-up",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "011381059108",
+      "name": "Pace the batches",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarEvents/{{ $('Split attended from no-show').first().json.eventId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"status\": \"COMPLETED\", \"attendeeCount\": $('Split attended from no-show').first().json.attendeeCount, \"registrationCount\": $('Split attended from no-show').first().json.registrationCount }) }}"
+      },
+      "id": "656699681871",
+      "name": "Close the event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1660,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"EVT Post-Webinar Follow-up\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "402596046191",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1880,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## The morning after an event\nAttendance is the strongest enrolment signal this business has,\nand GHL held it only as a tag. Splitting attended from no-show\nis what makes the next message worth sending: a replay to one\ngroup, a survey to the other.",
+        "height": 320,
+        "width": 640,
+        "color": 5
+      },
+      "id": "842532230239",
+      "name": "1. The morning after an event",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Replay to the absent, survey to the present\nOne message per person per event, decided by the attended flag.\nThe follow-up only goes out once: a second pass would find the\nsame event again the next morning, so the event is marked\nCOMPLETED as part of the same run.",
+        "height": 380,
+        "width": 540,
+        "color": 6
+      },
+      "id": "202817622889",
+      "name": "2. Replay to the absent, survey to the present",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        640,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Send, then close the event\nNumbers are written back onto the event so 'did that topic\nwork' is a saved view rather than a spreadsheet someone builds\nby hand after the fact.",
+        "height": 300,
+        "width": 860,
+        "color": 2
+      },
+      "id": "148074978867",
+      "name": "3. Send, then close the event",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        160
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 11:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Finished webinars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finished webinars": {
+      "main": [
+        [
+          {
+            "node": "Registrations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrations": {
+      "main": [
+        [
+          {
+            "node": "Split attended from no-show",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split attended from no-show": {
+      "main": [
+        [
+          {
+            "node": "Batch 10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch 10": {
+      "main": [
+        [
+          {
+            "node": "Close the event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Close the event": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send follow-up": {
+      "main": [
+        [
+          {
+            "node": "Pace the batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pace the batches": {
+      "main": [
+        [
+          {
+            "node": "Batch 10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Daily. After an event: the recording to the people who missed it, a short survey to the people who came, and the event marked complete with its attendance numbers."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

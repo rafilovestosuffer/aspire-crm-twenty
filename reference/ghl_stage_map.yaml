@@ -1,0 +1,75 @@
+# GHL pipeline stages -> Twenty opportunity stages.
+#
+# Three GHL pipelines with 11, 8 and 4 stages have to land on Twenty's five:
+# NEW, SCREENING, MEETING, PROPOSAL, CUSTOMER. There is no WON stage in Twenty
+# and adding one is a schema change, not a mapping decision — so "Closed-Won"
+# and "Enrolled" both become CUSTOMER.
+#
+# The mapping is lossy in one direction that matters: GHL distinguishes lost
+# deals with a stage, Twenty does not. Anything terminal-but-not-sold maps to
+# `drop: true` and must NOT be migrated as an open opportunity, or the pipeline
+# inherits years of dead deals on day one.
+#
+# This file is data, not code. Review it before any opportunity migration; a
+# wrong line here is invisible afterwards.
+
+twenty_stages: [NEW, SCREENING, MEETING, PROPOSAL, CUSTOMER]
+
+# Stages carrying enrolment/payment meaning also drive `enrollment.status`,
+# because in this business an opportunity IS an enrolment.
+pipelines:
+
+  - ghl_id: 6RIuf78jKIVicbh1vNvI
+    ghl_name: CloudSecurity-Training
+    note: The real training pipeline. 11 stages, several of which are audience states rather than deal progress.
+    stages:
+      - {ghl: New Lead,              ghl_id: 089ab40d-8bad-4a02-a2bc-7fd4169fce39, twenty: NEW}
+      - {ghl: Contacted,             ghl_id: ca339fc7-93e7-4aa4-a96c-b2c9c0407714, twenty: SCREENING}
+      - {ghl: Qualified,             ghl_id: e8ca4070-98df-4447-a609-68e43dcd492b, twenty: SCREENING}
+      - {ghl: Hot Lead,              ghl_id: 78a76ea1-18a7-44fc-9246-56ef8fdbc713, twenty: MEETING}
+      - {ghl: Awaiting Payment,      ghl_id: bba601dd-21b8-453c-8fd4-d1c05fc50e9f, twenty: PROPOSAL, enrollment_status: Payment Sent}
+      - {ghl: Enrolled,              ghl_id: cc97d2d3-7439-4d0b-a4b0-2f9009bd2612, twenty: CUSTOMER, enrollment_status: Paid}
+      - {ghl: Referral Opportunity,  ghl_id: 64da28ce-2a88-41d8-83a5-13be602d793a, twenty: NEW}
+      - {ghl: Lead Nurturing,        ghl_id: bec5ac48-61da-4ecd-a4b7-4baf54a47a11, twenty: SCREENING}
+      - {ghl: Trial/Free Offer,      ghl_id: ef585bd6-9816-4646-93be-dfda1c3fce35, twenty: SCREENING}
+      - {ghl: Evaluation,            ghl_id: 899d1a48-c5b6-4a1d-873c-9c8622ec0071, twenty: MEETING}
+      - {ghl: Success,               ghl_id: 4faaed8a-75fb-429a-90ef-dbbfaf665572, twenty: CUSTOMER, enrollment_status: Certified}
+
+  - ghl_id: 17z5zo4lHiwUafXxcvfM
+    ghl_name: Cyber Security Training
+    note: Conventional sales shape. Closed-Lost is the only explicit loss stage in the account.
+    stages:
+      - {ghl: New Lead,       ghl_id: d69d0c6f-6ed7-442f-a1de-37d607f13a17, twenty: NEW}
+      - {ghl: Contacted,      ghl_id: e34a7138-2c34-4427-b4ac-5814421d6c38, twenty: SCREENING}
+      - {ghl: Qualified Lead, ghl_id: dc9662ed-5876-49c0-8f81-cabba86600a6, twenty: SCREENING}
+      - {ghl: Hot Lead,       ghl_id: 78eb42b3-c3e6-4d9f-9825-7704c1dd42da, twenty: MEETING}
+      - {ghl: Opportunity,    ghl_id: f33c1709-9623-4297-99c8-405d6252b0c8, twenty: MEETING}
+      - {ghl: Negotiation,    ghl_id: 7adbb573-4aa1-4950-bf5b-e6f53e72e65b, twenty: PROPOSAL}
+      - {ghl: Closed-Won,     ghl_id: 0378367a-67fa-4fbe-965b-e88beae24372, twenty: CUSTOMER, enrollment_status: Paid}
+      - ghl: Closed-Lost
+        ghl_id: 8876a2a3-de08-4928-825d-330caa48b3ea
+        twenty: null
+        drop: true
+        reason: >
+          Twenty has no lost stage. Migrating these as open opportunities would
+          poison the pipeline; archive them in the GHL export instead.
+
+  - ghl_id: A6ApMVta4QEFKagQMwoL
+    ghl_name: Marketing Pipeline
+    note: Four stages, ambiguous terminal stage.
+    stages:
+      - {ghl: New Lead,      ghl_id: feaa3237-6a4c-48ae-bfc3-63f8a3ad0f4e, twenty: NEW}
+      - {ghl: Contacted,     ghl_id: c43a174e-a249-48fd-b95a-e25b35a19c0c, twenty: SCREENING}
+      - {ghl: Proposal Sent, ghl_id: 4302af1f-0ad2-453e-aa53-f792c31c6485, twenty: PROPOSAL}
+      - ghl: Closed
+        ghl_id: 0bd6a6d6-3b82-40ad-9431-a19a1122fca3
+        twenty: null
+        drop: true
+        reason: >
+          "Closed" does not say won or lost. Do not guess — resolve per record
+          against the opportunity value and the contact's tags before migrating,
+          or leave them out of the first pass.
+
+# Stages that mean "this person is not progressing" and must never be treated as
+# an open opportunity by LEAD Nurture Sequence's open-opportunity exit check.
+non_progressing: [Closed-Lost, Closed, Referral Opportunity]

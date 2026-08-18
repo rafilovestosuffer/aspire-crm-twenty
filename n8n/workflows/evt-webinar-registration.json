@@ -1,0 +1,566 @@
+{
+  "name": "EVT Webinar Registration",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "webinar-register",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "436154681561",
+      "name": "Registration",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// The payload comes from a landing page we do not fully control, so validate\n// rather than trust. A registration with no email cannot be confirmed, cannot\n// be reminded and cannot be counted \u2014 reject it loudly instead of writing a\n// half record nobody will ever notice is broken.\nconst b = $input.first().json.body || {};\nconst email = String(b.email || '').trim().toLowerCase();\nif (!email.includes('@')) {\n  throw new Error(`webinar registration without a usable email: ${JSON.stringify(b).slice(0, 200)}`);\n}\nconst SOURCES = ['Email','Social Media','Word of Mouth','Online Advertisement',\n                 'Website or Blog','Search Engine','Other'];\nconst raw = String(b.source || '').trim();\nconst source = SOURCES.find(s => s.toLowerCase() === raw.toLowerCase()) || 'Other';\n\nreturn [{ json: {\n  email,\n  firstName: String(b.firstName || b.first_name || '').trim(),\n  lastName: String(b.lastName || b.last_name || '').trim(),\n  webinarId: String(b.webinarId || '').trim(),\n  webinarTitle: String(b.webinarTitle || 'Aspire webinar').trim(),\n  source: source.toUpperCase().replace(/ /g, '_'),\n  consent: b.consent !== false,\n}}];"
+      },
+      "id": "769990311252",
+      "name": "Normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people?filter=emails.primaryEmail[eq]:{{ encodeURIComponent($('Normalise').first().json.email) }}&limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "771534102546",
+      "name": "Find person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        560,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const found = ($input.first().json.data?.people || [])[0];\nreturn [{ json: { ...$('Normalise').first().json, existingId: found?.id || null } }];"
+      },
+      "id": "033654515386",
+      "name": "Person exists?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.existingId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "361834171845",
+      "name": "New person?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"name\": {\"firstName\": $json.firstName, \"lastName\": $json.lastName }, \"emails\": {\"primaryEmail\": $json.email } }) }}"
+      },
+      "id": "850797256266",
+      "name": "Create person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "904696751413",
+      "name": "Known person",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        490
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "119792037259",
+      "name": "Person ready",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/consentRecords?filter=personId[eq]:{{ encodeURIComponent($('Person exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id) }}&order_by=effectiveAt[DescNullsLast]&limit=5",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "046595952465",
+      "name": "Prior opt-out?",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        0,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.first().json.data?.consentRecords || [];\nconst SUPPRESSED = ['OPTED_OUT', 'BOUNCED', 'COMPLAINED'];\nconst block = rows.find(r => SUPPRESSED.includes(r.status)) || null;\nconst d = $('Normalise').first().json;\nreturn [{ json: { ...d,\n  status: block ? 'PENDING' : (d.consent ? 'OPTED_IN' : 'PENDING'),\n  proof: block\n    ? `webinar registration ${$execution.id}; NOT re-subscribed, prior ${block.status}`\n    : `webinar registration ${$execution.id}`,\n}}];"
+      },
+      "id": "866362781436",
+      "name": "Consent status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/consentRecords",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"status\": $('Consent status').first().json.status, \"source\": \"FORM_SUBMISSION\", \"effectiveAt\": $now.toUTC().toISO(), \"proof\": $('Consent status').first().json.proof, \"personId\": $('Person exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
+      },
+      "id": "889000325377",
+      "name": "Record consent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarRegistrations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"registeredAt\": $now.toUTC().toISO(), \"attended\": false, \"remindersSent\": 0, \"source\": $('Normalise').first().json.source, \"personId\": $('Person exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id, \"webinarEventId\": $('Normalise').first().json.webinarId || null }) }}"
+      },
+      "id": "279543482415",
+      "name": "Record registration",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        660,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VEND Send Email",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "value": {
+            "personId": "={{ $('Person exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }}",
+            "templateKey": "webinar_confirm",
+            "mergeData": "={{ { \"webinarTitle\": $('Normalise').first().json.webinarTitle } }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "652026221459",
+      "name": "Send confirmation",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"EVT Webinar Registration\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "002473025211",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1100,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## Someone signs up for a webinar\nLanding pages post here when a person registers. This is the\nbusiest thing the company does: submissions arrive in spikes\naround each event \u2014 44 in one December, 1 in a quiet February \u2014\nso the funnel has to be event-shaped, not a steady trickle.",
+        "height": 400,
+        "width": 540,
+        "color": 5
+      },
+      "id": "076893167323",
+      "name": "1. Someone signs up for a webinar",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Make sure we know who they are\nOne record per human, matched on email. Someone who registers\nfor three webinars is one person with three registrations, not\nthree contacts \u2014 otherwise their history splits and nobody can\nsee they have been to two events already.",
+        "height": 510,
+        "width": 1080,
+        "color": 4
+      },
+      "id": "711094923513",
+      "name": "2. Make sure we know who they are",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        540,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Record the registration and the consent\nThe registration is its own record, linked to the event and the\nperson, so attendance can be tracked against it later. Consent is\nwritten at the same moment, because a sign-up is the clearest\npermission we will ever have and it must be evidenced.",
+        "height": 320,
+        "width": 860,
+        "color": 3
+      },
+      "id": "362438163839",
+      "name": "3. Record the registration and the consent",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Confirm it, and count it\nSend the confirmation through the one workflow allowed to send\nemail, so the consent gate applies here exactly as everywhere\nelse. Then bump the registration count on the event, which is\nwhat tells us whether a topic is working before it runs.",
+        "height": 380,
+        "width": 540,
+        "color": 2
+      },
+      "id": "075456725873",
+      "name": "4. Confirm it, and count it",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        860,
+        700
+      ]
+    }
+  ],
+  "connections": {
+    "Find person": {
+      "main": [
+        [
+          {
+            "node": "Person exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Person exists?": {
+      "main": [
+        [
+          {
+            "node": "New person?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New person?": {
+      "main": [
+        [
+          {
+            "node": "Create person",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Known person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create person": {
+      "main": [
+        [
+          {
+            "node": "Person ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Known person": {
+      "main": [
+        [
+          {
+            "node": "Person ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registration": {
+      "main": [
+        [
+          {
+            "node": "Normalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise": {
+      "main": [
+        [
+          {
+            "node": "Find person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Person ready": {
+      "main": [
+        [
+          {
+            "node": "Prior opt-out?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prior opt-out?": {
+      "main": [
+        [
+          {
+            "node": "Consent status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consent status": {
+      "main": [
+        [
+          {
+            "node": "Record consent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record consent": {
+      "main": [
+        [
+          {
+            "node": "Record registration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record registration": {
+      "main": [
+        [
+          {
+            "node": "Send confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send confirmation": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Public webhook for webinar and workshop sign-ups. Creates the person, the registration and a consent record, then confirms by email. The top of Aspire's funnel \u2014 GHL had a draft for this that was never published."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

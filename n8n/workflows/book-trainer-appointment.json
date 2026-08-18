@@ -1,0 +1,452 @@
+{
+  "name": "BOOK Trainer Appointment",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 10 * * *"
+            }
+          ]
+        }
+      },
+      "id": "646859815239",
+      "name": "Daily 10:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/appointments?filter=status[in]:[BOOKED,CONFIRMED],scheduledAt[gte]:{{ encodeURIComponent($now.plus({ hours: 12 }).toUTC().toISO()) }},scheduledAt[lte]:{{ encodeURIComponent($now.plus({ hours: 36 }).toUTC().toISO()) }}&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "014980165841",
+      "name": "Tomorrow's appointments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/appointments?filter=status[in]:[BOOKED,CONFIRMED],scheduledAt[lte]:{{ encodeURIComponent($now.minus({ hours: 4 }).toUTC().toISO()) }},scheduledAt[gte]:{{ encodeURIComponent($now.minus({ days: 7 }).toUTC().toISO()) }}&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "935619691345",
+      "name": "Past due appointments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const soon = pageAll(\"Tomorrow's appointments\", 'appointments');\nconst past = pageAll('Past due appointments',   'appointments');\n\nconst out = [];\nfor (const a of soon) {\n  if (!a.personId) continue;\n  out.push({ json: {\n    kind: 'remind', appointmentId: a.id, personId: a.personId,\n    appointmentType: a.appointmentType || 'meeting',\n    scheduledAt: a.scheduledAt,\n    meetingUrl: a.meetingUrl?.primaryLinkUrl || '',\n  }});\n}\nfor (const a of past) {\n  out.push({ json: { kind: 'noshow', appointmentId: a.id, personId: a.personId || null,\n                     scheduledAt: a.scheduledAt } });\n}\nreturn out;"
+      },
+      "id": "018871360217",
+      "name": "Reminders and no-shows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.kind }}",
+              "rightValue": "remind",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "335830777941",
+      "name": "Reminder or no-show?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VEND Send Email",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "value": {
+            "personId": "={{ $json.personId }}",
+            "templateKey": "appt_reminder_24h",
+            "mergeData": "={{ { \"appointmentType\": $json.appointmentType, \"scheduledAt\": $json.scheduledAt, \"meetingUrl\": $json.meetingUrl } }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "936015587866",
+      "name": "Send reminder",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/appointments/{{ $json.appointmentId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"status\": \"NO_SHOW\" }) }}"
+      },
+      "id": "861354323284",
+      "name": "Mark no-show",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1220,
+        490
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"title\": 'No-show \u2014 reschedule (' + $('Reminders and no-shows').first().json.scheduledAt + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 1 }).toUTC().toISO(), \"bodyV2\": {\"markdown\": \"They booked and did not attend. Worth one call before letting it go.\" } }) }}"
+      },
+      "id": "080275741885",
+      "name": "Task: reschedule",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        490
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"BOOK Trainer Appointment\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "152992248556",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1660,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## Tomorrow's meetings, and yesterday's no-shows\nAspire books consultations, Splunk demos and career calls across\neight calendars. A reminder the day before is the cheapest way to\ncut no-shows; catching the ones that were missed is how a lead\ngets a second chance instead of going quiet.",
+        "height": 320,
+        "width": 640,
+        "color": 5
+      },
+      "id": "092144703665",
+      "name": "1. Tomorrow's meetings, and yesterday's no-shows",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Decide who gets a nudge and what got missed\nAn appointment still marked booked hours after it should have\nfinished was almost certainly a no-show. Marking it is what lets\nanyone ask how often it happens, per calendar.",
+        "height": 340,
+        "width": 540,
+        "color": 6
+      },
+      "id": "548509870282",
+      "name": "2. Decide who gets a nudge and what got missed",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        640,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Remind, or record the miss\nThe reminder finally uses the template that has sat unused since\nthe first build. A no-show becomes a task, because someone who\nbooked and did not arrive is still interested \u2014 they just need\nrescheduling.",
+        "height": 510,
+        "width": 640,
+        "color": 2
+      },
+      "id": "895013851435",
+      "name": "3. Remind, or record the miss",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        140
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 10:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Tomorrow's appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tomorrow's appointments": {
+      "main": [
+        [
+          {
+            "node": "Past due appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Past due appointments": {
+      "main": [
+        [
+          {
+            "node": "Reminders and no-shows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reminders and no-shows": {
+      "main": [
+        [
+          {
+            "node": "Reminder or no-show?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reminder or no-show?": {
+      "main": [
+        [
+          {
+            "node": "Send reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark no-show",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send reminder": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark no-show": {
+      "main": [
+        [
+          {
+            "node": "Task: reschedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Task: reschedule": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Daily. Reminds people about tomorrow's trainer meetings and flags the ones nobody turned up to. Covers the eight calendars Aspire books against."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

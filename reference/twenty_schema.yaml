@@ -81,6 +81,141 @@ objects:
     relations:
       - {to: trainingAccount, label: Training Account, reverseLabel: Phishing Baselines, type: MANY_TO_ONE}
 
+  # ======================= Training business (what GHL actually runs) =======================
+  #
+  # Added after the 18 Aug 2026 GHL pull. The four objects above were designed
+  # before anyone read the account and describe a managed-security business
+  # that appears nowhere in it: socaas/mdr/cmmc/mrr/renewal all return zero
+  # occurrences across every custom field, tag, product, form, funnel, workflow
+  # name and pipeline stage. What the account does contain is a training and
+  # certification funnel — webinar, nurture, trainer meeting, bootcamp
+  # enrolment via a payment link, cohort. These six objects are that funnel.
+  # Reasoning and how to overturn it: docs/13-model-realignment.md.
+
+  - nameSingular: trainingProgram
+    namePlural: trainingPrograms
+    labelSingular: Training Program
+    labelPlural: Training Programs
+    description: >
+      A sellable certification course. The catalogue is not invented — it is the
+      option list of the GHL field "Your Chosen Certification". GHL modelled this
+      as two DIGITAL products and a radio button, so "which certifications sell"
+      was unanswerable without reading form payloads.
+    icon: IconCertificate2
+    ghl_equivalent: Product (2 exist) + "Your Chosen Certification" radio field
+    fields:
+      - {name: certification, label: Certification, type: SELECT, options: [SC-200 Microsoft Security Operations Analyst, SC-100 Microsoft Cybersecurity Architect, AZ-900 Microsoft Azure Fundamentals, SC-900 Microsoft Security Compliance and Identity, Splunk Core Certified User, Splunk Core Certified Power User, Splunk Core Certified Advanced Power User, GCP Cloud Digital Leader, Other]}
+      - {name: brand, label: Brand, type: SELECT, options: [Aspire TSS, Aspire eLearning]}
+      - {name: deliveryMode, label: Delivery Mode, type: SELECT, options: [Classroom, Online Live, Self-Paced, Hybrid]}
+      - {name: isActive, label: Active, type: BOOLEAN}
+      - {name: syllabusUrl, label: Syllabus URL, type: LINKS}
+
+  - nameSingular: cohort
+    namePlural: cohorts
+    labelSingular: Cohort
+    labelPlural: Cohorts
+    description: >
+      A dated intake of a program — "Splunk Bootcamp Jan 2026", "Training USA
+      Nov 2025". In GHL a cohort exists only as a tag, so seats, start dates and
+      who is in which intake cannot be reported on.
+    icon: IconUsersGroup
+    ghl_equivalent: Tags such as "registered splunk bootcamp jan-2026"
+    fields:
+      - {name: startDate, label: Start Date, type: DATE}
+      - {name: endDate, label: End Date, type: DATE}
+      - {name: location, label: Location, type: SELECT, options: [New York, Dhaka, Dubai, Online, Other]}
+      - {name: seatsAvailable, label: Seats Available, type: NUMBER}
+      - {name: seatsFilled, label: Seats Filled, type: NUMBER}
+      - {name: status, label: Status, type: SELECT, options: [Planned, Open for Enrolment, Full, Running, Completed, Cancelled]}
+      - {name: ghlTagName, label: Origin GHL Tag, type: TEXT}
+    relations:
+      - {to: trainingProgram, label: Program, reverseLabel: Cohorts, type: MANY_TO_ONE}
+
+  - nameSingular: enrollment
+    namePlural: enrollments
+    labelSingular: Enrollment
+    labelPlural: Enrollments
+    description: >
+      One person joining one cohort, and the money attached. Payment happens off
+      -platform on FastPayDirect links (six price tiers), so paymentLinkUrl and
+      status are how the CRM knows whether an enrolment was ever paid. This is
+      the object behind the 126 workflow-issued invoices.
+    icon: IconUserCheck
+    ghl_equivalent: Opportunity in a training pipeline + 6 payment trigger links
+    fields:
+      - {name: tier, label: Price Tier, type: SELECT, options: [Bronze, Silver, Gold, Platinum, Diamond, Titanium]}
+      - {name: status, label: Status, type: SELECT, options: [Interested, Registered, Payment Sent, Paid, Attending, Certified, Withdrawn, Refunded]}
+      - {name: amount, label: Amount, type: CURRENCY}
+      - {name: paymentLinkUrl, label: Payment Link, type: LINKS}
+      - {name: paymentChasedAt, label: Payment Last Chased, type: DATE_TIME}
+      - {name: enrolledAt, label: Enrolled At, type: DATE_TIME}
+      - {name: certifiedAt, label: Certified At, type: DATE}
+    relations:
+      - {to: person, label: Person, reverseLabel: Enrollments, type: MANY_TO_ONE}
+      - {to: cohort, label: Cohort, reverseLabel: Enrollments, type: MANY_TO_ONE}
+
+  - nameSingular: webinarEvent
+    namePlural: webinarEvents
+    labelSingular: Webinar Event
+    labelPlural: Webinar Events
+    description: >
+      A webinar or workshop. This is the top of Aspire's funnel and the busiest
+      thing in the account — submissions arrive in event-shaped spikes (44 in
+      Dec 2025, 34 in May 2026, 1 in Feb 2026), not as steady inbound.
+    icon: IconDeviceTvOld
+    ghl_equivalent: Funnel + registration form + a draft workflow that was never published
+    fields:
+      - {name: scheduledAt, label: Scheduled At, type: DATE_TIME}
+      - {name: topic, label: Topic, type: TEXT}
+      - {name: status, label: Status, type: SELECT, options: [Planned, Open for Registration, Live, Completed, Cancelled]}
+      - {name: registrationCount, label: Registrations, type: NUMBER}
+      - {name: attendeeCount, label: Attendees, type: NUMBER}
+      - {name: replayUrl, label: Replay URL, type: LINKS}
+      - {name: ghlFormId, label: Origin GHL Form ID, type: TEXT}
+
+  - nameSingular: webinarRegistration
+    namePlural: webinarRegistrations
+    labelSingular: Webinar Registration
+    labelPlural: Webinar Registrations
+    description: >
+      One person registering for one webinar, and whether they turned up.
+      Attendance is the single strongest enrolment signal in this business and
+      GHL held it only as the tag "watched training webinar".
+    icon: IconTicket
+    ghl_equivalent: Form submission + "webinar registered" / "webinar attendees" tags
+    fields:
+      - {name: registeredAt, label: Registered At, type: DATE_TIME}
+      - {name: attended, label: Attended, type: BOOLEAN}
+      - {name: remindersSent, label: Reminders Sent, type: NUMBER}
+      - {name: nps, label: NPS, type: NUMBER}
+      - {name: source, label: Source, type: SELECT, options: [Email, Social Media, Word of Mouth, Online Advertisement, Website or Blog, Search Engine, Other]}
+    relations:
+      - {to: person, label: Person, reverseLabel: Webinar Registrations, type: MANY_TO_ONE}
+      - {to: webinarEvent, label: Webinar, reverseLabel: Registrations, type: MANY_TO_ONE}
+
+  - nameSingular: aiConversation
+    namePlural: aiConversations
+    labelSingular: AI Conversation
+    labelPlural: AI Conversations
+    description: >
+      Output of the FrontDesk AI receptionist. GHL scattered this across seven
+      fdai_* fields on the contact, so each new conversation overwrote the last
+      one and no history survived. Here every conversation is its own record.
+    icon: IconMessageChatbot
+    ghl_equivalent: contact.fdai_intent, fdai_convo_summary, fdai_nps, fdai_handover_reason, fdai_appointment_interest, fdai_review_intent, fdai_page_url
+    fields:
+      - {name: intent, label: Intent, type: TEXT}
+      - {name: summary, label: Conversation Summary, type: TEXT}
+      - {name: handoverReason, label: Handover Reason, type: TEXT}
+      - {name: appointmentInterest, label: Appointment Interest, type: TEXT}
+      - {name: reviewIntent, label: Review Intent, type: TEXT}
+      - {name: nps, label: NPS, type: NUMBER}
+      - {name: pageUrl, label: Page URL, type: LINKS}
+      - {name: occurredAt, label: Occurred At, type: DATE_TIME}
+      - {name: handedOver, label: Handed to Human, type: BOOLEAN}
+    relations:
+      - {to: person, label: Person, reverseLabel: AI Conversations, type: MANY_TO_ONE}
+
   # ======================= Consent — the compliance keystone =======================
 
   - nameSingular: consentRecord

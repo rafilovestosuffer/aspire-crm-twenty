@@ -147,14 +147,138 @@
     },
     {
       "parameters": {
-        "jsCode": "const named = [\n  ['SUB Renewal Escalation', 'Renewal runs last 26h'],\n  ['OPS Scheduled Sweeps',   'Sweep runs last 26h'],\n  ['LEAD Nurture Sequence',  'Nurture runs last 26h'],\n];\n\n// 26 hours, not 24: a daily job that drifts by an hour must not raise a false\n// alarm every single morning. An alert people learn to ignore is worthless.\nconst missing = [];\nconst failed = [];\nfor (const [label, node] of named) {\n  const page = $(node).first().json || {};\n  const rows = page.data?.automationRuns || [];\n  const n = typeof page.totalCount === 'number' ? page.totalCount : rows.length;\n  if (!n) missing.push(label);\n  for (const r of rows) {\n    if (r.status === 'FAILED') failed.push(r.workflowName || label);\n  }\n}\n\nconst problems = [];\nif (missing.length) {\n  problems.push(`did not run in the last 26h: ${missing.join(', ')}`);\n}\nif (failed.length) {\n  problems.push(`${failed.length} failed run(s): ` +\n                [...new Set(failed)].slice(0, 3).join(', '));\n}\n\nreturn [{ json: {\n  healthy: problems.length === 0,\n  problems: problems.join(' | '),\n  checked: named.length,\n}}];"
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter=workflowName[eq]:{{ encodeURIComponent('ENR Cohort Operations') }},startedAt[gte]:{{ encodeURIComponent($now.minus({ hours: 26 }).toUTC().toISO()) }}&order_by=startedAt[DescNullsLast]&limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "647398934851",
+      "name": "Cohort runs last 26h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter=workflowName[eq]:{{ encodeURIComponent('EVT Post-Webinar Follow-up') }},startedAt[gte]:{{ encodeURIComponent($now.minus({ hours: 26 }).toUTC().toISO()) }}&order_by=startedAt[DescNullsLast]&limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "549900913749",
+      "name": "Post-webinar runs last 26h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter=workflowName[eq]:{{ encodeURIComponent('BOOK Trainer Appointment') }},startedAt[gte]:{{ encodeURIComponent($now.minus({ hours: 26 }).toUTC().toISO()) }}&order_by=startedAt[DescNullsLast]&limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "879629113684",
+      "name": "Appointment runs last 26h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1660,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter=workflowName[eq]:{{ encodeURIComponent('EVT Webinar Reminders') }},startedAt[gte]:{{ encodeURIComponent($now.minus({ hours: 26 }).toUTC().toISO()) }}&order_by=startedAt[DescNullsLast]&limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "984759406565",
+      "name": "Reminder runs last 26h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1880,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const named = [\n  ['SUB Renewal Escalation',     'Renewal runs last 26h'],\n  ['OPS Scheduled Sweeps',       'Sweep runs last 26h'],\n  ['LEAD Nurture Sequence',      'Nurture runs last 26h'],\n  ['ENR Cohort Operations',      'Cohort runs last 26h'],\n  ['EVT Post-Webinar Follow-up', 'Post-webinar runs last 26h'],\n  ['BOOK Trainer Appointment',   'Appointment runs last 26h'],\n  ['EVT Webinar Reminders',      'Reminder runs last 26h'],\n];\n\n// 26 hours, not 24: a daily job that drifts by an hour must not raise a false\n// alarm every single morning. An alert people learn to ignore is worthless.\nconst missing = [];\nconst failed = [];\nfor (const [label, node] of named) {\n  const page = $(node).first().json || {};\n  const rows = page.data?.automationRuns || [];\n  const n = typeof page.totalCount === 'number' ? page.totalCount : rows.length;\n  if (!n) missing.push(label);\n  for (const r of rows) {\n    if (r.status === 'FAILED') failed.push(r.workflowName || label);\n  }\n}\n\nconst problems = [];\nif (missing.length) {\n  problems.push(`did not run in the last 26h: ${missing.join(', ')}`);\n}\nif (failed.length) {\n  problems.push(`${failed.length} failed run(s): ` +\n                [...new Set(failed)].slice(0, 3).join(', '));\n}\n\nreturn [{ json: {\n  healthy: problems.length === 0,\n  problems: problems.join(' | '),\n  checked: named.length,\n}}];"
       },
       "id": "865011195768",
       "name": "Anything missing?",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1220,
+        2100,
         300
       ]
     },
@@ -184,7 +308,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1440,
+        2320,
         300
       ]
     },
@@ -210,8 +334,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1660,
-        300
+        0,
+        920
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -236,8 +360,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1660,
-        490
+        0,
+        1110
       ],
       "retryOnFail": true,
       "maxTries": 3,
@@ -262,13 +386,13 @@
     },
     {
       "parameters": {
-        "content": "## Did the daily automations run?\nThree workflows are supposed to run every morning. Each is asked\nfor by name and time, not pulled off the latest page of every\nautomationRun in the CRM. Form intake writes a run on every\nsubmit; past twenty recent rows the schedules used to fall off\nthe page and this check reported a dead worker on a healthy one.",
+        "content": "## Did the scheduled automations run?\nSeven workflows run on a schedule. Each is asked for by name and\ntime, not pulled off the latest page of every automationRun in\nthe CRM. Form intake writes a run on every submit; past twenty\nrecent rows the schedules used to fall off the page and this\ncheck reported a dead worker on a healthy one.",
         "height": 340,
-        "width": 1080,
+        "width": 1960,
         "color": 6
       },
-      "id": "490030893347",
-      "name": "2. Did the daily automations run?",
+      "id": "162729887647",
+      "name": "2. Did the scheduled automations run?",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -288,8 +412,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1640,
-        100
+        -20,
+        720
       ]
     }
   ],
@@ -339,6 +463,50 @@
       ]
     },
     "Nurture runs last 26h": {
+      "main": [
+        [
+          {
+            "node": "Cohort runs last 26h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cohort runs last 26h": {
+      "main": [
+        [
+          {
+            "node": "Post-webinar runs last 26h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post-webinar runs last 26h": {
+      "main": [
+        [
+          {
+            "node": "Appointment runs last 26h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointment runs last 26h": {
+      "main": [
+        [
+          {
+            "node": "Reminder runs last 26h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reminder runs last 26h": {
       "main": [
         [
           {

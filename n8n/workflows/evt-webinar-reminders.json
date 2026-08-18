@@ -1,0 +1,416 @@
+{
+  "name": "EVT Webinar Reminders",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "5 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "888714998138",
+      "name": "Hourly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarEvents?filter=scheduledAt[gte]:{{ encodeURIComponent($now.toUTC().toISO()) }},scheduledAt[lte]:{{ encodeURIComponent($now.plus({ hours: 48 }).toUTC().toISO()) }}&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "766152679103",
+      "name": "Upcoming webinars",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarRegistrations?filter=registeredAt[gte]:{{ encodeURIComponent($now.minus({ days: 120 }).toUTC().toISO()) }}&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "212453083141",
+      "name": "Registrations",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};// A short read here means someone silently never gets reminded, which shows\n// up as a low attendance rate that nobody can explain.\nconst events = pageAll('Upcoming webinars', 'webinarEvents');\nconst regs   = pageAll('Registrations',     'webinarRegistrations');\n\nconst byEvent = new Map();\nfor (const e of events) byEvent.set(e.id, e);\n\nconst now = Date.now();\nconst out = [];\n\nfor (const r of regs) {\n  const e = byEvent.get(r.webinarEventId);\n  if (!e || !e.scheduledAt) continue;\n  if (r.attended === true) continue;\n\n  const hoursAway = (new Date(e.scheduledAt).getTime() - now) / 3600000;\n  if (hoursAway <= 0) continue;\n\n  // remindersSent is the idempotency key: 0 -> the 24h note is still owed,\n  // 1 -> only the 1h note remains, 2 -> done. Sending on a time window alone\n  // would re-send every hour the window stayed open.\n  const done = Number(r.remindersSent || 0);\n  let key = null;\n  if (hoursAway <= 1.5 && done < 2) key = 'webinar_reminder_1h';\n  else if (hoursAway <= 24 && done < 1) key = 'webinar_reminder_24h';\n  if (!key) continue;\n\n  out.push({ json: {\n    registrationId: r.id,\n    personId: r.personId,\n    templateKey: key,\n    remindersSent: key === 'webinar_reminder_1h' ? 2 : 1,\n    webinarTitle: e.name || e.topic || 'Aspire webinar',\n    scheduledAt: e.scheduledAt,\n  }});\n}\nreturn out;"
+      },
+      "id": "004977696386",
+      "name": "Who to remind",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      },
+      "id": "863300643461",
+      "name": "Batch 10",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VEND Send Email",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "value": {
+            "personId": "={{ $json.personId }}",
+            "templateKey": "={{ $json.templateKey }}",
+            "mergeData": "={{ { \"webinarTitle\": $json.webinarTitle, \"scheduledAt\": $json.scheduledAt } }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "218605256035",
+      "name": "Send reminder",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarRegistrations/{{ $('Batch 10').first().json.registrationId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"remindersSent\": $('Batch 10').first().json.remindersSent }) }}"
+      },
+      "id": "763039235470",
+      "name": "Mark reminded",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "175759595197",
+      "name": "Pace the batches",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"EVT Webinar Reminders\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "271092478834",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1880,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## Every hour, look at what is coming up\nReminders are the difference between a registration and an\nattendee. This runs hourly rather than daily because a one-hour\nreminder sent at the wrong time of day is worse than none.",
+        "height": 300,
+        "width": 640,
+        "color": 5
+      },
+      "id": "414370842819",
+      "name": "1. Every hour, look at what is coming up",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Work out who is due which reminder\nTwo reminders per person per event: one a day ahead, one an hour\nahead. remindersSent on the registration is the counter, so a\nrestart or a re-run cannot send the same reminder twice.",
+        "height": 340,
+        "width": 540,
+        "color": 6
+      },
+      "id": "016170292175",
+      "name": "2. Work out who is due which reminder",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        640,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Send it and mark it sent\nThe counter is written straight after the send. If the send\nfails the counter does not move, so the next hourly run tries\nagain rather than skipping the person entirely.",
+        "height": 300,
+        "width": 860,
+        "color": 2
+      },
+      "id": "075589529102",
+      "name": "3. Send it and mark it sent",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        160
+      ]
+    }
+  ],
+  "connections": {
+    "Hourly": {
+      "main": [
+        [
+          {
+            "node": "Upcoming webinars",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upcoming webinars": {
+      "main": [
+        [
+          {
+            "node": "Registrations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrations": {
+      "main": [
+        [
+          {
+            "node": "Who to remind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Who to remind": {
+      "main": [
+        [
+          {
+            "node": "Batch 10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch 10": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send reminder": {
+      "main": [
+        [
+          {
+            "node": "Mark reminded",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark reminded": {
+      "main": [
+        [
+          {
+            "node": "Pace the batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pace the batches": {
+      "main": [
+        [
+          {
+            "node": "Batch 10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Hourly. Sends the 24-hour and 1-hour reminders for upcoming webinars. Separate from registration because a reminder is driven by the clock, not by the sign-up."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

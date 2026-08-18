@@ -73,7 +73,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};// A subscription sitting exactly on a 90/60/30/7 day milestone that is not in\n// this list is a renewal nobody chases \u2014 the one thing this workflow exists to\n// prevent \u2014 so pageAll throws rather than let a short read pass as a full one.\nconst subs = pageAll('Get active subscriptions', 'serviceSubscriptions');\n\n// Day counting in UTC, deliberately. Twenty stores renewalDate as UTC\n// midnight; measuring it against a local midnight shifts every date by the\n// container's offset and lands the whole run one day out west of Greenwich \u2014\n// so the 30-day notice goes out on day 29 and the 7-day notice on day 6.\nconst startOfUTCDay = (v) => {\n  const d = new Date(v);\n  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());\n};\nconst today = startOfUTCDay(new Date());\nconst out = [];\n\nfor (const s of subs) {\n  if (!s.renewalDate) continue;\n  const days = Math.round((startOfUTCDay(s.renewalDate) - today) / 86400000);\n  // Only act on the exact milestones, so a subscription is not chased daily\n  // for three months.\n  if ([90, 60, 30, 7].includes(days)) {\n    out.push({ json: { id: s.id, days, name: s.name,\n                       serviceLine: s.serviceLine, mrr: s.mrr,\n                       renewalDate: s.renewalDate, companyId: s.companyId }});\n  }\n}\nreturn out;"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};// A subscription sitting exactly on a 90/60/30/7 day milestone that is not in\n// this list is a renewal nobody chases \u2014 the one thing this workflow exists to\n// prevent \u2014 so pageAll throws rather than let a short read pass as a full one.\nconst subs = pageAll('Get active subscriptions', 'serviceSubscriptions');\n\n// Day counting in UTC, deliberately. Twenty stores renewalDate as UTC\n// midnight; measuring it against a local midnight shifts every date by the\n// container's offset and lands the whole run one day out west of Greenwich \u2014\n// so the 30-day notice goes out on day 29 and the 7-day notice on day 6.\nconst startOfUTCDay = (v) => {\n  const d = new Date(v);\n  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());\n};\nconst today = startOfUTCDay(new Date());\nconst out = [];\n\nfor (const s of subs) {\n  if (!s.renewalDate) continue;\n  const days = Math.round((startOfUTCDay(s.renewalDate) - today) / 86400000);\n  // Only act on the exact milestones, so a subscription is not chased daily\n  // for three months.\n  if ([90, 60, 30, 7].includes(days)) {\n    out.push({ json: { id: s.id, days, name: s.name,\n                       serviceLine: s.serviceLine, mrr: s.mrr,\n                       renewalDate: s.renewalDate, companyId: s.companyId }});\n  }\n}\n\n// Nothing due and nothing to be due are different states, and reporting both\n// as success is how this workflow would have lied on the VPS forever. The GHL\n// pull found no subscription business at all in the account \u2014 no MRR, no\n// renewals, zero payment transactions \u2014 so on day one this table is empty by\n// nature, not by accident. Saying so lets the health check distinguish an\n// automation that is working from one that has nothing to work on, and the\n// moment a real subscription is created this starts producing with no code\n// change. See docs/13-model-realignment.md.\nif (!out.length) {\n  return [{ json: { dormant: true, scanned: subs.length } }];\n}\nreturn out;"
       },
       "id": "443118479346",
       "name": "Days until renewal",
@@ -81,6 +81,36 @@
       "typeVersion": 2,
       "position": [
         440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.dormant }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "397488790245",
+      "name": "Anything due?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
         300
       ]
     },
@@ -94,7 +124,7 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        660,
+        880,
         300
       ]
     },
@@ -173,7 +203,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3,
       "position": [
-        880,
+        1100,
         300
       ]
     },
@@ -199,7 +229,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1100,
+        1320,
         300
       ],
       "credentials": {
@@ -233,7 +263,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1100,
+        1320,
         490
       ],
       "credentials": {
@@ -267,7 +297,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1100,
+        1320,
         680
       ],
       "credentials": {
@@ -293,7 +323,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1100,
+        1320,
         870
       ],
       "retryOnFail": true,
@@ -323,8 +353,42 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1320,
+        1540,
         300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"SUB Renewal Escalation\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id, \"errorMessage\": 'dormant: no service subscriptions exist (scanned ' + $json.scanned + '). Expected while Aspire sells training rather than subscriptions.' }) }}"
+      },
+      "id": "870624531716",
+      "name": "Log dormant run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1760,
+        490
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -339,7 +403,7 @@
       "parameters": {
         "content": "## Every morning, check what is coming up\nNothing happens when a renewal approaches \u2014 no system emits an\nevent for a date getting nearer. So we go and look, every day,\nand work out how many days are left on each subscription.\nGoHighLevel cannot do this at all.",
         "height": 320,
-        "width": 860,
+        "width": 1080,
         "color": 5
       },
       "id": "212230445776",
@@ -355,7 +419,7 @@
       "parameters": {
         "content": "## Escalate at 90, 60, 30 and 7 days\nEach milestone does something different and more urgent: start\nthe conversation, confirm they intend to renew, open a renewal\nopportunity in the pipeline, then escalate. A renewal is never\nlost because nobody remembered it.",
         "height": 890,
-        "width": 640,
+        "width": 860,
         "color": 6
       },
       "id": "457160575549",
@@ -363,7 +427,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        860,
+        1080,
         140
       ]
     }
@@ -395,7 +459,25 @@
       "main": [
         [
           {
+            "node": "Anything due?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything due?": {
+      "main": [
+        [
+          {
             "node": "Batch 20",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log dormant run",
             "type": "main",
             "index": 0
           }

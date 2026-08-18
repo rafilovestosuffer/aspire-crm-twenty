@@ -1,0 +1,533 @@
+{
+  "name": "ENR Bootcamp Enrolment",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enrol",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "914054023072",
+      "name": "Enrolment request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Tiers are the six FastPayDirect links found in GHL. An unknown tier must\n// not fall through to a default: sending the wrong payment link charges the\n// wrong amount, and that is a refund and an apology, not a bug report.\nconst TIERS = ['BRONZE','SILVER','GOLD','PLATINUM','DIAMOND','TITANIUM'];\nconst b = $input.first().json.body || {};\nconst email = String(b.email || '').trim().toLowerCase();\nif (!email.includes('@')) {\n  throw new Error(`enrolment without a usable email: ${JSON.stringify(b).slice(0, 200)}`);\n}\nconst tier = String(b.tier || '').trim().toUpperCase();\nif (!TIERS.includes(tier)) {\n  throw new Error(`unknown enrolment tier \"${b.tier}\" \u2014 expected one of ${TIERS.join(', ')}`);\n}\n\n// The link per tier is configuration, not code: prices and providers change\n// more often than workflows do. Missing config fails loudly here rather than\n// mailing somebody an empty link.\nconst links = {};\nfor (const pair of String($env.ENROL_PAYMENT_LINKS || '').split(',')) {\n  const [k, v] = pair.split('=');\n  if (k && v) links[k.trim().toUpperCase()] = v.trim();\n}\nconst paymentLinkUrl = links[tier] || '';\nif (!paymentLinkUrl) {\n  throw new Error(`no payment link configured for tier ${tier}. Set ENROL_PAYMENT_LINKS in infra/.env`);\n}\n\nreturn [{ json: {\n  email,\n  firstName: String(b.firstName || b.first_name || '').trim(),\n  lastName: String(b.lastName || b.last_name || '').trim(),\n  tier,\n  paymentLinkUrl,\n  cohortId: String(b.cohortId || '').trim(),\n  programName: String(b.programName || 'Aspire bootcamp').trim(),\n  amount: Number(b.amount || 0),\n}}];"
+      },
+      "id": "487297382083",
+      "name": "Normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people?filter=emails.primaryEmail[eq]:{{ encodeURIComponent($('Normalise').first().json.email) }}&limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "655406211714",
+      "name": "Find person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        560,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const found = ($input.first().json.data?.people || [])[0];\nreturn [{ json: { ...$('Normalise').first().json, existingId: found?.id || null } }];"
+      },
+      "id": "894456735075",
+      "name": "Person exists?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.existingId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "621951955344",
+      "name": "New person?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"name\": {\"firstName\": $json.firstName, \"lastName\": $json.lastName }, \"emails\": {\"primaryEmail\": $json.email } }) }}"
+      },
+      "id": "134241154378",
+      "name": "Create person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "651601846723",
+      "name": "Known person",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        490
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "275032920716",
+      "name": "Person ready",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/enrollments",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"tier\": $('Normalise').first().json.tier, \"status\": \"PAYMENT_SENT\", \"amount\": {\"amountMicros\": $('Normalise').first().json.amount * 1000000, \"currencyCode\": \"USD\" }, \"paymentLinkUrl\": {\"primaryLinkUrl\": $('Normalise').first().json.paymentLinkUrl }, \"enrolledAt\": $now.toUTC().toISO(), \"personId\": $('Person exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id, \"cohortId\": $('Normalise').first().json.cohortId || null }) }}"
+      },
+      "id": "668787543760",
+      "name": "Create enrolment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        0,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VEND Send Email",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "value": {
+            "personId": "={{ $('Person exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }}",
+            "templateKey": "enrol_payment_link",
+            "mergeData": "={{ { \"programName\": $('Normalise').first().json.programName, \"tier\": $('Normalise').first().json.tier, \"paymentLinkUrl\": $('Normalise').first().json.paymentLinkUrl } }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "074457979303",
+      "name": "Send payment link",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        220,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"title\": 'Enrolment: ' + $('Normalise').first().json.firstName + ' ' + $('Normalise').first().json.lastName + ' (' + $('Normalise').first().json.tier + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 2 }).toUTC().toISO(), \"bodyV2\": {\"markdown\": 'Payment link sent for ' + $('Normalise').first().json.programName + '. Confirm payment before the cohort starts.' } }) }}"
+      },
+      "id": "523589027301",
+      "name": "Create task",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        560,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SALES_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"#sales\", \"text\": `:mortar_board: *Bootcamp enrolment \u2014 ${$('Normalise').first().json.tier}*\n*${$('Normalise').first().json.firstName} ${$('Normalise').first().json.lastName}* \u2014 ${$('Normalise').first().json.programName}\n${$('Normalise').first().json.email}` }) }}",
+        "options": {}
+      },
+      "id": "378407668479",
+      "name": "Notify sales",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        780,
+        920
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"ENR Bootcamp Enrolment\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "832385207153",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1000,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## Someone wants a place on a bootcamp\nPayment happens off-platform on a FastPayDirect link \u2014 one per\nprice tier. The CRM's job is to know which link was sent, to\nwhom, for which cohort, and whether it was ever paid. Without\nthat, an unpaid enrolment is invisible until the course starts.",
+        "height": 400,
+        "width": 540,
+        "color": 5
+      },
+      "id": "093996120399",
+      "name": "1. Someone wants a place on a bootcamp",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Find or create the person\nStudents usually sign up with a personal address, and the same\nperson often registers for a webinar first. Matching on email\nkeeps the webinar history and the enrolment on one record.",
+        "height": 490,
+        "width": 1080,
+        "color": 4
+      },
+      "id": "003284419529",
+      "name": "2. Find or create the person",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        540,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Create the enrolment and send the link\nThe enrolment is created as PAYMENT_SENT, not PAID. Nothing here\nconfirms money arrived \u2014 the payment provider does that, and\nuntil it does, this record is what the chase runs against.",
+        "height": 360,
+        "width": 540,
+        "color": 4
+      },
+      "id": "468330167911",
+      "name": "3. Create the enrolment and send the link",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Make sure a human knows\nAn enrolment is the most valuable thing that happens in this\nfunnel. It gets a task with a due date and a message to the\nsales channel, so it cannot sit unnoticed while the cohort\nfills up.",
+        "height": 320,
+        "width": 640,
+        "color": 2
+      },
+      "id": "588614214030",
+      "name": "4. Make sure a human knows",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        540,
+        760
+      ]
+    }
+  ],
+  "connections": {
+    "Find person": {
+      "main": [
+        [
+          {
+            "node": "Person exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Person exists?": {
+      "main": [
+        [
+          {
+            "node": "New person?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New person?": {
+      "main": [
+        [
+          {
+            "node": "Create person",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Known person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create person": {
+      "main": [
+        [
+          {
+            "node": "Person ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Known person": {
+      "main": [
+        [
+          {
+            "node": "Person ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrolment request": {
+      "main": [
+        [
+          {
+            "node": "Normalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise": {
+      "main": [
+        [
+          {
+            "node": "Find person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Person ready": {
+      "main": [
+        [
+          {
+            "node": "Create enrolment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create enrolment": {
+      "main": [
+        [
+          {
+            "node": "Send payment link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send payment link": {
+      "main": [
+        [
+          {
+            "node": "Create task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create task": {
+      "main": [
+        [
+          {
+            "node": "Notify sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify sales": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Public webhook for bootcamp enrolment. Creates the enrolment, issues the payment link for the chosen tier and raises a task. This is the revenue path behind GHL's Bootcamp Payment Automation."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

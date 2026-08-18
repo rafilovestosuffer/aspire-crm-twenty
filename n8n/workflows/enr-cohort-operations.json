@@ -1,0 +1,563 @@
+{
+  "name": "ENR Cohort Operations",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "id": "924069951903",
+      "name": "Daily 08:00 UTC",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/cohorts?filter=startDate[gte]:{{ encodeURIComponent($now.minus({ days: 30 }).toUTC().toISODate()) }}&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "891858836913",
+      "name": "Cohorts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/enrollments?filter=status[in]:[INTERESTED,REGISTERED,PAYMENT_SENT,PAID]&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "135361676187",
+      "name": "Enrolments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const cohorts = pageAll('Cohorts',    'cohorts');\nconst enrols  = pageAll('Enrolments', 'enrollments');\n\nconst byCohort = new Map();\nfor (const c of cohorts) byCohort.set(c.id, c);\n\nconst CHASE_EVERY_DAYS = 3;\nconst CHASE_UNTIL_DAYS = 21;   // stop chasing three weeks after enrolling\nconst JOINING_LEAD_DAYS = 3;\n\nconst now = Date.now();\nconst seats = new Map();\nconst out = [];\n\nfor (const e of enrols) {\n  const c = e.cohortId ? byCohort.get(e.cohortId) : null;\n\n  if (e.status === 'PAID' || e.status === 'ATTENDING') {\n    seats.set(e.cohortId, (seats.get(e.cohortId) || 0) + 1);\n  }\n\n  if (!c || !c.startDate) continue;\n  const startsInDays = Math.ceil((new Date(c.startDate).getTime() - now) / 86400000);\n\n  if (e.status === 'PAYMENT_SENT') {\n    if (startsInDays < 0) continue;                 // cohort already started\n    const age = Math.floor((now - new Date(e.enrolledAt || e.createdAt).getTime()) / 86400000);\n    if (age > CHASE_UNTIL_DAYS) continue;\n    const lastChase = e.paymentChasedAt ? new Date(e.paymentChasedAt).getTime() : 0;\n    const sinceChase = (now - lastChase) / 86400000;\n    if (lastChase && sinceChase < CHASE_EVERY_DAYS) continue;\n    out.push({ json: {\n      enrollmentId: e.id, personId: e.personId, kind: 'chase',\n      templateKey: 'enrol_payment_chase',\n      programName: c.name || 'your Aspire bootcamp',\n      tier: e.tier || '', startDate: String(c.startDate).slice(0, 10),\n      paymentLinkUrl: e.paymentLinkUrl?.primaryLinkUrl || '',\n    }});\n    continue;\n  }\n\n  if (e.status === 'PAID' && startsInDays >= 0 && startsInDays <= JOINING_LEAD_DAYS) {\n    out.push({ json: {\n      enrollmentId: e.id, personId: e.personId, kind: 'joining',\n      templateKey: 'cohort_joining',\n      programName: c.name || 'your Aspire bootcamp',\n      startDate: String(c.startDate).slice(0, 10),\n      location: c.location || 'Online',\n    }});\n  }\n}\n\n// Seat counts are recomputed from enrolments rather than incremented, so a\n// failed run or a manual edit cannot leave them permanently wrong.\nconst seatRows = [];\nfor (const c of cohorts) {\n  const filled = seats.get(c.id) || 0;\n  if (Number(c.seatsFilled || 0) !== filled) {\n    seatRows.push({ cohortId: c.id, seatsFilled: filled });\n  }\n}\nif (seatRows.length) out.push({ json: { kind: 'seats', seatRows } });\n\nreturn out;"
+      },
+      "id": "076740922947",
+      "name": "What needs doing",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "chase",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "joining",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "typeValidation": "loose"
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "seats",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "872267748957",
+      "name": "Chase, join, or count",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VEND Send Email",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "value": {
+            "personId": "={{ $json.personId }}",
+            "templateKey": "enrol_payment_chase",
+            "mergeData": "={{ { \"programName\": $json.programName, \"tier\": $json.tier, \"startDate\": $json.startDate, \"paymentLinkUrl\": $json.paymentLinkUrl } }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "306416049421",
+      "name": "Send chase",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "VEND Send Email",
+          "mode": "list"
+        },
+        "workflowInputs": {
+          "value": {
+            "personId": "={{ $json.personId }}",
+            "templateKey": "cohort_joining",
+            "mergeData": "={{ { \"programName\": $json.programName, \"startDate\": $json.startDate, \"location\": $json.location, \"joiningDetails\": \"Details and materials are in your student portal.\" } }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "975161097457",
+      "name": "Send joining details",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        490
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per cohort whose count is wrong, for the PATCH that follows.\nreturn ($input.first().json.seatRows || []).map(r => ({ json: r }));"
+      },
+      "id": "439089778040",
+      "name": "Reconcile seats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1220,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/enrollments/{{ $('Chase, join, or count').first().json.enrollmentId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"paymentChasedAt\": $now.toUTC().toISO() }) }}"
+      },
+      "id": "071095822023",
+      "name": "Stamp the chase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1440,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/cohorts/{{ $json.cohortId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"seatsFilled\": $json.seatsFilled }) }}"
+      },
+      "id": "916213473186",
+      "name": "Write seat count",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1660,
+        680
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"ENR Cohort Operations\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "605398694996",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1880,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## Every morning, look after the cohorts\nThree things go wrong quietly: an enrolment is never paid, a\nstudent never gets joining instructions, and the seat count on\na cohort drifts from reality. All three surface only when it is\ntoo late to fix them, so they are checked daily.",
+        "height": 320,
+        "width": 640,
+        "color": 5
+      },
+      "id": "321889292106",
+      "name": "1. Every morning, look after the cohorts",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Decide what each enrolment needs\nAn unpaid enrolment gets a chase, at most every third day \u2014 a\ndaily chase reads as harassment and gets marked as spam. A paid\none gets joining instructions three days before the cohort\nstarts. Nothing gets both on the same day.",
+        "height": 380,
+        "width": 540,
+        "color": 6
+      },
+      "id": "567294649017",
+      "name": "2. Decide what each enrolment needs",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        640,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Chase, welcome, reconcile\nEvery message goes through the send workflow, so a student who\nopted out is refused here like anywhere else. Seat counts are\nrewritten from what the enrolments actually say.",
+        "height": 680,
+        "width": 860,
+        "color": 2
+      },
+      "id": "935830465533",
+      "name": "3. Chase, welcome, reconcile",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        160
+      ]
+    }
+  ],
+  "connections": {
+    "Daily 08:00 UTC": {
+      "main": [
+        [
+          {
+            "node": "Cohorts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cohorts": {
+      "main": [
+        [
+          {
+            "node": "Enrolments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrolments": {
+      "main": [
+        [
+          {
+            "node": "What needs doing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "What needs doing": {
+      "main": [
+        [
+          {
+            "node": "Chase, join, or count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chase, join, or count": {
+      "main": [
+        [
+          {
+            "node": "Send chase",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send joining details",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reconcile seats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send chase": {
+      "main": [
+        [
+          {
+            "node": "Stamp the chase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp the chase": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send joining details": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reconcile seats": {
+      "main": [
+        [
+          {
+            "node": "Write seat count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write seat count": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Daily. Chases unpaid enrolments, sends joining instructions before a cohort starts, and keeps seat counts honest."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

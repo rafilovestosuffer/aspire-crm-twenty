@@ -1,0 +1,551 @@
+{
+  "name": "AI FrontDesk Handover",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "frontdesk-ai",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "426872770567",
+      "name": "Conversation ended",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Field names mirror GHL's fdai_* keys so the agent does not have to change.\nconst b = $input.first().json.body || {};\nconst email = String(b.email || b.fdai_email || '').trim().toLowerCase();\nif (!email.includes('@')) {\n  throw new Error(`FrontDesk AI payload without a usable email: ${JSON.stringify(b).slice(0, 200)}`);\n}\nconst nps = Number(b.fdai_nps ?? b.nps);\nconst handoverReason = String(b.fdai_handover_reason || b.handoverReason || '').trim();\n\nreturn [{ json: {\n  email,\n  firstName: String(b.firstName || '').trim(),\n  lastName: String(b.lastName || '').trim(),\n  intent: String(b.fdai_intent || b.intent || '').slice(0, 500),\n  summary: String(b.fdai_convo_summary || b.summary || '').slice(0, 5000),\n  handoverReason,\n  appointmentInterest: String(b.fdai_appointment_interest || '').slice(0, 500),\n  reviewIntent: String(b.fdai_review_intent || '').slice(0, 500),\n  pageUrl: String(b.fdai_page_url || b.pageUrl || '').slice(0, 500),\n  nps: Number.isFinite(nps) ? nps : null,\n  handedOver: Boolean(handoverReason),\n}}];"
+      },
+      "id": "844052764077",
+      "name": "Normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people?filter=emails.primaryEmail[eq]:{{ encodeURIComponent($('Normalise').first().json.email) }}&limit=1",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "041669482608",
+      "name": "Find person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        560,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const found = ($input.first().json.data?.people || [])[0];\nreturn [{ json: { ...$('Normalise').first().json, existingId: found?.id || null } }];"
+      },
+      "id": "238021690398",
+      "name": "Person exists?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.existingId }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "138062857593",
+      "name": "New person?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"name\": {\"firstName\": $json.firstName, \"lastName\": $json.lastName }, \"emails\": {\"primaryEmail\": $json.email } }) }}"
+      },
+      "id": "072062033468",
+      "name": "Create person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1220,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "059404888909",
+      "name": "Known person",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        490
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "options": {}
+      },
+      "id": "564430739691",
+      "name": "Person ready",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/aiConversations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"intent\": $('Normalise').first().json.intent, \"summary\": $('Normalise').first().json.summary, \"handoverReason\": $('Normalise').first().json.handoverReason, \"appointmentInterest\": $('Normalise').first().json.appointmentInterest, \"reviewIntent\": $('Normalise').first().json.reviewIntent, \"nps\": $('Normalise').first().json.nps, \"pageUrl\": {\"primaryLinkUrl\": $('Normalise').first().json.pageUrl }, \"occurredAt\": $now.toUTC().toISO(), \"handedOver\": $('Normalise').first().json.handedOver, \"personId\": $('Person exists?').first().json.existingId || $('Create person').first().json.data.createPerson.id }) }}"
+      },
+      "id": "045979019950",
+      "name": "Store conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1660,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Normalise').first().json.handedOver }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "752239078014",
+      "name": "Handed over?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        0,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/tasks",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"title\": 'AI handover: ' + $('Normalise').first().json.intent, \"status\": \"TODO\", \"dueAt\": $now.plus({ hours: 4 }).toUTC().toISO(), \"bodyV2\": {\"markdown\": $('Normalise').first().json.summary } }) }}"
+      },
+      "id": "114821591906",
+      "name": "Task: pick this up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        220,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {},
+      "id": "825155088587",
+      "name": "No handover needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        220,
+        1110
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SALES_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"#sales\", \"text\": `:robot_face: *FrontDesk AI handed over a conversation*\n${$('Normalise').first().json.email} \u2014 ${$('Normalise').first().json.handoverReason}\nIntent: ${$('Normalise').first().json.intent}` }) }}",
+        "options": {}
+      },
+      "id": "901138346096",
+      "name": "Notify sales",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        440,
+        920
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"AI FrontDesk Handover\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id }) }}"
+      },
+      "id": "405756781971",
+      "name": "Log run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        660,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "content": "## The AI receptionist finishes a conversation\nGHL kept this in seven fdai_ fields on the contact, so every new\nconversation overwrote the last and no history survived. Here\neach conversation is its own record, which is the only way to\nask whether the agent is getting better or worse.",
+        "height": 380,
+        "width": 540,
+        "color": 5
+      },
+      "id": "015648359040",
+      "name": "1. The AI receptionist finishes a conversation",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Attach it to a person\nSame email match as everywhere else, so an AI conversation and a\nwebinar registration for the same address land on one record.",
+        "height": 470,
+        "width": 1300,
+        "color": 4
+      },
+      "id": "853388261409",
+      "name": "2. Attach it to a person",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        540,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Escalate only when the agent asked\nThe agent hands over when it cannot help. That is the moment a\nperson is most likely to be lost, so it becomes a task and a\nmessage \u2014 not a row someone might read later.",
+        "height": 490,
+        "width": 860,
+        "color": 6
+      },
+      "id": "259587075909",
+      "name": "3. Escalate only when the agent asked",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -20,
+        780
+      ]
+    }
+  ],
+  "connections": {
+    "Find person": {
+      "main": [
+        [
+          {
+            "node": "Person exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Person exists?": {
+      "main": [
+        [
+          {
+            "node": "New person?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New person?": {
+      "main": [
+        [
+          {
+            "node": "Create person",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Known person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create person": {
+      "main": [
+        [
+          {
+            "node": "Person ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Known person": {
+      "main": [
+        [
+          {
+            "node": "Person ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conversation ended": {
+      "main": [
+        [
+          {
+            "node": "Normalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise": {
+      "main": [
+        [
+          {
+            "node": "Find person",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Person ready": {
+      "main": [
+        [
+          {
+            "node": "Store conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store conversation": {
+      "main": [
+        [
+          {
+            "node": "Handed over?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handed over?": {
+      "main": [
+        [
+          {
+            "node": "Task: pick this up",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No handover needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Task: pick this up": {
+      "main": [
+        [
+          {
+            "node": "Notify sales",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify sales": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No handover needed": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "SYS Error Handler"
+  },
+  "meta": {
+    "description": "Webhook for the FrontDesk AI receptionist. Stores each conversation as its own record and escalates to a human when the agent asks for one."
+  },
+  "tags": [
+    {
+      "name": "aspire"
+    }
+  ]
+}

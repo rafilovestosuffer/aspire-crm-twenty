@@ -73,6 +73,13 @@ TWENTY = "={{ $env.TWENTY_BASE_URL }}"
 ALERT_CHANNEL = "#crm-alerts"
 SALES_CHANNEL = "#sales"
 FORM_PATH = "aspire-contact"          # public form: /form/aspire-contact
+# Public webhooks. Landing pages, the calendar vendor and the FrontDesk AI
+# agent all POST here; the paths are part of the contract, so changing one
+# breaks a live page. Registered in Caddy as public, unlike the n8n editor.
+WEBINAR_HOOK_PATH = "webinar-register"
+ENROL_HOOK_PATH = "enrol"
+APPOINTMENT_HOOK_PATH = "appointment"
+FDAI_HOOK_PATH = "frontdesk-ai"
 ALERT_HOOK = "={{ $env.ALERT_WEBHOOK_URL }}"
 SALES_HOOK = "={{ $env.SALES_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL }}"
 
@@ -85,7 +92,17 @@ SALES_HOOK = "={{ $env.SALES_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL }}"
 # catch it because no lead was due on a freshly seeded database, so the send
 # path was never executed. A green check that never ran the code is not a check.
 NURTURE_KEYS = ["nurture_1", "nurture_2", "nurture_3"]
-TEMPLATE_KEYS = ["lead_ack", "renewal_60d", "appt_reminder_24h", *NURTURE_KEYS]
+# Training-funnel templates, added once the GHL pull showed what this business
+# actually sends: webinar confirmations and reminders, then bootcamp payment
+# links and joining instructions. Copy is modelled on the 14 templates found in
+# GHL's email builder; only the wording carries over, because `editorData` is
+# not readable back through the API.
+WEBINAR_KEYS = ["webinar_confirm", "webinar_reminder_24h",
+                "webinar_reminder_1h", "webinar_replay", "webinar_survey"]
+ENROL_KEYS = ["enrol_payment_link", "enrol_payment_chase",
+              "enrol_receipt", "cohort_joining"]
+TEMPLATE_KEYS = ["lead_ack", "renewal_60d", "appt_reminder_24h",
+                 *NURTURE_KEYS, *WEBINAR_KEYS, *ENROL_KEYS]
 
 # Reads every page of a paginated scan node and proves nothing was left behind.
 #
@@ -703,6 +720,77 @@ your enquiry.</p>
 changes and we will pick it up.</p>
 <p>— Aspire Tech</p>`,
   },
+  webinar_confirm: {
+    subject: 'You are registered: {{webinarTitle}}',
+    body: `<p>Hi {{firstName}},</p>
+<p>You are registered for <strong>{{webinarTitle}}</strong> on {{scheduledAt}}.</p>
+<p>Joining link: {{joinUrl}}</p>
+<p>We will remind you the day before and again an hour ahead.</p>
+<p>— Aspire Tech</p>`,
+  },
+  webinar_reminder_24h: {
+    subject: 'Tomorrow: {{webinarTitle}}',
+    body: `<p>Hi {{firstName}},</p>
+<p><strong>{{webinarTitle}}</strong> runs tomorrow at {{scheduledAt}}.</p>
+<p>Joining link: {{joinUrl}}</p>
+<p>— Aspire Tech</p>`,
+  },
+  webinar_reminder_1h: {
+    subject: 'Starting in an hour: {{webinarTitle}}',
+    body: `<p>Hi {{firstName}},</p>
+<p>{{webinarTitle}} starts in about an hour.</p>
+<p>Joining link: {{joinUrl}}</p>`,
+  },
+  webinar_replay: {
+    subject: 'The recording of {{webinarTitle}}',
+    body: `<p>Hi {{firstName}},</p>
+<p>Sorry we missed you at {{webinarTitle}}. Here is the recording:</p>
+<p>{{replayUrl}}</p>
+<p>If you would rather talk it through with a trainer, just reply.</p>
+<p>— Aspire Tech</p>`,
+  },
+  webinar_survey: {
+    subject: 'Two minutes on {{webinarTitle}}?',
+    body: `<p>Hi {{firstName}},</p>
+<p>Thanks for joining {{webinarTitle}}. What did you make of it?</p>
+<p>{{surveyUrl}}</p>
+<p>— Aspire Tech</p>`,
+  },
+  enrol_payment_link: {
+    subject: 'Your place on {{programName}} — {{tier}}',
+    body: `<p>Hi {{firstName}},</p>
+<p>Here is your enrolment link for <strong>{{programName}}</strong>
+({{tier}}), starting {{startDate}}.</p>
+<p>{{paymentLinkUrl}}</p>
+<p>Your place is held until payment clears. Reply if you need an invoice
+instead.</p>
+<p>— Aspire Tech</p>`,
+  },
+  enrol_payment_chase: {
+    subject: 'Still holding your place on {{programName}}',
+    body: `<p>Hi {{firstName}},</p>
+<p>We are still holding your seat on {{programName}} ({{tier}}), but the
+cohort starts {{startDate}} and places are limited.</p>
+<p>{{paymentLinkUrl}}</p>
+<p>If your plans changed, reply and we will release it — no problem at all.</p>
+<p>— Aspire Tech</p>`,
+  },
+  enrol_receipt: {
+    subject: 'Payment received — welcome to {{programName}}',
+    body: `<p>Hi {{firstName}},</p>
+<p>Your payment for <strong>{{programName}}</strong> ({{tier}}) is confirmed
+and your seat is booked.</p>
+<p>Joining instructions follow closer to {{startDate}}.</p>
+<p>— Aspire Tech</p>`,
+  },
+  cohort_joining: {
+    subject: '{{programName}} starts {{startDate}} — how to join',
+    body: `<p>Hi {{firstName}},</p>
+<p>{{programName}} starts on {{startDate}} at {{location}}.</p>
+<p>{{joiningDetails}}</p>
+<p>Any questions, just reply to this email.</p>
+<p>— Aspire Tech</p>`,
+  },
 };
 
 const d = $input.first().json;
@@ -1198,8 +1286,22 @@ for (const s of subs) {
                        renewalDate: s.renewalDate, companyId: s.companyId }});
   }
 }
+
+// Nothing due and nothing to be due are different states, and reporting both
+// as success is how this workflow would have lied on the VPS forever. The GHL
+// pull found no subscription business at all in the account — no MRR, no
+// renewals, zero payment transactions — so on day one this table is empty by
+// nature, not by accident. Saying so lets the health check distinguish an
+// automation that is working from one that has nothing to work on, and the
+// moment a real subscription is created this starts producing with no code
+// change. See docs/13-model-realignment.md.
+if (!out.length) {
+  return [{ json: { dormant: true, scanned: subs.length } }];
+}
 return out;
 """.strip())
+
+    live = f.iff("Anything due?", "={{ $json.dormant }}", "notExists", "")
 
     batch = f.add("Batch 20", "n8n-nodes-base.splitInBatches",
                   {"batchSize": 20, "options": {}}, version=3)
@@ -1262,7 +1364,22 @@ return out;
 
     log = f.log_run("Log run", "SUB Renewal Escalation")
 
-    f.chain(trig, fetch, window, batch)
+    # A dormant marker carries no `days`, so letting it reach the switch would
+    # drop it into the fallback output — the 7-day branch — and page the team
+    # every morning about a renewal that does not exist. Split it off first.
+    dormant_log = f.twenty("Log dormant run", "POST", "/rest/automationRuns", {
+        "workflowName": "SUB Renewal Escalation",
+        "status": "SUCCESS",
+        "startedAt": "={{ $execution.startedAt }}",
+        "n8nExecutionId": "={{ $execution.id }}",
+        "errorMessage": "={{ 'dormant: no service subscriptions exist (scanned ' "
+                        "+ $json.scanned + '). Expected while Aspire sells "
+                        "training rather than subscriptions.' }}",
+    }, row=1)
+
+    f.chain(trig, fetch, window, live)
+    f.connect(live, batch, out=0)
+    f.connect(live, dormant_log, out=1)
     f.connect(batch, route, out=1)      # splitInBatches: output 1 is the loop body
     f.connect(route, t90, out=0)
     f.connect(route, t60, out=1)
@@ -1779,12 +1896,12 @@ def wf_health_check() -> Flow:
 
     since = q("$now.minus({ hours: 26 }).toUTC().toISO()")
 
-    f.phase("Did the daily automations run?",
-            "Three workflows are supposed to run every morning. Each is asked\n"
-            "for by name and time, not pulled off the latest page of every\n"
-            "automationRun in the CRM. Form intake writes a run on every\n"
-            "submit; past twenty recent rows the schedules used to fall off\n"
-            "the page and this check reported a dead worker on a healthy one.",
+    f.phase("Did the scheduled automations run?",
+            "Seven workflows run on a schedule. Each is asked for by name and\n"
+            "time, not pulled off the latest page of every automationRun in\n"
+            "the CRM. Form intake writes a run on every submit; past twenty\n"
+            "recent rows the schedules used to fall off the page and this\n"
+            "check reported a dead worker on a healthy one.",
             "decide")
 
     # One filtered GET per job. Asking for the latest 20 automationRuns and
@@ -1807,12 +1924,47 @@ def wf_health_check() -> Flow:
         + q("'LEAD Nurture Sequence'")
         + f",startedAt[gte]:{since}"
         "&order_by=startedAt[DescNullsLast]&limit=20")
+    # The training funnel's daily jobs. Left out, they could stop running for
+    # weeks without anyone noticing — and these are the ones that touch
+    # students and money, so silence there costs more than silence anywhere
+    # else in the system.
+    cohort = f.twenty(
+        "Cohort runs last 26h", "GET",
+        "/rest/automationRuns?filter=workflowName[eq]:"
+        + q("'ENR Cohort Operations'")
+        + f",startedAt[gte]:{since}"
+        "&order_by=startedAt[DescNullsLast]&limit=20")
+    postwb = f.twenty(
+        "Post-webinar runs last 26h", "GET",
+        "/rest/automationRuns?filter=workflowName[eq]:"
+        + q("'EVT Post-Webinar Follow-up'")
+        + f",startedAt[gte]:{since}"
+        "&order_by=startedAt[DescNullsLast]&limit=20")
+    appts = f.twenty(
+        "Appointment runs last 26h", "GET",
+        "/rest/automationRuns?filter=workflowName[eq]:"
+        + q("'BOOK Trainer Appointment'")
+        + f",startedAt[gte]:{since}"
+        "&order_by=startedAt[DescNullsLast]&limit=20")
+    # Hourly, so 26 hours should hold roughly 26 runs. Absence here means the
+    # webinar reminders stopped, which shows up later as an unexplained drop
+    # in attendance rather than as an error.
+    remind = f.twenty(
+        "Reminder runs last 26h", "GET",
+        "/rest/automationRuns?filter=workflowName[eq]:"
+        + q("'EVT Webinar Reminders'")
+        + f",startedAt[gte]:{since}"
+        "&order_by=startedAt[DescNullsLast]&limit=20")
 
     judge = f.code("Anything missing?", """
 const named = [
-  ['SUB Renewal Escalation', 'Renewal runs last 26h'],
-  ['OPS Scheduled Sweeps',   'Sweep runs last 26h'],
-  ['LEAD Nurture Sequence',  'Nurture runs last 26h'],
+  ['SUB Renewal Escalation',     'Renewal runs last 26h'],
+  ['OPS Scheduled Sweeps',       'Sweep runs last 26h'],
+  ['LEAD Nurture Sequence',      'Nurture runs last 26h'],
+  ['ENR Cohort Operations',      'Cohort runs last 26h'],
+  ['EVT Post-Webinar Follow-up', 'Post-webinar runs last 26h'],
+  ['BOOK Trainer Appointment',   'Appointment runs last 26h'],
+  ['EVT Webinar Reminders',      'Reminder runs last 26h'],
 ];
 
 // 26 hours, not 24: a daily job that drifts by an hour must not raise a false
@@ -1861,16 +2013,1032 @@ return [{ json: {
                          "Check the worker first: docker compose ps worker",
                          row=1)
 
-    f.chain(trig, alive, renewal, sweeps, nurture, judge, gate)
+    f.chain(trig, alive, renewal, sweeps, nurture,
+            cohort, postwb, appts, remind, judge, gate)
     f.connect(gate, quiet, out=0)
     f.connect(gate, shout, out=1)
     f.connect(shout, quiet)
     return f
 
 
+# --------------------------------------------------------------------------
+# The training funnel — added after the 18 Aug 2026 GHL pull
+#
+# Everything above this line was designed before anyone had read the GHL
+# account. The pull showed the business is cybersecurity training and
+# certification: a webinar or workshop fills the top of the funnel, nurture and
+# a trainer meeting move people along, and a bootcamp enrolment is paid through
+# a FastPayDirect link. None of that had a workflow. These do.
+#
+# The logic is inferred from configuration, not captured from GHL — workflow
+# internals are not exposed by any documented endpoint. Each inference and its
+# evidence is listed in docs/13-model-realignment.md, so it can be checked
+# against the GHL UI rather than re-derived.
+# --------------------------------------------------------------------------
+
+# Find-or-create a person from a webhook payload. Four workflows below need the
+# same three nodes, and writing them out four times is how they drift: the
+# consent record in the first build was created with no person attached because
+# one copy of this had been edited and the others had not.
+def _person_upsert(f: "Flow", src: str) -> str:
+    """Add find/create/merge nodes. `src` names the node holding the payload.
+
+    Returns an expression for the person id, usable in later nodes.
+    """
+    find = f.twenty("Find person", "GET",
+                    "/rest/people?filter=emails.primaryEmail[eq]:"
+                    + q(f"$('{src}').first().json.email") + "&limit=1")
+    exists = f.code("Person exists?", f"""
+const found = ($input.first().json.data?.people || [])[0];
+return [{{ json: {{ ...$('{src}').first().json, existingId: found?.id || null }} }}];
+""".strip())
+    branch = f.iff("New person?", "={{ $json.existingId }}", "notExists", "")
+    with f.fan():
+        create = f.twenty("Create person", "POST", "/rest/people", {
+            "name": {"firstName": "={{ $json.firstName }}",
+                     "lastName": "={{ $json.lastName }}"},
+            "emails": {"primaryEmail": "={{ $json.email }}"},
+        })
+        skip = f.noop("Known person", row=1)
+    merge = f.add("Person ready", "n8n-nodes-base.merge",
+                  {"mode": "append", "options": {}}, version=3)
+    f.chain(find, exists, branch)
+    f.connect(branch, create, out=0)
+    f.connect(branch, skip, out=1)
+    f.connect(create, merge)
+    f.connect(skip, merge)
+    return ("={{ $('Person exists?').first().json.existingId || "
+            "$('Create person').first().json.data.createPerson.id }}")
+
+
+def wf_webinar_registration() -> Flow:
+    f = Flow("EVT Webinar Registration",
+             "Public webhook for webinar and workshop sign-ups. Creates the "
+             "person, the registration and a consent record, then confirms by "
+             "email. The top of Aspire's funnel — GHL had a draft for this that "
+             "was never published.")
+
+    f.phase("Someone signs up for a webinar",
+            "Landing pages post here when a person registers. This is the\n"
+            "busiest thing the company does: submissions arrive in spikes\n"
+            "around each event — 44 in one December, 1 in a quiet February —\n"
+            "so the funnel has to be event-shaped, not a steady trickle.",
+            "capture")
+
+    trig = f.add("Registration", "n8n-nodes-base.webhook", {
+        "httpMethod": "POST",
+        "path": WEBINAR_HOOK_PATH,
+        "responseMode": "lastNode",
+        "options": {},
+    }, version=2)
+
+    norm = f.code("Normalise", """
+// The payload comes from a landing page we do not fully control, so validate
+// rather than trust. A registration with no email cannot be confirmed, cannot
+// be reminded and cannot be counted — reject it loudly instead of writing a
+// half record nobody will ever notice is broken.
+const b = $input.first().json.body || {};
+const email = String(b.email || '').trim().toLowerCase();
+if (!email.includes('@')) {
+  throw new Error(`webinar registration without a usable email: ${JSON.stringify(b).slice(0, 200)}`);
+}
+const SOURCES = ['Email','Social Media','Word of Mouth','Online Advertisement',
+                 'Website or Blog','Search Engine','Other'];
+const raw = String(b.source || '').trim();
+const source = SOURCES.find(s => s.toLowerCase() === raw.toLowerCase()) || 'Other';
+
+return [{ json: {
+  email,
+  firstName: String(b.firstName || b.first_name || '').trim(),
+  lastName: String(b.lastName || b.last_name || '').trim(),
+  webinarId: String(b.webinarId || '').trim(),
+  webinarTitle: String(b.webinarTitle || 'Aspire webinar').trim(),
+  source: source.toUpperCase().replace(/ /g, '_'),
+  consent: b.consent !== false,
+}}];
+""".strip())
+
+    f.phase("Make sure we know who they are",
+            "One record per human, matched on email. Someone who registers\n"
+            "for three webinars is one person with three registrations, not\n"
+            "three contacts — otherwise their history splits and nobody can\n"
+            "see they have been to two events already.", "record")
+
+    person_id = _person_upsert(f, "Normalise")
+
+    f.phase("Record the registration and the consent",
+            "The registration is its own record, linked to the event and the\n"
+            "person, so attendance can be tracked against it later. Consent is\n"
+            "written at the same moment, because a sign-up is the clearest\n"
+            "permission we will ever have and it must be evidenced.", "consent")
+
+    # Registering for an event is consent for that event, but it is not a
+    # licence to re-subscribe someone who previously opted out. Same rule as
+    # the lead form: a prior suppression wins, and a human resolves it.
+    prior = f.twenty("Prior opt-out?", "GET",
+                     "/rest/consentRecords?filter=personId[eq]:"
+                     + q("$('Person exists?').first().json.existingId || "
+                         "$('Create person').first().json.data.createPerson.id")
+                     + "&order_by=effectiveAt[DescNullsLast]&limit=5")
+
+    decide = f.code("Consent status", """
+const rows = $input.first().json.data?.consentRecords || [];
+const SUPPRESSED = ['OPTED_OUT', 'BOUNCED', 'COMPLAINED'];
+const block = rows.find(r => SUPPRESSED.includes(r.status)) || null;
+const d = $('Normalise').first().json;
+return [{ json: { ...d,
+  status: block ? 'PENDING' : (d.consent ? 'OPTED_IN' : 'PENDING'),
+  proof: block
+    ? `webinar registration ${$execution.id}; NOT re-subscribed, prior ${block.status}`
+    : `webinar registration ${$execution.id}`,
+}}];
+""".strip())
+
+    consent = f.twenty("Record consent", "POST", "/rest/consentRecords", {
+        "channel": "EMAIL",
+        "status": "={{ $('Consent status').first().json.status }}",
+        "source": "FORM_SUBMISSION",
+        "effectiveAt": "={{ $now.toUTC().toISO() }}",
+        "proof": "={{ $('Consent status').first().json.proof }}",
+        "personId": person_id,
+    })
+
+    reg = f.twenty("Record registration", "POST", "/rest/webinarRegistrations", {
+        "registeredAt": "={{ $now.toUTC().toISO() }}",
+        "attended": False,
+        "remindersSent": 0,
+        "source": "={{ $('Normalise').first().json.source }}",
+        "personId": person_id,
+        "webinarEventId": "={{ $('Normalise').first().json.webinarId || null }}",
+    })
+
+    f.phase("Confirm it, and count it",
+            "Send the confirmation through the one workflow allowed to send\n"
+            "email, so the consent gate applies here exactly as everywhere\n"
+            "else. Then bump the registration count on the event, which is\n"
+            "what tells us whether a topic is working before it runs.",
+            "notify")
+
+    confirm = f.add("Send confirmation", "n8n-nodes-base.executeWorkflow", {
+        "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
+        "workflowInputs": {"value": {
+            "personId": person_id,
+            "templateKey": "webinar_confirm",
+            "mergeData": "={{ { \"webinarTitle\": $('Normalise').first().json.webinarTitle } }}",
+        }},
+        "options": {},
+    }, version=1.2)
+
+    log = f.log_run("Log run", "EVT Webinar Registration")
+
+    f.chain(trig, norm)
+    f.connect(norm, "Find person")
+    f.chain("Person ready", prior, decide, consent, reg, confirm, log)
+    return f
+
+
+def wf_webinar_reminders() -> Flow:
+    f = Flow("EVT Webinar Reminders",
+             "Hourly. Sends the 24-hour and 1-hour reminders for upcoming "
+             "webinars. Separate from registration because a reminder is driven "
+             "by the clock, not by the sign-up.")
+
+    f.phase("Every hour, look at what is coming up",
+            "Reminders are the difference between a registration and an\n"
+            "attendee. This runs hourly rather than daily because a one-hour\n"
+            "reminder sent at the wrong time of day is worse than none.",
+            "capture")
+
+    trig = f.add("Hourly", "n8n-nodes-base.scheduleTrigger",
+                 {"rule": {"interval": [{"field": "cronExpression",
+                                         "expression": "5 * * * *"}]}}, version=1)
+
+    # Only events in the next 48 hours can be due a reminder, so ask for those.
+    # Unbounded this would read every webinar ever run, once an hour, forever.
+    events = f.twenty("Upcoming webinars", "GET",
+                      "/rest/webinarEvents?filter=scheduledAt[gte]:"
+                      + q("$now.toUTC().toISO()")
+                      + ",scheduledAt[lte]:"
+                      + q("$now.plus({ hours: 48 }).toUTC().toISO()")
+                      + "&limit=200", paginate=True)
+
+    regs = f.twenty("Registrations", "GET",
+                    "/rest/webinarRegistrations?filter=registeredAt[gte]:"
+                    + q("$now.minus({ days: 120 }).toUTC().toISO()")
+                    + "&limit=200", paginate=True)
+
+    f.phase("Work out who is due which reminder",
+            "Two reminders per person per event: one a day ahead, one an hour\n"
+            "ahead. remindersSent on the registration is the counter, so a\n"
+            "restart or a re-run cannot send the same reminder twice.",
+            "decide")
+
+    plan = f.code("Who to remind", PAGE_ALL_JS + """
+
+// A short read here means someone silently never gets reminded, which shows
+// up as a low attendance rate that nobody can explain.
+const events = pageAll('Upcoming webinars', 'webinarEvents');
+const regs   = pageAll('Registrations',     'webinarRegistrations');
+
+const byEvent = new Map();
+for (const e of events) byEvent.set(e.id, e);
+
+const now = Date.now();
+const out = [];
+
+for (const r of regs) {
+  const e = byEvent.get(r.webinarEventId);
+  if (!e || !e.scheduledAt) continue;
+  if (r.attended === true) continue;
+
+  const hoursAway = (new Date(e.scheduledAt).getTime() - now) / 3600000;
+  if (hoursAway <= 0) continue;
+
+  // remindersSent is the idempotency key: 0 -> the 24h note is still owed,
+  // 1 -> only the 1h note remains, 2 -> done. Sending on a time window alone
+  // would re-send every hour the window stayed open.
+  const done = Number(r.remindersSent || 0);
+  let key = null;
+  if (hoursAway <= 1.5 && done < 2) key = 'webinar_reminder_1h';
+  else if (hoursAway <= 24 && done < 1) key = 'webinar_reminder_24h';
+  if (!key) continue;
+
+  out.push({ json: {
+    registrationId: r.id,
+    personId: r.personId,
+    templateKey: key,
+    remindersSent: key === 'webinar_reminder_1h' ? 2 : 1,
+    webinarTitle: e.name || e.topic || 'Aspire webinar',
+    scheduledAt: e.scheduledAt,
+  }});
+}
+return out;
+""".strip())
+
+    batch = f.add("Batch 10", "n8n-nodes-base.splitInBatches",
+                  {"batchSize": 10, "options": {}}, version=3)
+
+    f.phase("Send it and mark it sent",
+            "The counter is written straight after the send. If the send\n"
+            "fails the counter does not move, so the next hourly run tries\n"
+            "again rather than skipping the person entirely.", "notify")
+
+    send = f.add("Send reminder", "n8n-nodes-base.executeWorkflow", {
+        "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
+        "workflowInputs": {"value": {
+            "personId": "={{ $json.personId }}",
+            "templateKey": "={{ $json.templateKey }}",
+            "mergeData": "={{ { \"webinarTitle\": $json.webinarTitle, \"scheduledAt\": $json.scheduledAt } }}",
+        }},
+        "options": {},
+    }, version=1)
+
+    mark = f.twenty("Mark reminded", "PATCH",
+                    "/rest/webinarRegistrations/"
+                    "{{ $('Batch 10').first().json.registrationId }}",
+                    {"remindersSent": "={{ $('Batch 10').first().json.remindersSent }}"})
+
+    pace = f.add("Pace the batches", "n8n-nodes-base.wait",
+                 {"amount": 30, "unit": "seconds"}, version=1.1)
+
+    log = f.log_run("Log run", "EVT Webinar Reminders")
+
+    f.chain(trig, events, regs, plan, batch)
+    f.connect(batch, log, out=0)
+    f.connect(batch, send, out=1)
+    f.chain(send, mark, pace)
+    f.connect(pace, batch)
+    return f
+
+
+def wf_post_webinar() -> Flow:
+    f = Flow("EVT Post-Webinar Follow-up",
+             "Daily. After an event: the recording to the people who missed it, "
+             "a short survey to the people who came, and the event marked "
+             "complete with its attendance numbers.")
+
+    f.phase("The morning after an event",
+            "Attendance is the strongest enrolment signal this business has,\n"
+            "and GHL held it only as a tag. Splitting attended from no-show\n"
+            "is what makes the next message worth sending: a replay to one\n"
+            "group, a survey to the other.", "capture")
+
+    trig = f.add("Daily 11:00 UTC", "n8n-nodes-base.scheduleTrigger",
+                 {"rule": {"interval": [{"field": "cronExpression",
+                                         "expression": "0 11 * * *"}]}}, version=1)
+
+    events = f.twenty("Finished webinars", "GET",
+                      "/rest/webinarEvents?filter=scheduledAt[gte]:"
+                      + q("$now.minus({ days: 3 }).toUTC().toISO()")
+                      + ",scheduledAt[lte]:"
+                      + q("$now.toUTC().toISO()")
+                      + "&limit=200", paginate=True)
+
+    regs = f.twenty("Registrations", "GET",
+                    "/rest/webinarRegistrations?filter=registeredAt[gte]:"
+                    + q("$now.minus({ days: 120 }).toUTC().toISO()")
+                    + "&limit=200", paginate=True)
+
+    f.phase("Replay to the absent, survey to the present",
+            "One message per person per event, decided by the attended flag.\n"
+            "The follow-up only goes out once: a second pass would find the\n"
+            "same event again the next morning, so the event is marked\n"
+            "COMPLETED as part of the same run.", "decide")
+
+    plan = f.code("Split attended from no-show", PAGE_ALL_JS + """
+
+const events = pageAll('Finished webinars', 'webinarEvents');
+const regs   = pageAll('Registrations',     'webinarRegistrations');
+
+const byEvent = new Map();
+for (const r of regs) {
+  if (!r.webinarEventId) continue;
+  if (!byEvent.has(r.webinarEventId)) byEvent.set(r.webinarEventId, []);
+  byEvent.get(r.webinarEventId).push(r);
+}
+
+const out = [];
+for (const e of events) {
+  // COMPLETED is the guard against sending the same follow-up on consecutive
+  // mornings — the three-day window above deliberately overlaps so a failed
+  // run gets another chance, and without this flag that retry becomes a
+  // duplicate send to everyone who already had one.
+  if (e.status === 'COMPLETED') continue;
+  const rows = byEvent.get(e.id) || [];
+  const attended = rows.filter(r => r.attended === true);
+
+  for (const r of rows) {
+    out.push({ json: {
+      personId: r.personId,
+      templateKey: r.attended === true ? 'webinar_survey' : 'webinar_replay',
+      webinarTitle: e.name || e.topic || 'Aspire webinar',
+      eventId: e.id,
+      attendeeCount: attended.length,
+      registrationCount: rows.length,
+    }});
+  }
+}
+return out;
+""".strip())
+
+    batch = f.add("Batch 10", "n8n-nodes-base.splitInBatches",
+                  {"batchSize": 10, "options": {}}, version=3)
+
+    f.phase("Send, then close the event",
+            "Numbers are written back onto the event so 'did that topic\n"
+            "work' is a saved view rather than a spreadsheet someone builds\n"
+            "by hand after the fact.", "notify")
+
+    send = f.add("Send follow-up", "n8n-nodes-base.executeWorkflow", {
+        "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
+        "workflowInputs": {"value": {
+            "personId": "={{ $json.personId }}",
+            "templateKey": "={{ $json.templateKey }}",
+            "mergeData": "={{ { \"webinarTitle\": $json.webinarTitle } }}",
+        }},
+        "options": {},
+    }, version=1)
+
+    pace = f.add("Pace the batches", "n8n-nodes-base.wait",
+                 {"amount": 30, "unit": "seconds"}, version=1.1)
+
+    close = f.twenty("Close the event", "PATCH",
+                     "/rest/webinarEvents/"
+                     "{{ $('Split attended from no-show').first().json.eventId }}", {
+                         "status": "COMPLETED",
+                         "attendeeCount":
+                             "={{ $('Split attended from no-show').first().json.attendeeCount }}",
+                         "registrationCount":
+                             "={{ $('Split attended from no-show').first().json.registrationCount }}",
+                     })
+
+    log = f.log_run("Log run", "EVT Post-Webinar Follow-up")
+
+    f.chain(trig, events, regs, plan, batch)
+    f.connect(batch, close, out=0)
+    f.connect(close, log)
+    f.connect(batch, send, out=1)
+    f.chain(send, pace)
+    f.connect(pace, batch)
+    return f
+
+
+def wf_enrolment() -> Flow:
+    f = Flow("ENR Bootcamp Enrolment",
+             "Public webhook for bootcamp enrolment. Creates the enrolment, "
+             "issues the payment link for the chosen tier and raises a task. "
+             "This is the revenue path behind GHL's Bootcamp Payment Automation.")
+
+    f.phase("Someone wants a place on a bootcamp",
+            "Payment happens off-platform on a FastPayDirect link — one per\n"
+            "price tier. The CRM's job is to know which link was sent, to\n"
+            "whom, for which cohort, and whether it was ever paid. Without\n"
+            "that, an unpaid enrolment is invisible until the course starts.",
+            "capture")
+
+    trig = f.add("Enrolment request", "n8n-nodes-base.webhook", {
+        "httpMethod": "POST",
+        "path": ENROL_HOOK_PATH,
+        "responseMode": "lastNode",
+        "options": {},
+    }, version=2)
+
+    norm = f.code("Normalise", """
+// Tiers are the six FastPayDirect links found in GHL. An unknown tier must
+// not fall through to a default: sending the wrong payment link charges the
+// wrong amount, and that is a refund and an apology, not a bug report.
+const TIERS = ['BRONZE','SILVER','GOLD','PLATINUM','DIAMOND','TITANIUM'];
+const b = $input.first().json.body || {};
+const email = String(b.email || '').trim().toLowerCase();
+if (!email.includes('@')) {
+  throw new Error(`enrolment without a usable email: ${JSON.stringify(b).slice(0, 200)}`);
+}
+const tier = String(b.tier || '').trim().toUpperCase();
+if (!TIERS.includes(tier)) {
+  throw new Error(`unknown enrolment tier "${b.tier}" — expected one of ${TIERS.join(', ')}`);
+}
+
+// The link per tier is configuration, not code: prices and providers change
+// more often than workflows do. Missing config fails loudly here rather than
+// mailing somebody an empty link.
+const links = {};
+for (const pair of String($env.ENROL_PAYMENT_LINKS || '').split(',')) {
+  const [k, v] = pair.split('=');
+  if (k && v) links[k.trim().toUpperCase()] = v.trim();
+}
+const paymentLinkUrl = links[tier] || '';
+if (!paymentLinkUrl) {
+  throw new Error(`no payment link configured for tier ${tier}. Set ENROL_PAYMENT_LINKS in infra/.env`);
+}
+
+return [{ json: {
+  email,
+  firstName: String(b.firstName || b.first_name || '').trim(),
+  lastName: String(b.lastName || b.last_name || '').trim(),
+  tier,
+  paymentLinkUrl,
+  cohortId: String(b.cohortId || '').trim(),
+  programName: String(b.programName || 'Aspire bootcamp').trim(),
+  amount: Number(b.amount || 0),
+}}];
+""".strip())
+
+    f.phase("Find or create the person",
+            "Students usually sign up with a personal address, and the same\n"
+            "person often registers for a webinar first. Matching on email\n"
+            "keeps the webinar history and the enrolment on one record.",
+            "record")
+
+    person_id = _person_upsert(f, "Normalise")
+
+    f.phase("Create the enrolment and send the link",
+            "The enrolment is created as PAYMENT_SENT, not PAID. Nothing here\n"
+            "confirms money arrived — the payment provider does that, and\n"
+            "until it does, this record is what the chase runs against.",
+            "record")
+
+    enrol = f.twenty("Create enrolment", "POST", "/rest/enrollments", {
+        "tier": "={{ $('Normalise').first().json.tier }}",
+        "status": "PAYMENT_SENT",
+        "amount": {"amountMicros": "={{ $('Normalise').first().json.amount * 1000000 }}",
+                   "currencyCode": "USD"},
+        "paymentLinkUrl": {"primaryLinkUrl": "={{ $('Normalise').first().json.paymentLinkUrl }}"},
+        "enrolledAt": "={{ $now.toUTC().toISO() }}",
+        "personId": person_id,
+        "cohortId": "={{ $('Normalise').first().json.cohortId || null }}",
+    })
+
+    send = f.add("Send payment link", "n8n-nodes-base.executeWorkflow", {
+        "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
+        "workflowInputs": {"value": {
+            "personId": person_id,
+            "templateKey": "enrol_payment_link",
+            "mergeData": "={{ { \"programName\": $('Normalise').first().json.programName, "
+                         "\"tier\": $('Normalise').first().json.tier, "
+                         "\"paymentLinkUrl\": $('Normalise').first().json.paymentLinkUrl } }}",
+        }},
+        "options": {},
+    }, version=1.2)
+
+    f.phase("Make sure a human knows",
+            "An enrolment is the most valuable thing that happens in this\n"
+            "funnel. It gets a task with a due date and a message to the\n"
+            "sales channel, so it cannot sit unnoticed while the cohort\n"
+            "fills up.", "notify")
+
+    task = f.twenty("Create task", "POST", "/rest/tasks", {
+        "title": "={{ 'Enrolment: ' + $('Normalise').first().json.firstName + ' ' + "
+                 "$('Normalise').first().json.lastName + ' (' + "
+                 "$('Normalise').first().json.tier + ')' }}",
+        "status": "TODO",
+        "dueAt": "={{ $now.plus({ days: 2 }).toUTC().toISO() }}",
+        "bodyV2": {"markdown": "={{ 'Payment link sent for ' + "
+                               "$('Normalise').first().json.programName + "
+                               "'. Confirm payment before the cohort starts.' }}"},
+    })
+
+    notify = f.notify("Notify sales", SALES_CHANNEL, hook=SALES_HOOK,
+                      text="=:mortar_board: *Bootcamp enrolment — "
+                           "{{ $('Normalise').first().json.tier }}*\n"
+                           "*{{ $('Normalise').first().json.firstName }} "
+                           "{{ $('Normalise').first().json.lastName }}* — "
+                           "{{ $('Normalise').first().json.programName }}\n"
+                           "{{ $('Normalise').first().json.email }}")
+
+    log = f.log_run("Log run", "ENR Bootcamp Enrolment")
+
+    f.chain(trig, norm)
+    f.connect(norm, "Find person")
+    f.chain("Person ready", enrol, send, task, notify, log)
+    return f
+
+
+def wf_cohort_ops() -> Flow:
+    f = Flow("ENR Cohort Operations",
+             "Daily. Chases unpaid enrolments, sends joining instructions "
+             "before a cohort starts, and keeps seat counts honest.")
+
+    f.phase("Every morning, look after the cohorts",
+            "Three things go wrong quietly: an enrolment is never paid, a\n"
+            "student never gets joining instructions, and the seat count on\n"
+            "a cohort drifts from reality. All three surface only when it is\n"
+            "too late to fix them, so they are checked daily.", "capture")
+
+    trig = f.add("Daily 08:00 UTC", "n8n-nodes-base.scheduleTrigger",
+                 {"rule": {"interval": [{"field": "cronExpression",
+                                         "expression": "0 8 * * *"}]}}, version=1)
+
+    cohorts = f.twenty("Cohorts", "GET",
+                       "/rest/cohorts?filter=startDate[gte]:"
+                       + q("$now.minus({ days: 30 }).toUTC().toISODate()")
+                       + "&limit=200", paginate=True)
+
+    enrols = f.twenty("Enrolments", "GET",
+                      "/rest/enrollments?filter=status[in]:"
+                      "[INTERESTED,REGISTERED,PAYMENT_SENT,PAID]&limit=200",
+                      paginate=True)
+
+    f.phase("Decide what each enrolment needs",
+            "An unpaid enrolment gets a chase, at most every third day — a\n"
+            "daily chase reads as harassment and gets marked as spam. A paid\n"
+            "one gets joining instructions three days before the cohort\n"
+            "starts. Nothing gets both on the same day.", "decide")
+
+    plan = f.code("What needs doing", PAGE_ALL_JS + """
+
+const cohorts = pageAll('Cohorts',    'cohorts');
+const enrols  = pageAll('Enrolments', 'enrollments');
+
+const byCohort = new Map();
+for (const c of cohorts) byCohort.set(c.id, c);
+
+const CHASE_EVERY_DAYS = 3;
+const CHASE_UNTIL_DAYS = 21;   // stop chasing three weeks after enrolling
+const JOINING_LEAD_DAYS = 3;
+
+const now = Date.now();
+const seats = new Map();
+const out = [];
+
+for (const e of enrols) {
+  const c = e.cohortId ? byCohort.get(e.cohortId) : null;
+
+  if (e.status === 'PAID' || e.status === 'ATTENDING') {
+    seats.set(e.cohortId, (seats.get(e.cohortId) || 0) + 1);
+  }
+
+  if (!c || !c.startDate) continue;
+  const startsInDays = Math.ceil((new Date(c.startDate).getTime() - now) / 86400000);
+
+  if (e.status === 'PAYMENT_SENT') {
+    if (startsInDays < 0) continue;                 // cohort already started
+    const age = Math.floor((now - new Date(e.enrolledAt || e.createdAt).getTime()) / 86400000);
+    if (age > CHASE_UNTIL_DAYS) continue;
+    const lastChase = e.paymentChasedAt ? new Date(e.paymentChasedAt).getTime() : 0;
+    const sinceChase = (now - lastChase) / 86400000;
+    if (lastChase && sinceChase < CHASE_EVERY_DAYS) continue;
+    out.push({ json: {
+      enrollmentId: e.id, personId: e.personId, kind: 'chase',
+      templateKey: 'enrol_payment_chase',
+      programName: c.name || 'your Aspire bootcamp',
+      tier: e.tier || '', startDate: String(c.startDate).slice(0, 10),
+      paymentLinkUrl: e.paymentLinkUrl?.primaryLinkUrl || '',
+    }});
+    continue;
+  }
+
+  if (e.status === 'PAID' && startsInDays >= 0 && startsInDays <= JOINING_LEAD_DAYS) {
+    out.push({ json: {
+      enrollmentId: e.id, personId: e.personId, kind: 'joining',
+      templateKey: 'cohort_joining',
+      programName: c.name || 'your Aspire bootcamp',
+      startDate: String(c.startDate).slice(0, 10),
+      location: c.location || 'Online',
+    }});
+  }
+}
+
+// Seat counts are recomputed from enrolments rather than incremented, so a
+// failed run or a manual edit cannot leave them permanently wrong.
+const seatRows = [];
+for (const c of cohorts) {
+  const filled = seats.get(c.id) || 0;
+  if (Number(c.seatsFilled || 0) !== filled) {
+    seatRows.push({ cohortId: c.id, seatsFilled: filled });
+  }
+}
+if (seatRows.length) out.push({ json: { kind: 'seats', seatRows } });
+
+return out;
+""".strip())
+
+    route = f.add("Chase, join, or count", "n8n-nodes-base.switch", {
+        "rules": {"values": [
+            {"conditions": {"options": {"caseSensitive": True,
+                                        "typeValidation": "loose"},
+                            "conditions": [{"leftValue": "={{ $json.kind }}",
+                                            "rightValue": "chase",
+                                            "operator": {"type": "string",
+                                                         "operation": "equals"}}],
+                            "combinator": "and"}},
+            {"conditions": {"options": {"caseSensitive": True,
+                                        "typeValidation": "loose"},
+                            "conditions": [{"leftValue": "={{ $json.kind }}",
+                                            "rightValue": "joining",
+                                            "operator": {"type": "string",
+                                                         "operation": "equals"}}],
+                            "combinator": "and"}},
+            {"conditions": {"options": {"caseSensitive": True,
+                                        "typeValidation": "loose"},
+                            "conditions": [{"leftValue": "={{ $json.kind }}",
+                                            "rightValue": "seats",
+                                            "operator": {"type": "string",
+                                                         "operation": "equals"}}],
+                            "combinator": "and"}},
+        ]},
+        "options": {},
+    }, version=3)
+
+    f.phase("Chase, welcome, reconcile",
+            "Every message goes through the send workflow, so a student who\n"
+            "opted out is refused here like anywhere else. Seat counts are\n"
+            "rewritten from what the enrolments actually say.", "notify")
+
+    with f.fan():
+        chase = f.add("Send chase", "n8n-nodes-base.executeWorkflow", {
+            "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
+            "workflowInputs": {"value": {
+                "personId": "={{ $json.personId }}",
+                "templateKey": "enrol_payment_chase",
+                "mergeData": "={{ { \"programName\": $json.programName, "
+                             "\"tier\": $json.tier, \"startDate\": $json.startDate, "
+                             "\"paymentLinkUrl\": $json.paymentLinkUrl } }}",
+            }},
+            "options": {},
+        }, version=1)
+
+        joining = f.add("Send joining details", "n8n-nodes-base.executeWorkflow", {
+            "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
+            "workflowInputs": {"value": {
+                "personId": "={{ $json.personId }}",
+                "templateKey": "cohort_joining",
+                "mergeData": "={{ { \"programName\": $json.programName, "
+                             "\"startDate\": $json.startDate, "
+                             "\"location\": $json.location, "
+                             "\"joiningDetails\": \"Details and materials are in your student portal.\" } }}",
+            }},
+            "options": {},
+        }, version=1, row=1)
+
+        seats = f.code("Reconcile seats", """
+// One item per cohort whose count is wrong, for the PATCH that follows.
+return ($input.first().json.seatRows || []).map(r => ({ json: r }));
+""".strip(), row=2)
+
+    # Stamp the chase so the next run can respect CHASE_EVERY_DAYS. Without
+    # this the enrolment looks never-chased every morning and the student is
+    # mailed daily until they pay or report us.
+    stamp = f.twenty("Stamp the chase", "PATCH",
+                     "/rest/enrollments/{{ $('Chase, join, or count').first().json.enrollmentId }}",
+                     {"paymentChasedAt": "={{ $now.toUTC().toISO() }}"})
+
+    fix_seats = f.twenty("Write seat count", "PATCH",
+                         "/rest/cohorts/{{ $json.cohortId }}",
+                         {"seatsFilled": "={{ $json.seatsFilled }}"}, row=2)
+
+    log = f.log_run("Log run", "ENR Cohort Operations")
+
+    f.chain(trig, cohorts, enrols, plan, route)
+    f.connect(route, chase, out=0)
+    f.connect(route, joining, out=1)
+    f.connect(route, seats, out=2)
+    f.chain(chase, stamp)
+    f.connect(stamp, log)
+    f.connect(joining, log)
+    f.chain(seats, fix_seats)
+    f.connect(fix_seats, log)
+    return f
+
+
+def wf_appointments() -> Flow:
+    f = Flow("BOOK Trainer Appointment",
+             "Daily. Reminds people about tomorrow's trainer meetings and "
+             "flags the ones nobody turned up to. Covers the eight calendars "
+             "Aspire books against.")
+
+    f.phase("Tomorrow's meetings, and yesterday's no-shows",
+            "Aspire books consultations, Splunk demos and career calls across\n"
+            "eight calendars. A reminder the day before is the cheapest way to\n"
+            "cut no-shows; catching the ones that were missed is how a lead\n"
+            "gets a second chance instead of going quiet.", "capture")
+
+    trig = f.add("Daily 10:00 UTC", "n8n-nodes-base.scheduleTrigger",
+                 {"rule": {"interval": [{"field": "cronExpression",
+                                         "expression": "0 10 * * *"}]}}, version=1)
+
+    soon = f.twenty("Tomorrow's appointments", "GET",
+                    "/rest/appointments?filter=status[in]:[BOOKED,CONFIRMED],"
+                    "scheduledAt[gte]:" + q("$now.plus({ hours: 12 }).toUTC().toISO()")
+                    + ",scheduledAt[lte]:" + q("$now.plus({ hours: 36 }).toUTC().toISO()")
+                    + "&limit=200", paginate=True)
+
+    past = f.twenty("Past due appointments", "GET",
+                    "/rest/appointments?filter=status[in]:[BOOKED,CONFIRMED],"
+                    "scheduledAt[lte]:" + q("$now.minus({ hours: 4 }).toUTC().toISO()")
+                    + ",scheduledAt[gte]:" + q("$now.minus({ days: 7 }).toUTC().toISO()")
+                    + "&limit=200", paginate=True)
+
+    f.phase("Decide who gets a nudge and what got missed",
+            "An appointment still marked booked hours after it should have\n"
+            "finished was almost certainly a no-show. Marking it is what lets\n"
+            "anyone ask how often it happens, per calendar.", "decide")
+
+    plan = f.code("Reminders and no-shows", PAGE_ALL_JS + """
+
+const soon = pageAll("Tomorrow's appointments", 'appointments');
+const past = pageAll('Past due appointments',   'appointments');
+
+const out = [];
+for (const a of soon) {
+  if (!a.personId) continue;
+  out.push({ json: {
+    kind: 'remind', appointmentId: a.id, personId: a.personId,
+    appointmentType: a.appointmentType || 'meeting',
+    scheduledAt: a.scheduledAt,
+    meetingUrl: a.meetingUrl?.primaryLinkUrl || '',
+  }});
+}
+for (const a of past) {
+  out.push({ json: { kind: 'noshow', appointmentId: a.id, personId: a.personId || null,
+                     scheduledAt: a.scheduledAt } });
+}
+return out;
+""".strip())
+
+    route = f.iff("Reminder or no-show?", "={{ $json.kind }}", "equals", "remind")
+
+    f.phase("Remind, or record the miss",
+            "The reminder finally uses the template that has sat unused since\n"
+            "the first build. A no-show becomes a task, because someone who\n"
+            "booked and did not arrive is still interested — they just need\n"
+            "rescheduling.", "notify")
+
+    with f.fan():
+        remind = f.add("Send reminder", "n8n-nodes-base.executeWorkflow", {
+            "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
+            "workflowInputs": {"value": {
+                "personId": "={{ $json.personId }}",
+                "templateKey": "appt_reminder_24h",
+                "mergeData": "={{ { \"appointmentType\": $json.appointmentType, "
+                             "\"scheduledAt\": $json.scheduledAt, "
+                             "\"meetingUrl\": $json.meetingUrl } }}",
+            }},
+            "options": {},
+        }, version=1)
+
+        mark = f.twenty("Mark no-show", "PATCH",
+                        "/rest/appointments/{{ $json.appointmentId }}",
+                        {"status": "NO_SHOW"}, row=1)
+
+    reschedule = f.twenty("Task: reschedule", "POST", "/rest/tasks", {
+        "title": "={{ 'No-show — reschedule (' + "
+                 "$('Reminders and no-shows').first().json.scheduledAt + ')' }}",
+        "status": "TODO",
+        "dueAt": "={{ $now.plus({ days: 1 }).toUTC().toISO() }}",
+        "bodyV2": {"markdown": "They booked and did not attend. Worth one call before letting it go."},
+    }, row=1)
+
+    log = f.log_run("Log run", "BOOK Trainer Appointment")
+
+    f.chain(trig, soon, past, plan, route)
+    f.connect(route, remind, out=0)
+    f.connect(route, mark, out=1)
+    f.connect(remind, log)
+    f.chain(mark, reschedule)
+    f.connect(reschedule, log)
+    return f
+
+
+def wf_frontdesk_ai() -> Flow:
+    f = Flow("AI FrontDesk Handover",
+             "Webhook for the FrontDesk AI receptionist. Stores each "
+             "conversation as its own record and escalates to a human when the "
+             "agent asks for one.")
+
+    f.phase("The AI receptionist finishes a conversation",
+            "GHL kept this in seven fdai_ fields on the contact, so every new\n"
+            "conversation overwrote the last and no history survived. Here\n"
+            "each conversation is its own record, which is the only way to\n"
+            "ask whether the agent is getting better or worse.", "capture")
+
+    trig = f.add("Conversation ended", "n8n-nodes-base.webhook", {
+        "httpMethod": "POST",
+        "path": FDAI_HOOK_PATH,
+        "responseMode": "lastNode",
+        "options": {},
+    }, version=2)
+
+    norm = f.code("Normalise", """
+// Field names mirror GHL's fdai_* keys so the agent does not have to change.
+const b = $input.first().json.body || {};
+const email = String(b.email || b.fdai_email || '').trim().toLowerCase();
+if (!email.includes('@')) {
+  throw new Error(`FrontDesk AI payload without a usable email: ${JSON.stringify(b).slice(0, 200)}`);
+}
+const nps = Number(b.fdai_nps ?? b.nps);
+const handoverReason = String(b.fdai_handover_reason || b.handoverReason || '').trim();
+
+return [{ json: {
+  email,
+  firstName: String(b.firstName || '').trim(),
+  lastName: String(b.lastName || '').trim(),
+  intent: String(b.fdai_intent || b.intent || '').slice(0, 500),
+  summary: String(b.fdai_convo_summary || b.summary || '').slice(0, 5000),
+  handoverReason,
+  appointmentInterest: String(b.fdai_appointment_interest || '').slice(0, 500),
+  reviewIntent: String(b.fdai_review_intent || '').slice(0, 500),
+  pageUrl: String(b.fdai_page_url || b.pageUrl || '').slice(0, 500),
+  nps: Number.isFinite(nps) ? nps : null,
+  handedOver: Boolean(handoverReason),
+}}];
+""".strip())
+
+    f.phase("Attach it to a person",
+            "Same email match as everywhere else, so an AI conversation and a\n"
+            "webinar registration for the same address land on one record.",
+            "record")
+
+    person_id = _person_upsert(f, "Normalise")
+
+    store = f.twenty("Store conversation", "POST", "/rest/aiConversations", {
+        "intent": "={{ $('Normalise').first().json.intent }}",
+        "summary": "={{ $('Normalise').first().json.summary }}",
+        "handoverReason": "={{ $('Normalise').first().json.handoverReason }}",
+        "appointmentInterest": "={{ $('Normalise').first().json.appointmentInterest }}",
+        "reviewIntent": "={{ $('Normalise').first().json.reviewIntent }}",
+        "nps": "={{ $('Normalise').first().json.nps }}",
+        "pageUrl": {"primaryLinkUrl": "={{ $('Normalise').first().json.pageUrl }}"},
+        "occurredAt": "={{ $now.toUTC().toISO() }}",
+        "handedOver": "={{ $('Normalise').first().json.handedOver }}",
+        "personId": person_id,
+    })
+
+    f.phase("Escalate only when the agent asked",
+            "The agent hands over when it cannot help. That is the moment a\n"
+            "person is most likely to be lost, so it becomes a task and a\n"
+            "message — not a row someone might read later.", "decide")
+
+    gate = f.iff("Handed over?",
+                 "={{ $('Normalise').first().json.handedOver }}", "equals", "true")
+
+    with f.fan():
+        task = f.twenty("Task: pick this up", "POST", "/rest/tasks", {
+            "title": "={{ 'AI handover: ' + $('Normalise').first().json.intent }}",
+            "status": "TODO",
+            "dueAt": "={{ $now.plus({ hours: 4 }).toUTC().toISO() }}",
+            "bodyV2": {"markdown": "={{ $('Normalise').first().json.summary }}"},
+        })
+        quiet = f.noop("No handover needed", row=1)
+
+    notify = f.notify("Notify sales", SALES_CHANNEL, hook=SALES_HOOK,
+                      text="=:robot_face: *FrontDesk AI handed over a conversation*\n"
+                           "{{ $('Normalise').first().json.email }} — "
+                           "{{ $('Normalise').first().json.handoverReason }}\n"
+                           "Intent: {{ $('Normalise').first().json.intent }}")
+
+    log = f.log_run("Log run", "AI FrontDesk Handover")
+
+    f.chain(trig, norm)
+    f.connect(norm, "Find person")
+    f.chain("Person ready", store, gate)
+    f.connect(gate, task, out=0)
+    f.connect(gate, quiet, out=1)
+    f.chain(task, notify)
+    f.connect(notify, log)
+    f.connect(quiet, log)
+    return f
+
+
+def wf_tag_sync() -> Flow:
+    f = Flow("SEG Tag Sync",
+             "Daily. Keeps the crmTag catalogue in step with the tags actually "
+             "in use and flags the ones that should become fields or be "
+             "dropped. GHL's 57 tags were carrying state no object owned.")
+
+    f.phase("Tags are a data model nobody designed",
+            "GHL accumulated 57 tags doing four different jobs at once:\n"
+            "lifecycle state, lead source, cohort membership and audience\n"
+            "lists. Migrated as-is they become 57 unexplained labels, so each\n"
+            "one is classified and given a recommended action.", "capture")
+
+    trig = f.add("Daily 05:00 UTC", "n8n-nodes-base.scheduleTrigger",
+                 {"rule": {"interval": [{"field": "cronExpression",
+                                         "expression": "0 5 * * *"}]}}, version=1)
+
+    tags = f.twenty("Existing tags", "GET", "/rest/crmTags?limit=200",
+                    paginate=True)
+
+    f.phase("Classify each tag and say what to do with it",
+            "A cohort tag such as 'registered splunk bootcamp jan-2026'\n"
+            "should become a cohort record, not a label. A lifecycle tag such\n"
+            "as 'hot lead' is already an opportunity stage. Saying so in the\n"
+            "record is what stops the same argument happening twice.",
+            "decide")
+
+    classify = f.code("Classify", PAGE_ALL_JS + """
+
+const tags = pageAll('Existing tags', 'crmTags');
+
+// Patterns come from reading all 57 tags in the account, not from guesswork.
+const RULES = [
+  { re: /^(new|new lead|cold|warm|hot lead|qualified|prospect|follow up|important|urgent|high priority|vip client)$/i,
+    category: 'LIFECYCLE',  action: 'DROP',
+    why: 'Opportunity stage already carries this. A tag that duplicates a field goes stale on one of the two.' },
+  { re: /(registered|bootcamp|workshop_|soc_|_may|jan-|cohort)/i,
+    category: 'SEGMENT',    action: 'CONVERT_TO_FIELD',
+    why: 'This is cohort membership. It belongs on a cohort record, where seats and dates live.' },
+  { re: /(webinar|watched training)/i,
+    category: 'INTEREST',   action: 'CONVERT_TO_FIELD',
+    why: 'Attendance is a webinarRegistration field, and the strongest enrolment signal we have.' },
+  { re: /(fb-ads|mass media|yelp|name via lookup|mannual|manual)/i,
+    category: 'SOURCE',     action: 'KEEP_AS_TAG',
+    why: 'Acquisition source. Low cardinality, no lifecycle meaning — a tag is the right shape.' },
+  { re: /(bd-|ba-|bank|ngo|ministry|police|government|it company|student|university|careerchanger|dubai)/i,
+    category: 'SEGMENT',    action: 'KEEP_AS_TAG',
+    why: 'Audience list used for targeting. Keep, but it must never gate consent.' },
+  { re: /(aspir|internal|spam likely|auto contacted|auto touched|couldn)/i,
+    category: 'LEGACY',     action: 'DROP',
+    why: 'Operational residue from GHL. Nothing in Twenty reads it.' },
+];
+
+const out = [];
+for (const t of tags) {
+  const name = String(t.name || t.ghlTagName || '');
+  if (!name) continue;
+  const rule = RULES.find(r => r.re.test(name));
+  const category = rule ? rule.category : 'SEGMENT';
+  const action = rule ? rule.action : 'KEEP_AS_TAG';
+  const why = rule ? rule.why : 'Unmatched by any rule — classify by hand before migrating.';
+
+  // Only write when the classification would actually change something.
+  // Rewriting identical values every morning makes the audit log useless for
+  // spotting the day a tag's meaning was reconsidered.
+  if (t.category === category && t.migrationAction === action) continue;
+  out.push({ json: { id: t.id, name, category, migrationAction: action, why } });
+}
+return out;
+""".strip())
+
+    batch = f.add("Batch 20", "n8n-nodes-base.splitInBatches",
+                  {"batchSize": 20, "options": {}}, version=3)
+
+    f.phase("Write the decision down",
+            "The classification lands on the tag record itself, so the\n"
+            "migration decision travels with the thing it is about instead of\n"
+            "living in someone's notes.", "record")
+
+    write = f.twenty("Save classification", "PATCH",
+                     "/rest/crmTags/{{ $json.id }}", {
+                         "category": "={{ $json.category }}",
+                         "migrationAction": "={{ $json.migrationAction }}",
+                     })
+
+    log = f.log_run("Log run", "SEG Tag Sync")
+
+    f.chain(trig, tags, classify, batch)
+    f.connect(batch, log, out=0)
+    f.connect(batch, write, out=1)
+    f.connect(write, batch)
+    return f
+
+
 BUILDERS = [wf_error_handler, wf_send_email, wf_lead_form,
             wf_tracked_link, wf_renewal, wf_sweeps,
             wf_inbound_events, wf_nurture, wf_health_check,
+            # The training funnel, from the GHL pull.
+            wf_webinar_registration, wf_webinar_reminders, wf_post_webinar,
+            wf_enrolment, wf_cohort_ops, wf_appointments,
+            wf_frontdesk_ai, wf_tag_sync,
             wf_alert_sink, wf_failure_probe]
 
 
