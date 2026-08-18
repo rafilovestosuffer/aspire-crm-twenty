@@ -13,17 +13,24 @@ So this does not check that workflows exist. It submits the real form, follows
 the real redirect, triggers the real schedules, and then asks Twenty whether the
 records it was supposed to create are there.
 
-Requires the dev profile: Mailpit catches the mail, the alert sink catches the
-chat webhook. Nothing leaves the host.
+Requires the dev profile by default: Mailpit catches the mail, the alert sink
+catches the chat webhook. Nothing leaves the host.
 
     ./infra/up.sh
     python scripts/n8n_credentials.py
     python scripts/n8n_deploy.py --dev
     python scripts/prove_workflows.py
 
+Against a real relay (Gmail, Workspace), Mailpit is not in the path. The suite
+refuses to run unless --live-email (or LIVE_DEMO_EMAIL) is set *and* sits on
+LIVE_MAIL_ALLOWLIST — otherwise a rebuild would SMTP the fake proof domains.
+
+    python scripts/prove_workflows.py --live-email you@gmail.com
+
 Usage:
     python scripts/prove_workflows.py
     python scripts/prove_workflows.py --only consent
+    python scripts/prove_workflows.py --live-email you@gmail.com
 """
 
 from __future__ import annotations
@@ -51,7 +58,8 @@ def read_env() -> dict[str, str]:
                 if line and not line.startswith("#") and "=" in line:
                     k, _, v = line.partition("=")
                     env.setdefault(k.strip(), v.strip().strip("\"'"))
-    for k in ("TWENTY_BASE_URL", "TWENTY_API_KEY", "N8N_BASE_URL", "N8N_API_KEY"):
+    for k in ("TWENTY_BASE_URL", "TWENTY_API_KEY", "N8N_BASE_URL", "N8N_API_KEY",
+              "LIVE_DEMO_EMAIL", "LIVE_MAIL_ALLOWLIST", "EMAIL_SMTP_HOST"):
         if os.environ.get(k):
             env[k] = os.environ[k]
     return env
@@ -63,6 +71,60 @@ TWENTY_KEY = ENV.get("TWENTY_API_KEY", "")
 N8N = ENV.get("N8N_BASE_URL", "http://localhost:5678")
 N8N_KEY = ENV.get("N8N_API_KEY", "")
 MAILPIT = ENV.get("MAILPIT_URL", "http://localhost:8025")
+
+# Catcher hosts: n8n_credentials.py defaults EMAIL_SMTP_HOST to mailpit when
+# unset. Anything else is a real relay and must not receive proof domains.
+CATCHER_HOSTS = frozenset({"", "mailpit", "localhost", "127.0.0.1"})
+LIVE_EMAIL = ""
+
+
+def smtp_is_live(env: dict | None = None) -> bool:
+    host = ((env or ENV).get("EMAIL_SMTP_HOST") or "").strip().lower()
+    return host not in CATCHER_HOSTS
+
+
+def parse_allowlist(env: dict | None = None) -> list[str]:
+    raw = (env or ENV).get("LIVE_MAIL_ALLOWLIST") or ""
+    return [a.strip().lower() for a in raw.split(",") if a.strip()]
+
+
+def require_live_safety(live_email: str, env: dict | None = None) -> str:
+    """Refuse to prove against a real relay unless the recipient is allowlisted.
+
+    An empty allowlist means VEND Send Email will SMTP anyone who consented —
+    including the fake proof.{tag}@northgate-{tag}.com addresses this suite
+    invents. That is the defect a live Gmail .env would hit on rebuild.sh.
+    """
+    env = env or ENV
+    email = (live_email or env.get("LIVE_DEMO_EMAIL") or "").strip()
+    if not email or "@" not in email:
+        print(
+            "ERROR: EMAIL_SMTP_HOST is a real relay "
+            f"({env.get('EMAIL_SMTP_HOST')}) but no live recipient was given.\n"
+            "       This suite submits the form as proof.<tag>@northgate-<tag>.com\n"
+            "       — those are not real, and Gmail would still try to deliver.\n"
+            "       Pass --live-email you@gmail.com (and set LIVE_MAIL_ALLOWLIST\n"
+            "       to the same address), or clear EMAIL_SMTP_* to use Mailpit.",
+            file=sys.stderr)
+        sys.exit(2)
+    allow = parse_allowlist(env)
+    if not allow:
+        print(
+            "ERROR: EMAIL_SMTP_HOST is a real relay but LIVE_MAIL_ALLOWLIST is "
+            "empty.\n       Without it, seed .example.com addresses and proof "
+            "domains are eligible to send.\n       Set LIVE_MAIL_ALLOWLIST="
+            f"{email} in infra/.env and recreate n8n so the env var reaches "
+            "the container.",
+            file=sys.stderr)
+        sys.exit(2)
+    if email.lower() not in allow:
+        print(
+            f"ERROR: {email} is not on LIVE_MAIL_ALLOWLIST ({', '.join(allow)}).\n"
+            "       The send workflow would refuse the ack, and the suite "
+            "would fail for the wrong reason.",
+            file=sys.stderr)
+        sys.exit(2)
+    return email
 
 
 def http(method: str, url: str, *, headers=None, data=None,
@@ -99,6 +161,25 @@ def twenty_post(obj: str, body: dict) -> dict:
         raise RuntimeError(f"Twenty {status}: {raw[:200].decode('utf-8','replace')}")
     d = json.loads(raw or "{}").get("data", {})
     return next(iter(d.values()), {}) if d else {}
+
+
+def twenty_patch(obj: str, rid: str, body: dict) -> dict:
+    status, raw, _ = http("PATCH", f"{TWENTY}/rest/{obj}/{rid}",
+                          headers={"Authorization": f"Bearer {TWENTY_KEY}",
+                                   "Content-Type": "application/json"},
+                          data=json.dumps(body).encode())
+    if status >= 400:
+        raise RuntimeError(f"Twenty {status}: {raw[:200].decode('utf-8','replace')}")
+    d = json.loads(raw or "{}").get("data", {})
+    return next(iter(d.values()), {}) if d else {}
+
+
+def twenty_delete(obj: str, rid: str) -> int:
+    status, raw, _ = http("DELETE", f"{TWENTY}/rest/{obj}/{rid}",
+                          headers={"Authorization": f"Bearer {TWENTY_KEY}"})
+    if status >= 400 and status != 404:
+        raise RuntimeError(f"Twenty {status}: {raw[:200].decode('utf-8','replace')}")
+    return status
 
 
 def rows(obj: str, query: str = "") -> list[dict]:
@@ -197,14 +278,73 @@ def api_workflows() -> dict[str, str]:
 
 
 def mailpit_clear() -> None:
-    http("DELETE", f"{MAILPIT}/api/v1/messages")
+    try:
+        http("DELETE", f"{MAILPIT}/api/v1/messages")
+    except error.URLError:
+        pass
 
 
 def mailpit_messages() -> list[dict]:
-    status, body, _ = http("GET", f"{MAILPIT}/api/v1/messages?limit=50")
+    try:
+        status, body, _ = http("GET", f"{MAILPIT}/api/v1/messages?limit=50")
+    except error.URLError:
+        return []
     if status >= 400:
         return []
     return json.loads(body or "{}").get("messages", [])
+
+
+def sent_logs(person_id: str, vendor: str = "") -> list[dict]:
+    logs = rows("messageLogs",
+                f"filter=personId[eq]:{person_id}"
+                "&order_by=createdAt[DescNullsLast]")
+    out = [m for m in logs if (m.get("status") or "") == "SENT"]
+    if vendor:
+        out = [m for m in out if (m.get("vendor") or "") == vendor]
+    return out
+
+
+def blocked_logs(person_id: str) -> list[dict]:
+    logs = rows("messageLogs",
+                f"filter=personId[eq]:{person_id}"
+                "&order_by=createdAt[DescNullsLast]")
+    return [m for m in logs if (m.get("subject") or "").startswith("Blocked:")]
+
+
+def wait_for(pred, timeout: float = 0, interval: float = 2.0):
+    """Call pred() until it returns a truthy first element, or timeout.
+
+    pred must return (ok, detail). timeout=0 is a single check — Mailpit is
+    already in the path after the sleep the caller did.
+    """
+    last = pred()
+    deadline = time.time() + timeout
+    while not last[0] and time.time() < deadline:
+        time.sleep(interval)
+        last = pred()
+    return last
+
+
+def ack_reached(email: str, person_id: str, *, before: int = 0,
+                vendor: str = "smtp/lead_ack") -> tuple[bool, str]:
+    """Did the acknowledgement actually leave? Mailpit locally, messageLog live."""
+    if LIVE_EMAIL:
+        sent = sent_logs(person_id, vendor)
+        n = len(sent)
+        detail = (sent[0].get("vendor") or sent[0].get("subject")
+                  if sent else "no SENT log")
+        return n > before, f"{detail} ({n} SENT, was {before})"
+    mail = mailpit_messages()
+    to = mail[0]["To"][0]["Address"] if mail else ""
+    return to == email, to or "no mail"
+
+
+def no_mail_left(person_id: str) -> tuple[bool, str]:
+    if LIVE_EMAIL:
+        sent = sent_logs(person_id)
+        return not sent, f"{len(sent)} SENT log(s)"
+    n = len(mailpit_messages())
+    return n == 0, f"{n} message(s)"
 
 
 def submit_form(fields: list[str]) -> int:
@@ -249,8 +389,12 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
 def prove_lead_form() -> None:
     print(f"\n{BOLD}LEAD Form Intake — public form to CRM record{OFF}")
     tag = uuid.uuid4().hex[:8]
-    email = f"proof.{tag}@northgate-{tag}.com"
-    mailpit_clear()
+    email = LIVE_EMAIL or f"proof.{tag}@northgate-{tag}.com"
+    existing = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
+    sent_before = (len(sent_logs(existing[0]["id"], "smtp/lead_ack"))
+                   if existing else 0)
+    if not LIVE_EMAIL:
+        mailpit_clear()
 
     status = submit_form(["Proof", f"Lead{tag}", email, f"Northgate {tag}",
                           "555-0100", "SOC / managed detection",
@@ -282,16 +426,19 @@ def prove_lead_form() -> None:
     check("follow-up task raised with score", bool(hot),
           hot[0]["title"] if hot else "none")
 
-    mail = mailpit_messages()
-    to = mail[0]["To"][0]["Address"] if mail else ""
-    check("acknowledgement sent to the right address", to == email, to or "no mail")
+    ok, detail = wait_for(
+        lambda: ack_reached(email, person["id"], before=sent_before),
+        timeout=60 if LIVE_EMAIL else 0)
+    check("acknowledgement sent to the right address", ok, detail)
 
 
 def prove_consent_gate() -> None:
     print(f"\n{BOLD}Consent gate — the send must be refused{OFF}")
     tag = uuid.uuid4().hex[:8]
+    # Always a fake, non-allowlisted address. Live SMTP must not see this.
     email = f"noconsent.{tag}@bluffpoint-{tag}.com"
-    mailpit_clear()
+    if not LIVE_EMAIL:
+        mailpit_clear()
 
     status = submit_form(["NoConsent", f"Test{tag}", email, f"Bluffpoint {tag}",
                           "555-0101", "Incident response",
@@ -312,8 +459,8 @@ def prove_consent_gate() -> None:
           bool(consent) and consent[0].get("status") == "PENDING",
           consent[0].get("status") if consent else "none")
 
-    check("NO email was sent", len(mailpit_messages()) == 0,
-          f"{len(mailpit_messages())} message(s)")
+    ok, detail = no_mail_left(people[0]["id"])
+    check("NO email was sent", ok, detail)
 
     logs = rows("messageLogs", "order_by=createdAt[DescNullsLast]")
     blocked = [m for m in logs[:5]
@@ -425,12 +572,16 @@ def prove_inbound_events() -> None:
     """
     print(f"\n{BOLD}MSG Inbound Events — the consent loop closes{OFF}")
     tag = uuid.uuid4().hex[:8]
-    email = f"loop.{tag}@ridgeline-{tag}.com"
+    email = LIVE_EMAIL or f"loop.{tag}@ridgeline-{tag}.com"
     fields = ["Loop", f"Test{tag}", email, f"Ridgeline {tag}", "555-0144",
               "CMMC or compliance", "Consent loop proof.", "true"]
 
     # --- 1. opted in: the acknowledgement must actually send -------------
-    mailpit_clear()
+    existing = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
+    sent_before = (len(sent_logs(existing[0]["id"], "smtp/lead_ack"))
+                   if existing else 0)
+    if not LIVE_EMAIL:
+        mailpit_clear()
     if not check("form accepts submission", submit_form(fields) == 200):
         return
     time.sleep(7)
@@ -443,9 +594,12 @@ def prove_inbound_events() -> None:
     if people[0].get("companyId"):
         CREATED.append(("companies", people[0]["companyId"]))
 
-    if not check("acknowledgement sent while opted in",
-                 len(mailpit_messages()) >= 1, f"{len(mailpit_messages())} message(s)"):
+    ok, detail = wait_for(
+        lambda: ack_reached(email, pid, before=sent_before),
+        timeout=60 if LIVE_EMAIL else 0)
+    if not check("acknowledgement sent while opted in", ok, detail):
         return
+    sent_after_ack = len(sent_logs(pid))
 
     # --- 2. the mail provider reports an unsubscribe ---------------------
     posted, _, _ = http("POST", f"{N8N}/webhook/mail-event",
@@ -468,17 +622,31 @@ def prove_inbound_events() -> None:
           (latest.get("proof") or "")[:48])
 
     # --- 3. the same form again: this time it must be refused ------------
-    mailpit_clear()
+    # Live SMTP: count SENT logs, not Mailpit. Mailpit is not in the path,
+    # and the person already has the first ack on file. Sleep first — a
+    # "no new mail" check that returns immediately would miss a late send.
+    if not LIVE_EMAIL:
+        mailpit_clear()
     if not check("second submission accepted", submit_form(fields) == 200):
         return
-    time.sleep(7)
+    time.sleep(8 if LIVE_EMAIL else 7)
 
-    check("NO second email sent after opting out",
-          len(mailpit_messages()) == 0, f"{len(mailpit_messages())} message(s)")
+    if LIVE_EMAIL:
+        n_new = len(sent_logs(pid)) - sent_after_ack
+        check("NO second email sent after opting out", n_new == 0,
+              f"{n_new} new SENT log(s)")
+    else:
+        check("NO second email sent after opting out",
+              len(mailpit_messages()) == 0,
+              f"{len(mailpit_messages())} message(s)")
 
-    logs = rows("messageLogs", f"filter=personId[eq]:{pid}"
-                               "&order_by=createdAt[DescNullsLast]")
-    blocked = [m for m in logs[:5] if (m.get("subject") or "").startswith("Blocked:")]
+    blocked = []
+    deadline = time.time() + (30 if LIVE_EMAIL else 0)
+    while True:
+        blocked = blocked_logs(pid)
+        if blocked or time.time() >= deadline:
+            break
+        time.sleep(2)
     check("refusal logged against the person", bool(blocked),
           blocked[0]["subject"] if blocked else "none")
 
@@ -544,19 +712,35 @@ def cleanup() -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Prove the workflows work")
     ap.add_argument("--only", default="",
-                    help="lead, consent, link, error, scheduled")
+                    help="lead, consent, link, inbound, error, scheduled")
     ap.add_argument("--email", default="admin@aspiretss.com")
     ap.add_argument("--password", default="AspireDemo2026!")
     ap.add_argument("--keep", action="store_true",
                     help="leave the test records in Twenty for inspection")
+    ap.add_argument("--live-email", default="",
+                    help="send opted-in proofs to this address (required when "
+                         "EMAIL_SMTP_HOST is a real relay). Also reads "
+                         "LIVE_DEMO_EMAIL from the environment.")
     args = ap.parse_args()
+
+    global LIVE_EMAIL
+    live_flag = (args.live_email or os.environ.get("LIVE_DEMO_EMAIL")
+                 or ENV.get("LIVE_DEMO_EMAIL") or "").strip()
+    if smtp_is_live():
+        LIVE_EMAIL = require_live_safety(live_flag)
+    elif live_flag:
+        LIVE_EMAIL = live_flag
 
     if not TWENTY_KEY or not N8N_KEY:
         print("ERROR: TWENTY_API_KEY and N8N_API_KEY must be set in infra/.env",
               file=sys.stderr)
         return 2
 
-    print(f"Twenty  {TWENTY}\nn8n     {N8N}\nMailpit {MAILPIT}")
+    print(f"Twenty  {TWENTY}\nn8n     {N8N}")
+    if LIVE_EMAIL:
+        print(f"live    {LIVE_EMAIL}  (asserting messageLog, not Mailpit)")
+    else:
+        print(f"Mailpit {MAILPIT}")
 
     try:
         ids = api_workflows()

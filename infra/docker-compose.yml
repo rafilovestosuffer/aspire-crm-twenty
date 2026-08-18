@@ -95,6 +95,7 @@ services:
       # this is the closest thing to GHL's inbox and it is native.
       MESSAGING_PROVIDER_GMAIL_ENABLED: ${MESSAGING_PROVIDER_GMAIL_ENABLED:-false}
       CALENDAR_PROVIDER_GOOGLE_ENABLED: ${CALENDAR_PROVIDER_GOOGLE_ENABLED:-false}
+      AUTH_GOOGLE_ENABLED: ${AUTH_GOOGLE_ENABLED:-false}
       AUTH_GOOGLE_CLIENT_ID: ${AUTH_GOOGLE_CLIENT_ID:-}
       AUTH_GOOGLE_CLIENT_SECRET: ${AUTH_GOOGLE_CLIENT_SECRET:-}
       AUTH_GOOGLE_CALLBACK_URL: ${AUTH_GOOGLE_CALLBACK_URL:-}
@@ -149,6 +150,7 @@ services:
 
       MESSAGING_PROVIDER_GMAIL_ENABLED: ${MESSAGING_PROVIDER_GMAIL_ENABLED:-false}
       CALENDAR_PROVIDER_GOOGLE_ENABLED: ${CALENDAR_PROVIDER_GOOGLE_ENABLED:-false}
+      AUTH_GOOGLE_ENABLED: ${AUTH_GOOGLE_ENABLED:-false}
       AUTH_GOOGLE_CLIENT_ID: ${AUTH_GOOGLE_CLIENT_ID:-}
       AUTH_GOOGLE_CLIENT_SECRET: ${AUTH_GOOGLE_CLIENT_SECRET:-}
       AUTH_GOOGLE_CALLBACK_URL: ${AUTH_GOOGLE_CALLBACK_URL:-}
@@ -204,6 +206,10 @@ services:
       TWENTY_BASE_URL: http://server:3000
       ASPIRE_FROM_EMAIL: ${ASPIRE_FROM_EMAIL:-}
       ASPIRE_REP_IDS: ${ASPIRE_REP_IDS:-}
+      # When set, VEND Send Email refuses any recipient not on this list.
+      # Required for a live Gmail demo so seed and proof addresses cannot leave
+      # the host. Empty in production — consent is the only send-time gate.
+      LIVE_MAIL_ALLOWLIST: ${LIVE_MAIL_ALLOWLIST:-}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
 
       # Chat alerts post to an incoming webhook — a plain JSON POST, so the

@@ -25,6 +25,44 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 cd "$ROOT"
 
+env_get() {
+  local f="$HERE/.env" line
+  [[ -f "$f" ]] || return 0
+  line="$(grep -E "^$1=" "$f" 2>/dev/null | tail -1 || true)"
+  printf '%s' "${line#*=}" | tr -d '"'"'"''
+}
+
+# Catcher hosts only. Anything else is a real relay — the current proof suite
+# submits proof.<tag>@northgate-<tag>.com, and those must never leave the host.
+smtp_is_live() {
+  local host
+  host="$(echo "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  case "$host" in
+    ""|mailpit|localhost|127.0.0.1) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+prove_workflows() {
+  local host live
+  host="$(env_get EMAIL_SMTP_HOST)"
+  live="$(env_get LIVE_DEMO_EMAIL)"
+  if smtp_is_live "$host"; then
+    if [[ -z "$live" ]]; then
+      echo "ERROR: EMAIL_SMTP_HOST=${host} is a real relay but LIVE_DEMO_EMAIL is empty." >&2
+      echo "       This suite submits the form as proof.<tag>@northgate-<tag>.com" >&2
+      echo "       — those are not real, and Gmail would still try to deliver." >&2
+      echo "       Set LIVE_DEMO_EMAIL and LIVE_MAIL_ALLOWLIST to your address in" >&2
+      echo "       infra/.env (and recreate n8n so the allowlist reaches the container)," >&2
+      echo "       or clear EMAIL_SMTP_* to use Mailpit." >&2
+      exit 1
+    fi
+    python3 scripts/prove_workflows.py --live-email "$live"
+  else
+    python3 scripts/prove_workflows.py
+  fi
+}
+
 step=0
 run() {
   step=$((step + 1))
@@ -63,7 +101,7 @@ run "Seed demo data"             python3 scripts/seed_demo_data.py --wipe
 run "Create n8n credentials"     python3 scripts/n8n_credentials.py
 run "Validate every Twenty call" python3 scripts/validate_workflow_queries.py
 run "Deploy and activate"        python3 scripts/n8n_deploy.py --dev --activate
-run "Prove the workflows"        python3 scripts/prove_workflows.py
+run "Prove the workflows"        prove_workflows
 # Last, not first: the worker can be dead while every other check passes,
 # and a build that ends green with no worker has no scheduled jobs and no
 # mailbox sync. Re-checking here catches it after everything has settled.

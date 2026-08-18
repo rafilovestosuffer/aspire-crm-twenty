@@ -132,11 +132,16 @@ at rehearsal and on the day. `--wipe` resets.
 
 No n8n. Configuration only, and a big part of the demo.
 
-**Email + calendar sync.** Settings → Accounts → connect a mailbox. Gmail /
-Google Workspace and Microsoft sync two-way; IMAP and CalDAV also work. Restrict
-which labels or folders sync, and set exclusions for personal and team addresses
-(`support@`, `info@`). Threads and calendar events then appear on record
-timelines, resyncing every ~5 minutes.
+**Email + calendar sync.** Settings → Accounts → Connect Gmail. This is mailbox
+sync onto Person timelines — it does **not** send workflow mail. That is n8n
+SMTP (`Aspire SMTP`), configured separately; both can use the same Gmail
+account. See **Live Gmail demo** below for the OAuth client, localhost redirect
+URIs, test users, and the messaging cron check.
+
+Gmail / Google Workspace and Microsoft sync two-way; IMAP and CalDAV also work.
+Restrict which labels or folders sync, and set exclusions for personal and team
+addresses (`support@`, `info@`). Threads and calendar events then appear on
+record timelines, resyncing every ~5 minutes.
 
 This is the honest answer to "where did the GHL inbox go?" for email — which is
 likely most of Aspire's conversation volume.
@@ -162,6 +167,16 @@ python scripts/build_n8n_workflows.py       # regenerate (already committed)
 python scripts/validate_workflow_queries.py # every Twenty call vs live schema
 python scripts/n8n_deploy.py --dev          # --dev adds the local alert sink
 python scripts/prove_workflows.py           # run them and check what happened
+```
+
+Against Mailpit that last line is enough. If `EMAIL_SMTP_HOST` is a real relay,
+`prove_workflows.py` **refuses** unless `--live-email` (or `LIVE_DEMO_EMAIL`)
+sits on `LIVE_MAIL_ALLOWLIST` — otherwise a rebuild would SMTP the fake proof
+domains. `rebuild.sh` passes the flag from env, or fails with the same message.
+
+```bash
+python scripts/prove_workflows.py --live-email you@gmail.com
+python scripts/prove_live_mail.py            # operator-shaped run, keeps the person
 ```
 
 Three gates, in that order, and they exist for different reasons.
@@ -209,6 +224,145 @@ Then `python scripts/n8n_deploy.py --activate`.
 > **Error workflows do not fire for manual runs.** n8n only invokes
 > `settings.errorWorkflow` for production executions, which is why the probe is
 > webhook-triggered. Testing failure handling from the editor proves nothing.
+
+---
+
+## Live Gmail demo
+
+Two different Gmail connections. n8n SMTP proves the workflows actually send.
+Twenty mailbox sync puts those threads on the Person timeline. Both can use the
+same account; they are configured separately and prove different things.
+
+Run this on **the laptop that already hosts the stack**. An app password in git
+or in a remote VM is how credentials leak. Nothing below is committed except
+empty placeholders.
+
+Do **not** point SMTP at Gmail and re-run `prove_workflows.py` without
+`--live-email`. That suite submits `proof.{tag}@northgate-{tag}.com`.
+
+### Part 1 — n8n SMTP (workflow proof)
+
+1. Google account → 2-Step Verification → [App Password](https://support.google.com/accounts/answer/185833) for Mail.
+2. Set in `infra/.env` (personal Gmail; **not** the Workspace relay):
+
+```ini
+EMAIL_DRIVER=smtp
+EMAIL_SMTP_HOST=smtp.gmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_SMTP_USER=you@gmail.com
+EMAIL_SMTP_PASSWORD=<app password>
+EMAIL_SMTP_SECURE=false
+EMAIL_FROM_ADDRESS=you@gmail.com
+ASPIRE_FROM_EMAIL=you@gmail.com
+LIVE_DEMO_EMAIL=you@gmail.com
+LIVE_MAIL_ALLOWLIST=you@gmail.com
+```
+
+Port 587 + STARTTLS is what n8n's SMTP node expects. `smtp-relay.gmail.com` is
+Workspace-only and will not accept a personal `@gmail.com`. Gmail will reject a
+From that is not the authenticated account (or an allowed send-as alias).
+
+A Gmail address on the lead form scores **-40** (free domain). The ack still
+sends; the lead just looks cold. Use a Workspace address if you want the
+high-score demo beat.
+
+3. Recreate n8n so `LIVE_MAIL_ALLOWLIST` reaches the container, then rebuild
+   the credential and the send workflow:
+
+```bash
+docker compose -f infra/docker-compose.yml up -d n8n
+python scripts/n8n_credentials.py          # Aspire SMTP -> smtp.gmail.com
+python scripts/build_n8n_workflows.py      # emit the allowlist gate
+python scripts/n8n_deploy.py --activate    # not --dev: do not swallow alerts
+python scripts/prove_live_mail.py          # keeps the person
+python scripts/prove_live_mail.py --nurture
+```
+
+`LIVE_MAIL_ALLOWLIST` is the second gate inside `VEND Send Email`, next to
+consent. When set, any `to` not on the list is refused and logged as
+`Blocked: not_on_allowlist`. No SMTP call. Seed `.example.com` addresses
+cannot leave the host even if a workflow is triggered by hand. An empty
+allowlist is production: consent only.
+
+Use `--dev` only if you still want the failure probe and alert sink. On live
+SMTP, prefer a real chat webhook in `ALERT_WEBHOOK_URL` (Google Chat incoming
+webhook is already the documented shape) so SYS Error Handler lands in your
+Google account too.
+
+`prove_live_mail.py` refuses unless SMTP is a real relay and the recipient is
+on the allowlist. It upserts you, submits the real form (`field-0`… by
+position), asserts `messageLog` SENT `smtp/lead_ack`, posts
+`/webhook/mail-event` unsubscribe, submits again (no second Gmail, `Blocked:`
+on the person), optionally backdates `formSubmission.submittedAt` by 3 days
+and triggers `LEAD Nurture Sequence`, then runs renewal + sweeps (tasks only;
+those workflows do not send). A form filled in the browser at
+`http://localhost:5678/form/aspire-contact` is the same path as the scripted
+submit; the script exists so we assert records, not HTTP 200.
+
+Tracked-link and error-handler proofs stay on `prove_workflows.py` (no SMTP).
+The failure probe still needs `--dev` or a real `ALERT_WEBHOOK_URL`.
+
+If send fails, check the account's security challenge — Google may flag a
+first-time `smtp.gmail.com` login from a new IP — not the workflow.
+
+### Part 2 — Twenty mailbox sync (inbox on the record)
+
+This does **not** send workflow mail. It syncs the connected mailbox onto
+matching Person records (~5 minutes).
+
+Google Cloud (Testing is enough for one user):
+
+1. New project → enable **Gmail API**, **Google Calendar API**, **People API**.
+2. OAuth consent screen: External, Testing, add `you@gmail.com` as a test user.
+3. OAuth client type **Web application**.
+4. Authorized JavaScript origin: `http://localhost:3000`.
+5. Redirect URIs (must match `SERVER_URL` byte-for-byte, including `http`):
+   - `http://localhost:3000/auth/google/redirect`
+   - `http://localhost:3000/auth/google-apis/get-access-token`
+
+Then in `infra/.env` and a compose recreate:
+
+```ini
+MESSAGING_PROVIDER_GMAIL_ENABLED=true
+CALENDAR_PROVIDER_GOOGLE_ENABLED=true
+AUTH_GOOGLE_ENABLED=true
+AUTH_GOOGLE_CLIENT_ID=...
+AUTH_GOOGLE_CLIENT_SECRET=...
+AUTH_GOOGLE_CALLBACK_URL=http://localhost:3000/auth/google/redirect
+AUTH_GOOGLE_APIS_CALLBACK_URL=http://localhost:3000/auth/google-apis/get-access-token
+```
+
+`AUTH_GOOGLE_ENABLED` is passed to both `server` and `worker`. Twenty defaults
+to config-in-database; if Admin Panel values disagree with `.env`, set them
+under **Settings → Admin Panel → Configuration Variables** as well.
+
+In Twenty: **Settings → Accounts → Connect Gmail**. The unverified-app warning
+is expected in Testing; proceed as the test user.
+
+After connect, confirm messaging crons are registered. The worker has
+`DISABLE_CRON_JOBS_REGISTRATION=true` and the server registers the default
+set — verify rather than assume:
+
+```bash
+docker compose -f infra/docker-compose.yml exec worker \
+  yarn command:prod cron:messaging:message-list-fetch
+# plus messages-import, calendar-event-list-fetch, calendar-events-import
+# if absent
+```
+
+Then: send the live ack (Part 1) → wait for sync → open **your Person** in
+Twenty. The thread should be on the timeline. Reply from Gmail; the reply
+should appear on the same record. That is the honest "where the inbox went"
+demo.
+
+**This proves:** consent gate, template render, SMTP, `messageLog`, form →
+person → ack in a real inbox, unsubscribe honouring, nurture send if
+backdated, error alerts if a Chat webhook is set, mailbox thread on the
+record if OAuth is connected.
+
+**This does not prove:** Gmail bounce/complaint webhooks (SMTP has none;
+`MSG Inbound Events` still needs a JSON POST), bulk/campaign sending,
+deliverability to third parties, or GHL workflow internals.
 
 ---
 
