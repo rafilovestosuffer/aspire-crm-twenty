@@ -101,6 +101,11 @@ infra/rebuild.sh                     zero to proven, every step a gate (demo mac
 infra/preflight.sh                   is this server ready? run before deploying
 infra/init-vps-env.sh                generate secrets + public hostnames on a VPS
 infra/deploy.sh                      one-command server deploy, eleven gated steps
+infra/harden-host.sh                 unattended-upgrades + fail2ban (run as root)
+infra/watchdog.sh                    hourly stack_verify → chat webhook on failure
+infra/backup-offsite.sh              rsync infra/backups/ off this disk
+scripts/import_consent_csv.py        GHL suppression CSV → consentRecord
+scripts/mark_enrolment_paid.py       PAYMENT_SENT → PAID after money cleared
 infra/Caddyfile                      reverse proxy + Let's Encrypt (internet-facing)
 infra/Caddyfile.internal             reverse proxy + local CA (office network)
 scripts/verify_restore.py            restores a backup and compares row counts

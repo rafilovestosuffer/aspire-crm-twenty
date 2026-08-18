@@ -32,6 +32,8 @@ git log -1 --format='%an %h %s'
 # generates the four secrets, sets https hostnames, lists what is still blank
 nano infra/.env        # paste only the lines it listed
 
+sudo ./infra/harden-host.sh   # unattended-upgrades + fail2ban. Does not touch SSH.
+
 ./infra/preflight.sh   # 20 seconds. Fix anything it calls a blocker
 ./infra/deploy.sh      # ~15 minutes
 ```
@@ -100,9 +102,12 @@ provider is wired there, only the scripted unsubscribe path is proven.
 
 ### Three things immediately after
 
-1. **Change both default passwords** — CRM and automation. They are in a public repository.
-2. **Check the padlock** on the CRM. A warning means Let's Encrypt could not reach port 80.
-3. **Check you can open the automation editor.** If `N8N_EDITOR_ALLOWED_IPS` does not include the address you are browsing from, it refuses you too — by design. Fix the value in `infra/.env` and recreate Caddy.
+1. **The initial password is in `infra/admin-initial-password.txt`**, not the
+   demo password in this repository. Change it in both the CRM and n8n.
+2. **Make the GitHub repository private.** It is public.
+3. **Check the padlock** on the CRM. A warning means Let's Encrypt could not reach port 80.
+4. **Check you can open the automation editor.** If `N8N_EDITOR_ALLOWED_IPS` does not include the address you are browsing from, it refuses you too — by design. Fix the value in `infra/.env` and recreate Caddy.
+5. **Cron the watchdog and copy backups off the disk** — `infra/watchdog.sh` hourly, `infra/backup-offsite.sh` nightly. Same-disk dumps are not a backup.
 
 ---
 
@@ -392,13 +397,34 @@ not something to be finding out mid-deploy.
 
 ## Operating it
 
-**Backups.** Nightly `pg_dump` of both databases into `infra/backups`, 30-day
-retention. That directory is on the same disk as the database, which is not a
-backup — it survives a bad migration, not a dead server. Copy it off the host
-nightly:
+**Backups.** Nightly dump of both databases **and** the Twenty / n8n file
+volumes into `infra/backups`, 30-day retention. Attachments are not in
+Postgres — a database-only restore leaves records pointing at files that
+are gone. That directory is still on the same disk as the database, which
+is not a backup. Copy it off the host nightly:
 
 ```bash
-rsync -az --delete infra/backups/ backup-host:/srv/aspire-crm/
+./infra/backup-offsite.sh user@backup-host:/srv/aspire-crm/
+# or:
+# rsync -az --delete infra/backups/ backup-host:/srv/aspire-crm/
+```
+
+**Watchdog.** Cron `infra/watchdog.sh` hourly. It runs `stack_verify.py` and
+POSTs to `ALERT_WEBHOOK_URL` if a layer is down. A dead worker is silent
+without this.
+
+**Suppression list.** Before GHL is terminated:
+
+```bash
+python3 scripts/import_consent_csv.py unsubscribed.csv --dry-run
+python3 scripts/import_consent_csv.py unsubscribed.csv
+```
+
+**Paid enrolments.** The workflow will not mark PAID. After FastPayDirect
+clears:
+
+```bash
+python3 scripts/mark_enrolment_paid.py --email student@example.com --yes
 ```
 
 **Upgrades.** The image tags (`TAG` for Twenty, `N8N_TAG` for n8n) are pinned

@@ -235,6 +235,9 @@ docs/migration-guide/_combined.html
 docs/migration-guide/_combined_bn.html
 infra/.env
 infra/backups/
+# Written by deploy.sh. The public repo still documents a demo password;
+# a VPS must not use it. Never commit this file.
+infra/admin-initial-password.txt
 
 # Caddy's internal CA root, copied out so the app containers can trust it.
 # Machine-specific: regenerated on each host.

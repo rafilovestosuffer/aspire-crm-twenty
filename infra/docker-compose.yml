@@ -277,6 +277,10 @@ services:
       PGPASSWORD: ${PG_DATABASE_PASSWORD}
     volumes:
       - ./backups:/backups
+      # Attachments and uploaded files live here, not in Postgres. A database
+      # dump alone restores records that point at files that no longer exist.
+      - server-local-data:/twenty-files:ro
+      - n8n-data:/n8n-files:ro
     entrypoint: >
       bash -c '
       while true; do
@@ -285,7 +289,12 @@ services:
           pg_dump -h db -U ${PG_DATABASE_USER:-postgres} -d $$d -Fc
             -f /backups/$$d-$$ts.dump && echo "backed up $$d at $$ts";
         done;
+        tar -C /twenty-files -czf /backups/twenty-files-$$ts.tar.gz . \
+          && echo "backed up twenty files at $$ts";
+        tar -C /n8n-files -czf /backups/n8n-files-$$ts.tar.gz . \
+          && echo "backed up n8n files at $$ts";
         find /backups -name "*.dump" -mtime +30 -delete;
+        find /backups -name "*-files-*.tar.gz" -mtime +30 -delete;
         sleep 86400;
       done'
 

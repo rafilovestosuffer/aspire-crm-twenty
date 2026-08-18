@@ -202,10 +202,33 @@ prove_restores() {
   python3 scripts/verify_restore.py --database n8n
 }
 
+# The demo password is in a public repository. A VPS that uses it is
+# reachable from the internet on day one. Generate one, persist it so
+# a re-run of this script can still sign in, and never rotate it here —
+# changing it after first boot is Settings → Members.
+admin_password() {
+  local f="$HERE/admin-initial-password.txt"
+  if [[ -s "$f" ]]; then
+    cat "$f"
+    return 0
+  fi
+  python3 - <<'PY'
+import secrets, string
+alphabet = string.ascii_letters + string.digits
+print("".join(secrets.choice(alphabet) for _ in range(18)) + "Aa1")
+PY
+}
+
+PASS="$(admin_password)"
+umask 077
+printf '%s\n' "$PASS" > "$HERE/admin-initial-password.txt"
+chmod 600 "$HERE/admin-initial-password.txt"
+printf "  ${G}ok${O}    initial admin password written to infra/admin-initial-password.txt\n"
+
 run "Start the stack"             start_stack
 run "Check the worker"            check_worker
-run "Create the CRM workspace"    python3 scripts/bootstrap_workspace.py
-run "Create the automation owner" python3 scripts/bootstrap_n8n.py
+run "Create the CRM workspace"    python3 scripts/bootstrap_workspace.py --password "$PASS"
+run "Create the automation owner" python3 scripts/bootstrap_n8n.py --password "$PASS"
 run "Build the object model"      python3 scripts/twenty_provision.py
 run "Create credentials"          python3 scripts/n8n_credentials.py
 run "Validate every CRM API call" python3 scripts/validate_workflow_queries.py
@@ -226,10 +249,11 @@ $(printf '=%.0s' {1..64})
   Automation   https://${AUTO}
   Public form  https://${AUTO}/form/aspire-contact
 
-  ${Y}Do these three things now, not tomorrow:${O}
+  ${Y}Do these now, not tomorrow:${O}
 
-  1. Change the admin password in the CRM (Settings → Members), and the
-     automation owner password too. Both defaults are in a public repository.
+  1. The initial login is ${Y}infra/admin-initial-password.txt${O} (mode 600).
+     Change it in the CRM (Settings → Members) and in n8n. The demo
+     password in the public repo was not used on this server.
 
   2. Confirm the certificate is real — open the CRM and check the padlock.
      A warning means Let's Encrypt could not reach this server on port 80.
@@ -240,13 +264,25 @@ $(printf '=%.0s' {1..64})
      the CIDRs, then:
        docker compose ${OVERLAY[*]} up -d --force-recreate caddy
 
+  4. Make the GitHub repo private. It is public and still documents the old
+     demo password.
+
+  5. Copy backups off this disk:
+       ./infra/backup-offsite.sh user@backup-host:/srv/aspire-crm/
+     Cron the watchdog so a dead worker is not silent:
+       sudo crontab -e
+       # 0 * * * * /path/to/aspire-crm-twenty/infra/watchdog.sh
+
   Optional, on an empty CRM (before Phase 4 data), prove the workflows against
   a real inbox. LIVE_MAIL_ALLOWLIST must stay empty on this server:
     python3 scripts/prove_workflows.py --production --live-email you@...
   Do not pass --dev. Do not seed demo data. Do not run this after real leads
   exist — the nurture smoke would be eligible to SMTP them.
 
-  There is no data in the CRM yet — that is Phase 4, and the GoHighLevel
-  suppression list must be exported before any termination date is agreed.
+  There is no data in the CRM yet. Before GHL is terminated:
+    export the suppression list, then
+    python3 scripts/import_consent_csv.py path/to/unsubscribed.csv
+  Paid enrolments stay PAYMENT_SENT until a person confirms:
+    python3 scripts/mark_enrolment_paid.py --email student@... --yes
 $(printf '=%.0s' {1..64})
 EOF

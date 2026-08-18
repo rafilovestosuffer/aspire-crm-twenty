@@ -86,6 +86,8 @@ services:
       - "127.0.0.1:${N8N_PORT:-5678}:5678"
     environment:
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      N8N_SECURE_COOKIE: "true"
+      N8N_PROXY_HOPS: "1"
 
 volumes:
   caddy-data:

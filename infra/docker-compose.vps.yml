@@ -70,6 +70,11 @@ services:
       - "127.0.0.1:${N8N_PORT:-5678}:5678"
     environment:
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      # TLS terminates at Caddy. Without these, n8n may set cookies without
+      # Secure and ignore X-Forwarded-Proto, so the editor looks "broken"
+      # over a perfectly good certificate.
+      N8N_SECURE_COOKIE: "true"
+      N8N_PROXY_HOPS: "1"
 
 volumes:
   caddy-data:

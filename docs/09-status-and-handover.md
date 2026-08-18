@@ -21,13 +21,16 @@ with the automation running and verified.
 
 Three reasons, in the order they matter.
 
-**GoHighLevel cannot model this business.** It has contacts, and it has "deals".
-Aspire sells recurring SOC subscriptions, CMMC compliance engagements with audit
-dates, and training accounts with seat counts and phishing scores over time.
-In GHL all of that gets flattened into custom fields on a deal. Twenty holds
-them as real objects with real relationships, so "which subscriptions renew in
-the next 90 days, and what is their seat usage" is a saved view instead of a
-spreadsheet export.
+**GoHighLevel cannot model this business.** The live account is a cybersecurity
+**training** funnel — webinar, nurture, trainer meeting, bootcamp enrolment
+via FastPayDirect, then a cohort — flattened into contact fields and deal
+stages. Twenty holds programs, cohorts, enrolments and webinar registrations
+as real objects, so "who paid for January bootcamp and who is still on a
+payment link" is a view, not a spreadsheet export.
+
+(The original schema also provisioned SOC subscriptions and CMMC engagements.
+Those objects remain, empty: absence from GHL is not proof they are absent
+from the company. The automations do not pretend they are in use.)
 
 **GoHighLevel hides its own automation history.** There is no API that exposes
 what a workflow did, or whether it failed. That gap is what made this audit
@@ -289,12 +292,12 @@ Order matters. Lead with the data model, land on the live form.
 
 | # | Show | Say |
 |---|---|---|
-| 1 | A company record: people, subscription, compliance engagement, training account, phishing trend | "GoHighLevel can't model any of this. It forces everything into a deal." |
-| 2 | *Renewals next 90 days*, the kanban, *Seats near capacity* | "Renewal exposure and upsell signals, both one click." |
+| 1 | A company record: people, a webinar registration, an enrolment, a cohort | "GoHighLevel flattens the training funnel into contact fields and a deal." |
+| 2 | *Open for enrolment* on a cohort, unpaid vs paid | "Who is still on a payment link, one click." |
 | 3 | A contact timeline with a real email thread and calendar event | "This is where the inbox went for email. Native, syncs every five minutes." |
 | 4 | **Fill the public form live on screen** | "Watch." Person appears scored and assigned, task raised, acknowledgement sent. **"That form is hosted by our own stack. No third-party tool."** |
 | 5 | Try to send to an opted-out contact | It refuses and logs why. "This is the control we tell clients to implement." |
-| 6 | Run renewal escalation | "GoHighLevel cannot do this — it has no subscription object." |
+| 6 | Mark an enrolment paid, watch joining instructions | "Payment is off-platform. The CRM does not pretend a link was a receipt." |
 | 7 | The `automationRun` view | "Every run, success and failure. GoHighLevel exposes no execution history at all — that gap is what made the audit hard." |
 
 Watching a record appear from a form submission does more than any document.
@@ -316,7 +319,7 @@ from it unaided. Do not skip it.
 dumped to CSV or SQL at any time. That is strictly better than the current
 position, where the data is in someone else's SaaS.
 
-**"Why not just keep GoHighLevel?"** Because it cannot model subscriptions,
-compliance engagements or training seats; because it will not tell us what its
-own automation did; and because it costs a recurring fee for a system Aspire
-cannot inspect. The replacement runs on one server.
+**"Why not just keep GoHighLevel?"** Because it cannot model the training
+funnel as objects; because it will not tell us what its own automation did;
+and because it costs a recurring fee for a system Aspire cannot inspect. The
+replacement runs on one server.
