@@ -123,14 +123,114 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const KEYS = [\"nurture_1\", \"nurture_2\", \"nurture_3\"];  // generated from TEMPLATE_KEYS\nconst TOUCHES = [3, 7, 14];      // days after the enquiry\nconst MAX_AGE = 21;              // past this, stop looking entirely\n\n// A short read here is a lead that silently never gets followed up, or \u2014 worse\n// \u2014 a missing send record that makes an already-nudged person look untouched\n// and start the sequence again.\nconst submissions = pageAll('Recent form submissions', 'formSubmissions');\nconst messages    = pageAll('Nurture already sent',    'messageLogs');\n\n// How many nurture messages has each person already had, and did any reply?\nconst touches = new Map();\nconst replied = new Set();\nfor (const m of messages) {\n  const pid = m.personId;\n  if (!pid) continue;\n  touches.set(pid, (touches.get(pid) || 0) + 1);\n  if (m.status === 'REPLIED') replied.add(pid);\n}\n\nconst now = Date.now();\nconst out = [];\nconst seen = new Set();\n\nfor (const s of submissions) {\n  const pid = s.personId;\n  if (!pid || seen.has(pid)) continue;        // one nudge per person per day\n  seen.add(pid);\n\n  // Prefer submittedAt: that is the business timestamp the form wrote, and\n  // it is the field a live demo can backdate. createdAt is insert time and\n  // Twenty will not let us rewrite it.\n  const when = s.submittedAt || s.createdAt;\n  const age = Math.floor((now - new Date(when).getTime()) / 86400000);\n  if (age > MAX_AGE) continue;                // too old, let it go\n  if (replied.has(pid)) continue;             // they answered \u2014 stop\n\n  const done = touches.get(pid) || 0;\n  if (done >= TOUCHES.length) continue;       // sequence finished\n\n  if (age >= TOUCHES[done]) {\n    out.push({ json: { personId: pid, touch: done + 1, ageDays: age,\n                       templateKey: KEYS[done] } });\n  }\n}\nreturn out;"
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/people?limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "726094935825",
+      "name": "People",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        660,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/opportunities?filter=stage[in]:[NEW,SCREENING,MEETING,PROPOSAL]&limit=200",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "qs",
+                    "name": "starting_after",
+                    "value": "={{ $response.body.pageInfo.endCursor }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ !$response.body.pageInfo.hasNextPage }}",
+              "limitPagesFetched": true,
+              "maxRequests": 50,
+              "requestInterval": 700
+            }
+          }
+        }
+      },
+      "id": "657419507420",
+      "name": "Open opportunities",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        880,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const KEYS = [\"nurture_1\", \"nurture_2\", \"nurture_3\"];  // generated from TEMPLATE_KEYS\nconst TOUCHES = [3, 7, 14];      // days after the enquiry\nconst MAX_AGE = 21;              // past this, stop looking entirely\n\n// A short read here is a lead that silently never gets followed up, or \u2014 worse\n// \u2014 a missing send record that makes an already-nudged person look untouched\n// and start the sequence again.\nconst submissions = pageAll('Recent form submissions', 'formSubmissions');\nconst messages    = pageAll('Nurture already sent',    'messageLogs');\nconst people      = pageAll('People',                  'people');\nconst opps        = pageAll('Open opportunities',      'opportunities');\n\nconst companyByPerson = new Map();\nfor (const p of people) {\n  if (p.id && p.companyId) companyByPerson.set(p.id, p.companyId);\n}\nconst openCompany = new Set();\nfor (const o of opps) {\n  if (o.companyId) openCompany.add(o.companyId);\n}\n\n// How many nurture messages has each person already had, and did any reply?\nconst touches = new Map();\nconst replied = new Set();\nfor (const m of messages) {\n  const pid = m.personId;\n  if (!pid) continue;\n  touches.set(pid, (touches.get(pid) || 0) + 1);\n  if (m.status === 'REPLIED') replied.add(pid);\n}\n\nconst now = Date.now();\nconst out = [];\nconst seen = new Set();\n\nfor (const s of submissions) {\n  const pid = s.personId;\n  if (!pid || seen.has(pid)) continue;        // one nudge per person per day\n  seen.add(pid);\n\n  // Prefer submittedAt: that is the business timestamp the form wrote, and\n  // it is the field a live demo can backdate. createdAt is insert time and\n  // Twenty will not let us rewrite it.\n  const when = s.submittedAt || s.createdAt;\n  const age = Math.floor((now - new Date(when).getTime()) / 86400000);\n  if (age > MAX_AGE) continue;                // too old, let it go\n  if (replied.has(pid)) continue;             // they answered \u2014 stop\n  const companyId = companyByPerson.get(pid);\n  if (companyId && openCompany.has(companyId)) continue;  // real opportunity\n\n  const done = touches.get(pid) || 0;\n  if (done >= TOUCHES.length) continue;       // sequence finished\n\n  if (age >= TOUCHES[done]) {\n    out.push({ json: { personId: pid, touch: done + 1, ageDays: age,\n                       templateKey: KEYS[done] } });\n  }\n}\nreturn out;"
       },
       "id": "471645779552",
       "name": "Who is due today",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        660,
+        1100,
         300
       ]
     },
@@ -144,7 +244,7 @@
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
-        880,
+        1320,
         300
       ]
     },
@@ -169,7 +269,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        1220,
+        1660,
         300
       ]
     },
@@ -183,7 +283,7 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        1440,
+        1880,
         300
       ]
     },
@@ -209,7 +309,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1660,
+        2100,
         300
       ],
       "credentials": {
@@ -225,7 +325,7 @@
       "parameters": {
         "content": "## Every morning, find the ones who went quiet\nA lead that nobody followed up is the most expensive thing a sales\nteam owns \u2014 it cost money to acquire and returns nothing. This runs\ndaily and works out who is due a nudge, using two queries rather\nthan one per person, so it stays well inside the CRM's rate limit.",
         "height": 320,
-        "width": 640,
+        "width": 1080,
         "color": 5
       },
       "id": "683371836386",
@@ -249,7 +349,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        640,
+        1080,
         80
       ]
     },
@@ -265,7 +365,7 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1200,
+        1640,
         140
       ]
     }
@@ -294,6 +394,28 @@
       ]
     },
     "Nurture already sent": {
+      "main": [
+        [
+          {
+            "node": "People",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "People": {
+      "main": [
+        [
+          {
+            "node": "Open opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open opportunities": {
       "main": [
         [
           {

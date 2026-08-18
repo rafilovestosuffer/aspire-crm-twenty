@@ -120,11 +120,41 @@ start_stack() {
          curl -fsS http://localhost:3000/healthz >/dev/null 2>&1; then
       printf "\n  ${G}ok${O}    CRM healthy\n"
       [[ $INTERNAL -eq 1 ]] && { trust_internal_ca || return 1; }
+      [[ $INTERNAL -eq 0 ]] && { wait_for_tls || return 1; }
       return 0
     fi
     printf "."; sleep 5
   done
   printf "\n  ${R}FAIL${O}  never became healthy — docker compose %s logs server\n" "${OVERLAY[*]}"
+  return 1
+}
+
+# Twenty serves /rest/metadata/* by calling ${SERVER_URL} from inside the
+# server container. A padlock the browser likes is not enough: if THIS
+# container cannot reach or trust that URL, every metadata request is HTTP
+# 500 with an empty body and no log line, and the provisioner fails without
+# naming TLS as the cause.
+wait_for_tls() {
+  local url
+  url=$(grep -E '^SERVER_URL=' "$HERE/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'')
+  url="${url%$'\r'}"
+  [[ -z "$url" ]] && return 0
+  case "$url" in
+    http://localhost*|http://127.0.0.1*) return 0 ;;
+  esac
+  printf "  waiting for the server to reach its own SERVER_URL"
+  local i
+  for i in $(seq 1 60); do
+    if docker compose "${OVERLAY[@]}" exec -T server \
+         curl -fsS "$url/healthz" >/dev/null 2>&1; then
+      printf "\n  ${G}ok${O}    %s reachable from the server container\n" "$url"
+      return 0
+    fi
+    printf "."; sleep 5
+  done
+  printf "\n  ${R}FAIL${O}  the server cannot GET %s/healthz\n" "$url"
+  printf "       Metadata calls will 500. Check Caddy, the compose network\n"
+  printf "       aliases for the public hostname, and the certificate.\n"
   return 1
 }
 
@@ -145,6 +175,11 @@ check_worker() {
   printf "  ${G}ok${O}    worker running\n"
 }
 
+prove_restores() {
+  python3 scripts/verify_restore.py || return 1
+  python3 scripts/verify_restore.py --database n8n
+}
+
 run "Start the stack"             start_stack
 run "Check the worker"            check_worker
 run "Create the CRM workspace"    python3 scripts/bootstrap_workspace.py
@@ -154,7 +189,7 @@ run "Create credentials"          python3 scripts/n8n_credentials.py
 run "Validate every CRM API call" python3 scripts/validate_workflow_queries.py
 run "Deploy and activate"         python3 scripts/n8n_deploy.py --activate
 run "Verify every layer"          python3 scripts/stack_verify.py
-run "Prove the backups restore"   python3 scripts/verify_restore.py
+run "Prove the backups restore"   prove_restores
 run "Prove the proxy rules hold"  python3 scripts/verify_proxy_rules.py ${MODE_ARGS[@]+"${MODE_ARGS[@]}"}
 
 CRM=$(grep -E '^CRM_DOMAIN=' "$HERE/.env" | cut -d= -f2- | tr -d '"')
@@ -177,10 +212,17 @@ $(printf '=%.0s' {1..64})
   2. Confirm the certificate is real — open the CRM and check the padlock.
      A warning means Let's Encrypt could not reach this server on port 80.
 
-  3. Restrict the automation editor. infra/Caddyfile ships with placeholder
-     IP ranges that match nothing, so the editor is currently refusing
-     everyone. Put your office and VPN ranges in, then:
+  3. Confirm you can open the automation editor from the office. The allowlist
+     is N8N_EDITOR_ALLOWED_IPS in infra/.env, not infra/Caddyfile. If it still
+     has RFC 5737 example ranges, nobody — including you — can get in. Fix
+     the CIDRs, then:
        docker compose ${OVERLAY[*]} up -d --force-recreate caddy
+
+  Optional, on an empty CRM (before Phase 4 data), prove the workflows against
+  a real inbox. LIVE_MAIL_ALLOWLIST must stay empty on this server:
+    python3 scripts/prove_workflows.py --production --live-email you@...
+  Do not pass --dev. Do not seed demo data. Do not run this after real leads
+  exist — the nurture smoke would be eligible to SMTP them.
 
   There is no data in the CRM yet — that is Phase 4, and the GoHighLevel
   suppression list must be exported before any termination date is agreed.

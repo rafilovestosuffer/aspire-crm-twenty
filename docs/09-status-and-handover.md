@@ -64,8 +64,8 @@ proof) and `automationRun` (the execution history GHL never exposed).
 | `OPS Scheduled Sweeps` | Finds what did *not* happen — stale opportunities, no-shows, overdue invoices |
 | `SYS Error Handler` | Catches any failure, records it, alerts, and suppresses alert storms |
 | `MSG Inbound Events` | Closes the consent loop: an unsubscribe or bounce from the mail provider flips the consent record, and a later form submission cannot quietly undo it |
-| `LEAD Nurture Sequence` | Day 3, 7 and 14 after an enquiry, then stops. Stops early on a reply, an opt-out, or a real opportunity |
-| `SYS Daily Health Check` | Asks every morning whether the stack is still alive — worker processing, schedules firing, failure rate, backup freshness — because nothing else notices a dead worker after deploy day |
+| `LEAD Nurture Sequence` | Day 3, 7 and 14 after an enquiry, then stops. Stops early on a reply, an opt-out, or a real opportunity on that person's company |
+| `SYS Daily Health Check` | Asks every morning whether the three scheduled jobs (renewal, sweeps, nurture) ran in the last 26 hours — each queried by name, not pulled off the latest page of `automationRun`. Does not check backup freshness; that is `verify_restore.py`. |
 
 ## 4. What "proven" means here
 
@@ -83,15 +83,18 @@ the real schedules, and then asks the CRM whether the records are there.
 | Lead capture | Person, company, linked consent, scored task, acknowledgement **to the right address** |
 | Consent enforcement | A non-consenting contact → send **refused**, no mail, refusal logged with its reason |
 | Click tracking | 307 to the destination, click counted |
-| Failure handling | A deliberate failure produces `automationRun` FAILED carrying the real error, and a delivered alert |
-| Scheduled work | Renewals and sweeps run clean against the seeded data |
+| Failure handling | A deliberate failure produces `automationRun` FAILED carrying the real error, and a delivered alert. **Laptop `--dev` only** — the failure probe is not deployed on the VPS |
+| Scheduled work | Renewals, sweeps and nurture start and finish without node errors (empty CRM is enough; they no-op) |
+| Health check | `SYS Daily Health Check` runs and writes an `automationRun`. On a first-day VPS it may correctly alert that yesterday's jobs never ran |
+
+`--production` is the VPS prove: no Mailpit, no failure probe, requires a real SMTP relay and `--live-email`. Run it only against an empty CRM.
 
 Run it any time. If something breaks later, it says so.
 
 ### What a passing suite still does not prove
 
-A check only proves the code it actually executed. Two of the worst defects
-found in this build passed every check before they were found:
+A check only proves the code it actually executed. Defects that passed every
+check before they were found:
 
 - The nurture sequence asked for email templates that did not exist. On a fresh
   database no lead is old enough to be nudged, so the send path never ran and
@@ -102,10 +105,16 @@ found in this build passed every check before they were found:
   `scripts/prove_paging.py` pushes a table past 200 and asserts the scan read
   every row — the only check here that costs a few minutes, and the only one
   that can catch this.
+- The daily health check used to read the latest 20 `automationRuns` and look
+  for two schedule names in that page. Form intake writes a run on every
+  submit, so the schedules fell off the page and the check reported a dead
+  worker on a healthy one — or missed a failed sweep. It now queries each of
+  the three morning jobs by name and time. Backup freshness is still
+  `verify_restore.py`, not this workflow.
 
-Both were volume-dependent: correct on a demo dataset, broken in production some
-months in. When adding a check, ask what data would have to exist for it to
-execute at all.
+Those were volume-dependent: correct on a demo dataset, broken in production
+some months in. When adding a check, ask what data would have to exist for it
+to execute at all.
 
 ## 5. Honest status
 

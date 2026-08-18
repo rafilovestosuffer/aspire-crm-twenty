@@ -114,6 +114,38 @@ if [[ -n "$SERVER_URL" && -n "$CRM_DOMAIN" ]]; then
     || bad "SERVER_URL" "is '$SERVER_URL', expected 'https://$CRM_DOMAIN' — a mismatch loops the login page forever"
 fi
 
+# Forms and webhooks are minted from N8N_PUBLIC_URL. Wrong value → the form
+# renders and submits nowhere, which looks like an n8n bug rather than this line.
+N8N_PUBLIC_URL=$(env_get N8N_PUBLIC_URL)
+if [[ -n "$AUTO_DOMAIN" ]]; then
+  expected_n8n="https://$AUTO_DOMAIN"
+  if [[ -z "$N8N_PUBLIC_URL" ]]; then
+    bad "N8N_PUBLIC_URL" "not set — expected $expected_n8n. Forms would render at a URL that cannot submit."
+  elif [[ "$N8N_PUBLIC_URL" == "$expected_n8n" ]]; then
+    ok "N8N_PUBLIC_URL matches AUTOMATION_DOMAIN" "$N8N_PUBLIC_URL"
+  else
+    bad "N8N_PUBLIC_URL" "is '$N8N_PUBLIC_URL', expected '$expected_n8n' — the public form submits to the wrong host"
+  fi
+fi
+
+# Laptop live-Gmail demo sets this so seed and proof addresses cannot leave
+# the host. Copied onto a server it becomes the only addresses that will
+# ever receive mail. Empty is production: consent is the only send-time gate.
+allowlist=$(env_get LIVE_MAIL_ALLOWLIST)
+if [[ -n "$allowlist" ]]; then
+  bad "LIVE_MAIL_ALLOWLIST" "is set ($allowlist) — VEND Send Email will refuse every other recipient. Clear it in infra/.env and recreate n8n before a production deploy. The laptop Gmail demo is the place for an allowlist, not this server."
+else
+  ok "LIVE_MAIL_ALLOWLIST" "empty — consent is the only send-time gate"
+fi
+
+driver=$(env_get EMAIL_DRIVER)
+case "$driver" in
+  smtp|SMTP) ok "EMAIL_DRIVER" "smtp" ;;
+  ""|logger)
+    warn "EMAIL_DRIVER" "${driver:-unset} — Twenty invites and password resets stay in the server log. Set EMAIL_DRIVER=smtp if those must leave the box. n8n SMTP is a separate credential and is unaffected." ;;
+  *) warn "EMAIL_DRIVER" "$driver" ;;
+esac
+
 # A blocker, not a warning: n8n_credentials.py refuses to invent an SMTP
 # credential, so the deploy stops at step 6 without this. Better to know now
 # than eight minutes in.

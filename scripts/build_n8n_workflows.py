@@ -730,6 +730,18 @@ return [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];
         "options": {},
     }, version=2.1, creds={"smtp": {"name": CRED_SMTP}})
 
+    # MSG Inbound Events PATCHes the log by vendorMessageId. Without this
+    # field the bounce/complaint branch finds nothing and the status stays
+    # SENT — so the CRM disagrees with the provider. Nodemailer puts the id
+    # on messageId; $execution.id is only a fallback so the column is never
+    # empty. Gmail SMTP still has no bounce webhook; the provider (or a
+    # script) must POST /webhook/mail-event for this match to fire.
+    identify = f.code("Identify the send", """
+const sent = $input.first().json || {};
+const raw = sent.messageId || sent.messageID || sent.id || $execution.id;
+return [{ json: { ...sent, vendorMessageId: String(raw).slice(0, 200) } }];
+""".strip())
+
     log = f.twenty("Log message", "POST", "/rest/messageLogs", {
         "channel": "EMAIL",
         "direction": "OUTBOUND",
@@ -740,6 +752,7 @@ return [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];
         # the count is always zero — so everyone would be nudged every single
         # day until they aged out. Also makes the message log far more useful.
         "vendor": "={{ 'smtp/' + $('Render template').first().json.templateKey }}",
+        "vendorMessageId": "={{ $json.vendorMessageId }}",
         "sentAt": "={{ $now.toUTC().toISO() }}",
         "personId": "={{ $('Render template').first().json.personId }}",
     })
@@ -762,7 +775,7 @@ return [{ json: { ...d, subject: fill(t.subject), html: fill(t.body) } }];
     f.chain(trig, person, consent, check, gate)
     f.connect(gate, render, out=0)
     f.connect(gate, blocked, out=1)
-    f.chain(render, send, log)
+    f.chain(render, send, identify, log)
     return f
 
 
@@ -1616,6 +1629,17 @@ def wf_nurture() -> Flow:
                     "{{ encodeURIComponent($now.minus({ days: 30 }).toUTC().toISO()) }}"
                     "&order_by=createdAt[DescNullsLast]&limit=200", paginate=True)
 
+    # People carry companyId; opportunities hang off the company, not the
+    # person. The "stop if they became an opportunity" rule is a company
+    # match, so both scans are required. Open stages only — CUSTOMER means
+    # they already bought, which is a different story, and Twenty has no WON.
+    people = f.twenty("People", "GET",
+                      "/rest/people?limit=200", paginate=True)
+    opps = f.twenty("Open opportunities", "GET",
+                    "/rest/opportunities?filter=stage[in]:"
+                    "[NEW,SCREENING,MEETING,PROPOSAL]&limit=200",
+                    paginate=True)
+
     f.phase("Decide who is due, and stop when you should",
             "Day 3, day 7, day 14 — then never again. It stops early if they\n"
             "replied, if they opted out, or if they already became a real\n"
@@ -1633,6 +1657,17 @@ const MAX_AGE = 21;              // past this, stop looking entirely
 // and start the sequence again.
 const submissions = pageAll('Recent form submissions', 'formSubmissions');
 const messages    = pageAll('Nurture already sent',    'messageLogs');
+const people      = pageAll('People',                  'people');
+const opps        = pageAll('Open opportunities',      'opportunities');
+
+const companyByPerson = new Map();
+for (const p of people) {
+  if (p.id && p.companyId) companyByPerson.set(p.id, p.companyId);
+}
+const openCompany = new Set();
+for (const o of opps) {
+  if (o.companyId) openCompany.add(o.companyId);
+}
 
 // How many nurture messages has each person already had, and did any reply?
 const touches = new Map();
@@ -1660,6 +1695,8 @@ for (const s of submissions) {
   const age = Math.floor((now - new Date(when).getTime()) / 86400000);
   if (age > MAX_AGE) continue;                // too old, let it go
   if (replied.has(pid)) continue;             // they answered — stop
+  const companyId = companyByPerson.get(pid);
+  if (companyId && openCompany.has(companyId)) continue;  // real opportunity
 
   const done = touches.get(pid) || 0;
   if (done >= TOUCHES.length) continue;       // sequence finished
@@ -1706,7 +1743,7 @@ return out;
 
     log = f.log_run("Log run", "LEAD Nurture Sequence")
 
-    f.chain(trig, subs, sent, plan, batch)
+    f.chain(trig, subs, sent, people, opps, plan, batch)
     f.connect(batch, log, out=0)          # done
     f.connect(batch, send, out=1)         # loop
     f.connect(send, pace)                 # wait before asking for the next batch
@@ -1737,33 +1774,60 @@ def wf_health_check() -> Flow:
 
     # Reaching the CRM at all is the first thing to establish: every check after
     # this one would fail for the same reason, and report a different cause.
-    alive = f.add("CRM answering?", "n8n-nodes-base.httpRequest", {
-        "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns"
-               "?order_by=startedAt[DescNullsLast]&limit=20",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "options": {"response": {"response": {"neverError": False}}},
-    }, version=4.2, creds={"httpHeaderAuth": {"name": CRED_TWENTY}})
+    alive = f.twenty("CRM answering?", "GET",
+                     "/rest/automationRuns?limit=1")
+
+    since = q("$now.minus({ hours: 26 }).toUTC().toISO()")
 
     f.phase("Did the daily automations run?",
-            "Three workflows are supposed to run every morning. If none of them\n"
-            "left a record in the last twenty-six hours, either the worker is\n"
-            "dead, n8n's scheduler is stuck, or the CRM stopped accepting\n"
-            "writes. All three are invisible from the outside.", "decide")
+            "Three workflows are supposed to run every morning. Each is asked\n"
+            "for by name and time, not pulled off the latest page of every\n"
+            "automationRun in the CRM. Form intake writes a run on every\n"
+            "submit; past twenty recent rows the schedules used to fall off\n"
+            "the page and this check reported a dead worker on a healthy one.",
+            "decide")
+
+    # One filtered GET per job. Asking for the latest 20 automationRuns and
+    # looking for names in that page is how a busy form made this check lie.
+    renewal = f.twenty(
+        "Renewal runs last 26h", "GET",
+        "/rest/automationRuns?filter=workflowName[eq]:"
+        + q("'SUB Renewal Escalation'")
+        + f",startedAt[gte]:{since}"
+        "&order_by=startedAt[DescNullsLast]&limit=20")
+    sweeps = f.twenty(
+        "Sweep runs last 26h", "GET",
+        "/rest/automationRuns?filter=workflowName[eq]:"
+        + q("'OPS Scheduled Sweeps'")
+        + f",startedAt[gte]:{since}"
+        "&order_by=startedAt[DescNullsLast]&limit=20")
+    nurture = f.twenty(
+        "Nurture runs last 26h", "GET",
+        "/rest/automationRuns?filter=workflowName[eq]:"
+        + q("'LEAD Nurture Sequence'")
+        + f",startedAt[gte]:{since}"
+        "&order_by=startedAt[DescNullsLast]&limit=20")
 
     judge = f.code("Anything missing?", """
-const runs = $input.first().json.data?.automationRuns || [];
+const named = [
+  ['SUB Renewal Escalation', 'Renewal runs last 26h'],
+  ['OPS Scheduled Sweeps',   'Sweep runs last 26h'],
+  ['LEAD Nurture Sequence',  'Nurture runs last 26h'],
+];
 
 // 26 hours, not 24: a daily job that drifts by an hour must not raise a false
 // alarm every single morning. An alert people learn to ignore is worthless.
-const cutoff = Date.now() - 26 * 3600_000;
-const recent = runs.filter(r => new Date(r.startedAt).getTime() > cutoff);
-
-const EXPECTED = ['SUB Renewal Escalation', 'OPS Scheduled Sweeps'];
-const seen = new Set(recent.map(r => r.workflowName));
-const missing = EXPECTED.filter(w => !seen.has(w));
-const failed = recent.filter(r => r.status === 'FAILED');
+const missing = [];
+const failed = [];
+for (const [label, node] of named) {
+  const page = $(node).first().json || {};
+  const rows = page.data?.automationRuns || [];
+  const n = typeof page.totalCount === 'number' ? page.totalCount : rows.length;
+  if (!n) missing.push(label);
+  for (const r of rows) {
+    if (r.status === 'FAILED') failed.push(r.workflowName || label);
+  }
+}
 
 const problems = [];
 if (missing.length) {
@@ -1771,13 +1835,13 @@ if (missing.length) {
 }
 if (failed.length) {
   problems.push(`${failed.length} failed run(s): ` +
-                failed.slice(0, 3).map(r => r.workflowName).join(', '));
+                [...new Set(failed)].slice(0, 3).join(', '));
 }
 
 return [{ json: {
   healthy: problems.length === 0,
   problems: problems.join(' | '),
-  checked: recent.length,
+  checked: named.length,
 }}];
 """.strip())
 
@@ -1786,7 +1850,8 @@ return [{ json: {
     f.phase("Say something only when something is wrong",
             "A green tick every morning trains people to stop reading. This\n"
             "sends nothing on a good day, and names exactly what is missing on\n"
-            "a bad one.", "notify")
+            "a bad one. It does not check backup freshness — that is\n"
+            "verify_restore.py, on a schedule the operator owns.", "notify")
 
     with f.fan():
         quiet = f.log_run("Log run", "SYS Daily Health Check")
@@ -1796,7 +1861,7 @@ return [{ json: {
                          "Check the worker first: docker compose ps worker",
                          row=1)
 
-    f.chain(trig, alive, judge, gate)
+    f.chain(trig, alive, renewal, sweeps, nurture, judge, gate)
     f.connect(gate, quiet, out=0)
     f.connect(gate, shout, out=1)
     f.connect(shout, quiet)

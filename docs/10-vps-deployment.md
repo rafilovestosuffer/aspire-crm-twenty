@@ -53,6 +53,10 @@ EMAIL_SMTP_USER=<workspace user>
 EMAIL_SMTP_PASSWORD=<app password>
 # smtp-relay.gmail.com is Workspace-only; personal Gmail uses smtp.gmail.com.
 
+# Must stay empty on the server. Set, VEND Send Email will refuse every
+# other recipient. preflight.sh blocks if this is copied from a laptop demo.
+LIVE_MAIL_ALLOWLIST=
+
 # Required. The default in .env.example points at a workflow that only exists
 # on a dev machine, so on a server every alert 404s inside the error handler.
 ALERT_WEBHOOK_URL=<real chat webhook>
@@ -71,12 +75,32 @@ firewall allows them. It exists because each of those otherwise fails later,
 with an error that does not name the cause — and a DNS mistake discovered
 during the real certificate request costs you a Let's Encrypt rate limit.
 
-`deploy.sh` runs eleven gated steps and stops at the first failure: stack up,
-worker check, workspace, automation owner, object model, credentials, query
-validation, deploy and activate, verify every layer, prove the backup restores
-on this machine's own disk, and prove the proxy rules hold — that the n8n
-editor is refused from outside the allowlist and served from inside it, while
-the form, webhooks and OAuth callback stay public.
+`deploy.sh` runs eleven gated steps and stops at the first failure: stack up
+(including waiting until the **server container** can GET its own `SERVER_URL`,
+because metadata is that HTTP call), worker check, workspace, automation owner,
+object model, credentials, query validation, deploy and activate, verify every
+layer (Caddy included), prove **both** databases restore on this machine's own
+disk, and prove the proxy rules hold — that the n8n editor is refused from
+outside the allowlist and served from inside it, while the form, webhooks and
+OAuth callback stay public.
+
+It does **not** run `prove_workflows.py`. After the stack is up, on an empty
+CRM:
+
+```bash
+python3 scripts/prove_workflows.py --production --live-email you@...
+```
+
+That requires a real SMTP relay and a real inbox. It does not deploy `--dev`
+workflows. Do not run it after Phase 4 data is in — triggering nurture would
+be eligible to SMTP real leads. Error-handler *delivery* is proven on the
+laptop with `--dev`; on the VPS, POST `ALERT_WEBHOOK_URL` or wait for a real
+failure.
+
+SMTP has no bounce or complaint webhook. `MSG Inbound Events` listens at
+`https://auto.aspiretss.com/webhook/mail-event` for a JSON POST
+`{ "type": "unsubscribe"|"bounce"|"complaint", "email": "..." }`. Until a
+provider is wired there, only the scripted unsubscribe path is proven.
 
 ### Before you start, have these
 
@@ -346,12 +370,31 @@ date of the last success is recorded in `out/restore_verification.json`.
 | `https://auto.aspiretss.com/form/aspire-contact` | Form renders |
 | `https://auto.aspiretss.com/` from an untrusted network | 403 |
 | `curl -I http://crm.aspiretss.com` | 308 redirect to https |
-| `python3 scripts/stack_verify.py` | All green, worker running |
+| `python3 scripts/stack_verify.py` | All green, worker **and Caddy** running |
 | `docker compose ... ps` | `caddy`, `server`, `worker`, `n8n`, `db`, `redis`, `backup` all up |
+| `python3 scripts/prove_workflows.py --production --live-email you@...` | Form, consent, link, inbound, scheduled, health — on an **empty** CRM only |
 
 The worker deserves its own look. Twenty's UI is perfectly healthy while the
 worker is dead — and a dead worker means no scheduled workflows and no mailbox
 sync, silently.
+
+`MSG Inbound Events` is public at `/webhook/mail-event`. SMTP itself has no
+bounce or complaint callback — a provider (or a script) must POST JSON
+`{"type":"unsubscribe"|"bounce"|"complaint","email":"..."}`. Unsubscribe is
+proven in the suite; bounce/complaint need that POST.
+
+If Twenty mailbox sync is used on this server, the Google OAuth redirect URIs
+must match `SERVER_URL` byte-for-byte, including `https`:
+
+- `https://crm.aspiretss.com/auth/google/redirect`
+- `https://crm.aspiretss.com/auth/google-apis/get-access-token`
+
+Laptop `http://localhost:3000/...` URIs will not work here. Set
+`AUTH_GOOGLE_ENABLED=true` and the matching callback vars, then recreate
+server and worker.
+
+The editor allowlist is `N8N_EDITOR_ALLOWED_IPS` in `infra/.env`, not a line
+in `infra/Caddyfile`. Recreate Caddy after changing it.
 
 `python3 scripts/verify_proxy_rules.py` runs the real `infra/Caddyfile` against
 the running stack and asserts each rule from a client outside the allowlist:

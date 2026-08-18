@@ -22,7 +22,24 @@ from pathlib import Path
 from urllib import error, request
 
 ROOT = Path(__file__).resolve().parent.parent
-COMPOSE = ["docker", "compose", "-f", str(ROOT / "infra" / "docker-compose.yml")]
+
+
+def compose_cmd(env: dict[str, str]) -> list[str]:
+    """Base compose, plus the VPS/internal overlay when this is a server.
+
+    CRM_DOMAIN is empty on a laptop. Set, the reverse proxy is in the overlay
+    and a stack_verify that only looks at docker-compose.yml will never see
+    Caddy — the one process whose absence means no TLS and no metadata API.
+    """
+    cmd = ["docker", "compose", "-f", str(ROOT / "infra" / "docker-compose.yml")]
+    if not (env.get("CRM_DOMAIN") or "").strip():
+        return cmd
+    overlay = (ROOT / "infra" / "docker-compose.internal.yml"
+               if not (env.get("ACME_EMAIL") or "").strip()
+               else ROOT / "infra" / "docker-compose.vps.yml")
+    if overlay.exists():
+        cmd += ["-f", str(overlay)]
+    return cmd
 
 OK, WARN, FAIL = "ok", "warn", "FAIL"
 GREEN, YELLOW, RED, DIM, RESET = "\033[32m", "\033[33m", "\033[31m", "\033[2m", "\033[0m"
@@ -79,8 +96,9 @@ def http(url: str, headers: dict[str, str] | None = None, timeout: int = 15):
         return 0, "", str(e)
 
 
-def check_containers(rep: Report, verbose: bool) -> dict[str, str]:
-    code, out = sh(COMPOSE + ["ps", "--format", "json"])
+def check_containers(rep: Report, verbose: bool, compose: list[str],
+                     require_caddy: bool) -> dict[str, str]:
+    code, out = sh(compose + ["ps", "--format", "json"])
     if code != 0:
         rep.add("docker compose", FAIL, "cannot run — is Docker running?")
         return {}
@@ -97,14 +115,16 @@ def check_containers(rep: Report, verbose: bool) -> dict[str, str]:
         except json.JSONDecodeError:
             pass
 
-    # Every service that must be running for the stack to work.
-    for name, why in [
+    needed = [
         ("db", "Postgres"),
         ("redis", "Redis"),
         ("server", "Twenty API + UI"),
         ("worker", "scheduled workflows, mailbox sync"),
         ("n8n", "automation"),
-    ]:
+    ]
+    if require_caddy:
+        needed.append(("caddy", "TLS reverse proxy"))
+    for name, why in needed:
         state = services.get(name)
         if state is None:
             rep.add(f"container: {name}", FAIL, f"not running — {why}")
@@ -123,17 +143,19 @@ def main() -> int:
     args = ap.parse_args()
 
     env = read_env()
+    compose = compose_cmd(env)
+    require_caddy = bool((env.get("CRM_DOMAIN") or "").strip())
     rep = Report()
 
     print(f"\n{DIM}Containers{RESET}")
-    check_containers(rep, args.verbose)
+    check_containers(rep, args.verbose, compose, require_caddy)
 
     print(f"\n{DIM}Data layer{RESET}")
-    code, out = sh(COMPOSE + ["exec", "-T", "db", "pg_isready", "-U",
+    code, out = sh(compose + ["exec", "-T", "db", "pg_isready", "-U",
                               env.get("PG_DATABASE_USER", "postgres")])
     rep.add("postgres accepting connections", OK if code == 0 else FAIL, out.strip()[:60])
 
-    code, out = sh(COMPOSE + ["exec", "-T", "db", "psql", "-U",
+    code, out = sh(compose + ["exec", "-T", "db", "psql", "-U",
                               env.get("PG_DATABASE_USER", "postgres"), "-lqt"])
     if code == 0:
         names = {l.split("|")[0].strip() for l in out.splitlines() if "|" in l}
@@ -142,7 +164,7 @@ def main() -> int:
     else:
         rep.add("database list", FAIL, out.strip()[:60])
 
-    code, out = sh(COMPOSE + ["exec", "-T", "redis", "redis-cli", "ping"])
+    code, out = sh(compose + ["exec", "-T", "redis", "redis-cli", "ping"])
     rep.add("redis", OK if "PONG" in out else FAIL, out.strip()[:40])
 
     print(f"\n{DIM}Twenty{RESET}")

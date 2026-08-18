@@ -27,10 +27,18 @@ LIVE_MAIL_ALLOWLIST — otherwise a rebuild would SMTP the fake proof domains.
 
     python scripts/prove_workflows.py --live-email you@gmail.com
 
+On a VPS, Mailpit and --dev are absent. --production skips the failure probe,
+requires a real relay and --live-email, and allows an empty allowlist (that is
+the production setting). Run it only against an empty CRM: triggering nurture
+on real leads would SMTP them.
+
+    python scripts/prove_workflows.py --production --live-email you@...
+
 Usage:
     python scripts/prove_workflows.py
     python scripts/prove_workflows.py --only consent
     python scripts/prove_workflows.py --live-email you@gmail.com
+    python scripts/prove_workflows.py --production --live-email you@gmail.com
 """
 
 from __future__ import annotations
@@ -88,12 +96,17 @@ def parse_allowlist(env: dict | None = None) -> list[str]:
     return [a.strip().lower() for a in raw.split(",") if a.strip()]
 
 
-def require_live_safety(live_email: str, env: dict | None = None) -> str:
+def require_live_safety(live_email: str, env: dict | None = None,
+                       *, allow_empty_allowlist: bool = False) -> str:
     """Refuse to prove against a real relay unless the recipient is allowlisted.
 
     An empty allowlist means VEND Send Email will SMTP anyone who consented —
     including the fake proof.{tag}@northgate-{tag}.com addresses this suite
     invents. That is the defect a live Gmail .env would hit on rebuild.sh.
+
+    --production on a VPS is the exception: LIVE_MAIL_ALLOWLIST must stay
+    empty there (preflight blocks otherwise), and this suite only sends to
+    LIVE_EMAIL. Consent-refuse tests keep a non-consenting fake address.
     """
     env = env or ENV
     email = (live_email or env.get("LIVE_DEMO_EMAIL") or "").strip()
@@ -109,6 +122,14 @@ def require_live_safety(live_email: str, env: dict | None = None) -> str:
         sys.exit(2)
     allow = parse_allowlist(env)
     if not allow:
+        if allow_empty_allowlist:
+            print(
+                "WARNING: LIVE_MAIL_ALLOWLIST is empty — consent is the only "
+                "send-time gate.\n         Opted-in proofs use "
+                f"{email} only. Do not run this against a CRM that already "
+                "has real leads due for nurture.",
+                file=sys.stderr)
+            return email
         print(
             "ERROR: EMAIL_SMTP_HOST is a real relay but LIVE_MAIL_ALLOWLIST is "
             "empty.\n       Without it, seed .example.com addresses and proof "
@@ -679,6 +700,54 @@ def prove_scheduled(sess: N8nSession, ids: dict) -> None:
               failed[0][0] + ": " + failed[0][1] if failed else status)
 
 
+def prove_health_check(sess: N8nSession, ids: dict) -> None:
+    """The health check is the thing that notices silence. Prove it runs.
+
+    A first-day VPS has no yesterday's scheduled runs, so the check may
+    correctly decide the stack is 'unhealthy' and alert. That is not a
+    failed proof — the proof is that it ran, judged, and wrote an
+    automationRun. Whether the Chat webhook delivered is a separate check
+    (laptop --dev, or a real ALERT_WEBHOOK_URL).
+    """
+    print(f"\n{BOLD}SYS Daily Health Check — the stack notices silence{OFF}")
+    name = "SYS Daily Health Check"
+    wid = ids.get(name)
+    if not check(f"{name} deployed", bool(wid),
+                 "" if wid else "not found"):
+        return
+    wf = sess.workflow(wid)
+    trig = next((n["name"] for n in wf.get("nodes", [])
+                 if "schedule" in n.get("type", "").lower()), "Daily 09:00 UTC")
+    before = count("automationRuns",
+                   f"filter=workflowName[eq]:{parse.quote(name)}")
+    exec_id = sess.run(wid, trig)
+    if not check(f"{name} starts", bool(exec_id)):
+        return
+    result = sess.wait(exec_id)
+    status = result.get("status", "unknown")
+    failed = [
+        (n, r["error"].get("message", "")[:90])
+        for n, runs_ in ((result.get("data") or {})
+                         .get("resultData", {}).get("runData", {}) or {}).items()
+        for r in runs_ if r.get("error")
+    ]
+    check(f"{name} completes without node errors",
+          status == "success" and not failed,
+          failed[0][0] + ": " + failed[0][1] if failed else status)
+
+    wrote = False
+    now_count = before
+    for _ in range(15):
+        time.sleep(2)
+        now_count = count("automationRuns",
+                          f"filter=workflowName[eq]:{parse.quote(name)}")
+        if now_count > before:
+            wrote = True
+            break
+    check("health check wrote an automationRun", wrote,
+          f"{now_count - before} new row(s)")
+
+
 def cleanup() -> None:
     """
     Remove the records this run created.
@@ -712,7 +781,7 @@ def cleanup() -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Prove the workflows work")
     ap.add_argument("--only", default="",
-                    help="lead, consent, link, inbound, error, scheduled")
+                    help="lead, consent, link, inbound, error, scheduled, health")
     ap.add_argument("--email", default="admin@aspiretss.com")
     ap.add_argument("--password", default="AspireDemo2026!")
     ap.add_argument("--keep", action="store_true",
@@ -721,12 +790,25 @@ def main() -> int:
                     help="send opted-in proofs to this address (required when "
                          "EMAIL_SMTP_HOST is a real relay). Also reads "
                          "LIVE_DEMO_EMAIL from the environment.")
+    ap.add_argument("--production", action="store_true",
+                    help="VPS prove: no Mailpit, no --dev failure probe, "
+                         "requires a real SMTP relay and --live-email. "
+                         "Run only against an empty CRM.")
     args = ap.parse_args()
 
     global LIVE_EMAIL
     live_flag = (args.live_email or os.environ.get("LIVE_DEMO_EMAIL")
                  or ENV.get("LIVE_DEMO_EMAIL") or "").strip()
-    if smtp_is_live():
+    if args.production:
+        if not smtp_is_live():
+            print(
+                "ERROR: --production is the VPS prove. EMAIL_SMTP_HOST is "
+                "unset or points at Mailpit.\n       Use prove_workflows.py "
+                "without --production on a laptop, or set the real relay.",
+                file=sys.stderr)
+            return 2
+        LIVE_EMAIL = require_live_safety(live_flag, allow_empty_allowlist=True)
+    elif smtp_is_live():
         LIVE_EMAIL = require_live_safety(live_flag)
     elif live_flag:
         LIVE_EMAIL = live_flag
@@ -737,9 +819,11 @@ def main() -> int:
         return 2
 
     print(f"Twenty  {TWENTY}\nn8n     {N8N}")
+    if args.production:
+        print("mode    production (messageLog, no failure probe)")
     if LIVE_EMAIL:
         print(f"live    {LIVE_EMAIL}  (asserting messageLog, not Mailpit)")
-    else:
+    elif not args.production:
         print(f"Mailpit {MAILPIT}")
 
     try:
@@ -763,8 +847,15 @@ def main() -> int:
     run("consent", prove_consent_gate)
     run("link", prove_tracked_link)
     run("inbound", prove_inbound_events)
-    run("error", prove_error_handler, sess, ids)
+    if args.production:
+        if not want or "error" in want:
+            print(f"\n{BOLD}SYS Error Handler — skipped on --production{OFF}")
+            print(f"  {DIM}Delivery is proven on the laptop with --dev. On the "
+                  f"VPS, POST ALERT_WEBHOOK_URL or wait for a real failure.{OFF}")
+    else:
+        run("error", prove_error_handler, sess, ids)
     run("scheduled", prove_scheduled, sess, ids)
+    run("health", prove_health_check, sess, ids)
 
     if not args.keep:
         cleanup()

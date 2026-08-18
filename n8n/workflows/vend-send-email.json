@@ -168,6 +168,19 @@
     },
     {
       "parameters": {
+        "jsCode": "const sent = $input.first().json || {};\nconst raw = sent.messageId || sent.messageID || sent.id || $execution.id;\nreturn [{ json: { ...sent, vendorMessageId: String(raw).slice(0, 200) } }];"
+      },
+      "id": "536062450363",
+      "name": "Identify the send",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
         "url": "={{ $env.TWENTY_BASE_URL }}/rest/messageLogs",
         "authentication": "genericCredentialType",
@@ -181,14 +194,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"SENT\", \"subject\": $('Render template').first().json.subject, \"vendor\": 'smtp/' + $('Render template').first().json.templateKey, \"sentAt\": $now.toUTC().toISO(), \"personId\": $('Render template').first().json.personId }) }}"
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"EMAIL\", \"direction\": \"OUTBOUND\", \"status\": \"SENT\", \"subject\": $('Render template').first().json.subject, \"vendor\": 'smtp/' + $('Render template').first().json.templateKey, \"vendorMessageId\": $json.vendorMessageId, \"sentAt\": $now.toUTC().toISO(), \"personId\": $('Render template').first().json.personId }) }}"
       },
       "id": "373407929265",
       "name": "Log message",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1540,
+        1760,
         300
       ],
       "credentials": {
@@ -222,7 +235,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1760,
+        1980,
         490
       ],
       "credentials": {
@@ -270,7 +283,7 @@
       "parameters": {
         "content": "## Send, and keep the receipt\nFill in the template and hand it to the mail server. Whether it\nwas sent or refused, a message log record is written either way,\nso a refusal is evidence rather than silence. That log is what\nwe would show if someone asked whether we emailed a contact.",
         "height": 510,
-        "width": 640,
+        "width": 860,
         "color": 2
       },
       "id": "525436825770",
@@ -358,6 +371,17 @@
       ]
     },
     "Send by SMTP": {
+      "main": [
+        [
+          {
+            "node": "Identify the send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Identify the send": {
       "main": [
         [
           {
