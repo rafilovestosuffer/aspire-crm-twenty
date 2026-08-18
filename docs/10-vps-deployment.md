@@ -24,7 +24,9 @@ cd aspire-crm-twenty
 # Default `main` is still 6d83b60 and is missing the VPS gates. Until that
 # merge lands, deploy from this branch or the stack will start without them.
 git checkout cursor/live-gmail-demo-8f94
-git log -1 --oneline   # must be 8500ea1 or a descendant of it
+git log -1 --format='%an %h %s'
+# Author must be Rafiur Rahman. Tip must include, or sit after,
+# "Close the VPS defects that would fail or lie on first deploy"
 cp infra/.env.example infra/.env
 
 # print four secrets, paste them into infra/.env
@@ -219,7 +221,9 @@ will feel slow under any real load.
 git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
 cd aspire-crm-twenty
 git checkout cursor/live-gmail-demo-8f94
-git log -1 --oneline   # must be 8500ea1 or a descendant of it
+git log -1 --format='%an %h %s'
+# Author must be Rafiur Rahman. Tip must include, or sit after,
+# "Close the VPS defects that would fail or lie on first deploy"
 cp infra/.env.example infra/.env
 ```
 
