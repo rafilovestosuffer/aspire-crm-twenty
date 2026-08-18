@@ -1994,15 +1994,21 @@ const IDLE_REASON = `no lead due a nudge (${submissions.length} submission(s) in
     # Opted-out people are NOT filtered here on purpose. The send sub-workflow
     # is the single place consent is decided; filtering early would put a second
     # copy of that rule in a second file, and the two would drift.
-    # Batch size and the pause below are a rate-limit calculation, not a guess.
-    # Twenty allows 100 requests per MINUTE. Each nudge costs 3 calls inside the
-    # send sub-workflow (get person, get consent, log the outcome), so a batch of
-    # 20 was 60 calls fired back to back — and two batches in the same minute put
-    # us over the limit. n8n retries a 429, so the symptom would not be lost mail;
-    # it would be a slow, noisy run that trips the error handler on a busy day.
-    # 10 per batch, one batch every 30 seconds, is a steady 60 calls a minute.
-    batch = f.add("Batch 10", "n8n-nodes-base.splitInBatches",
-                  {"batchSize": 10, "options": {}}, version=3)
+    #
+    # ONE per iteration, and that is not a tuning choice. Execute Workflow
+    # defaults to mode "once": every item in the batch is handed to a SINGLE
+    # sub-workflow execution, and VEND Send Email reads $('When called').first().
+    # A batch of ten therefore sent one email and silently dropped nine. Looping
+    # one at a time is the shape n8n documents, and it keeps the counter, the
+    # log and the send talking about the same person.
+    #
+    # The pause is a rate-limit calculation, not a guess. Twenty allows 100
+    # requests per MINUTE and each nudge costs 3 calls inside the send
+    # sub-workflow (get person, get consent, log the outcome). One every three
+    # seconds is 20 a minute, 60 calls — the same budget the old batch-of-ten
+    # was aiming at, now actually delivered.
+    batch = f.add("One at a time", "n8n-nodes-base.splitInBatches",
+                  {"batchSize": 1, "options": {}}, version=3)
 
     f.phase("Send it the only way anything can be sent",
             "Each nudge goes through the send sub-workflow, so the consent gate\n"
@@ -2018,10 +2024,10 @@ const IDLE_REASON = `no lead due a nudge (${submissions.length} submission(s) in
             "mergeData": "={{ { \"touch\": $json.touch, \"ageDays\": $json.ageDays } }}",
         }},
         "options": {},
-    }, version=1)
+    }, version=1.2)
 
-    pace = f.add("Pace the batches", "n8n-nodes-base.wait",
-                 {"amount": 30, "unit": "seconds"}, version=1.1)
+    pace = f.add("Pace the sends", "n8n-nodes-base.wait",
+                 {"amount": 3, "unit": "seconds"}, version=1.1)
 
     log = f.log_run("Log run", "LEAD Nurture Sequence")
     gate, _ = f.idle_gate("LEAD Nurture Sequence")
@@ -2442,8 +2448,11 @@ for (const r of regs) {
 const IDLE_REASON = `no reminder due (${events.length} webinar(s) in the next 48h)`;
 """.strip() + "\n" + IDLE_MARKER_JS)
 
-    batch = f.add("Batch 10", "n8n-nodes-base.splitInBatches",
-                  {"batchSize": 10, "options": {}}, version=3)
+    # One at a time: Execute Workflow's default mode hands the whole batch to a
+    # single sub-workflow execution, which reads only the first item — so a
+    # batch of ten reminded one person and silently skipped nine.
+    batch = f.add("One at a time", "n8n-nodes-base.splitInBatches",
+                  {"batchSize": 1, "options": {}}, version=3)
 
     f.phase("Send it and mark it sent",
             "The counter is written straight after the send. If the send\n"
@@ -2458,7 +2467,7 @@ const IDLE_REASON = `no reminder due (${events.length} webinar(s) in the next 48
             "mergeData": "={{ { \"webinarTitle\": $json.webinarTitle, \"scheduledAt\": $json.scheduledAt } }}",
         }},
         "options": {},
-    }, version=1)
+    }, version=1.2)
 
     # `.item`, not `.first()`. Inside a batch of ten, `.first()` is the first
     # row of the batch for all ten items — so one registration would have its
@@ -2468,11 +2477,11 @@ const IDLE_REASON = `no reminder due (${events.length} webinar(s) in the next 48
     # actually working on.
     mark = f.twenty("Mark reminded", "PATCH",
                     "/rest/webinarRegistrations/"
-                    "{{ $('Batch 10').item.json.registrationId }}",
-                    {"remindersSent": "={{ $('Batch 10').item.json.remindersSent }}"})
+                    "{{ $('One at a time').item.json.registrationId }}",
+                    {"remindersSent": "={{ $('One at a time').item.json.remindersSent }}"})
 
-    pace = f.add("Pace the batches", "n8n-nodes-base.wait",
-                 {"amount": 30, "unit": "seconds"}, version=1.1)
+    pace = f.add("Pace the sends", "n8n-nodes-base.wait",
+                 {"amount": 3, "unit": "seconds"}, version=1.1)
 
     log = f.log_run("Log run", "EVT Webinar Reminders")
     gate, _ = f.idle_gate("EVT Webinar Reminders")
@@ -2556,8 +2565,11 @@ for (const e of events) {
 const IDLE_REASON = `no webinar finished with anyone to follow up (${events.length} in window)`;
 """.strip() + "\n" + IDLE_MARKER_JS)
 
-    batch = f.add("Batch 10", "n8n-nodes-base.splitInBatches",
-                  {"batchSize": 10, "options": {}}, version=3)
+    # One at a time: see EVT Webinar Reminders. Execute Workflow's default
+    # mode would hand the whole batch to one sub-workflow execution and only
+    # the first attendee would hear from us.
+    batch = f.add("One at a time", "n8n-nodes-base.splitInBatches",
+                  {"batchSize": 1, "options": {}}, version=3)
 
     f.phase("Send, then close the event",
             "Numbers are written back onto the event so 'did that topic\n"
@@ -2572,10 +2584,10 @@ const IDLE_REASON = `no webinar finished with anyone to follow up (${events.leng
             "mergeData": "={{ { \"webinarTitle\": $json.webinarTitle } }}",
         }},
         "options": {},
-    }, version=1)
+    }, version=1.2)
 
-    pace = f.add("Pace the batches", "n8n-nodes-base.wait",
-                 {"amount": 30, "unit": "seconds"}, version=1.1)
+    pace = f.add("Pace the sends", "n8n-nodes-base.wait",
+                 {"amount": 3, "unit": "seconds"}, version=1.1)
 
     # The plan emits one item per registration, so several rows can belong to
     # the same event. Closing straight off `.first()` would mark exactly one
@@ -2876,6 +2888,17 @@ const IDLE_REASON = `nothing to chase or welcome (${cohorts.length} cohort(s), $
             "opted out is refused here like anywhere else. Seat counts are\n"
             "rewritten from what the enrolments actually say.", "notify")
 
+    # Both mail branches loop one item at a time. Wired straight from the
+    # switch, Execute Workflow's default mode would pass every chase-due
+    # enrolment into a single sub-workflow execution, which reads only the
+    # first — one student chased, the rest silently skipped, and the run still
+    # green. The seat branch needs no loop: it is an HTTP node, which does
+    # execute once per item.
+    chase_loop = f.add("Chase one at a time", "n8n-nodes-base.splitInBatches",
+                       {"batchSize": 1, "options": {}}, version=3)
+    join_loop = f.add("Welcome one at a time", "n8n-nodes-base.splitInBatches",
+                      {"batchSize": 1, "options": {}}, version=3, row=1)
+
     with f.fan():
         chase = f.add("Send chase", "n8n-nodes-base.executeWorkflow", {
             "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
@@ -2887,7 +2910,7 @@ const IDLE_REASON = `nothing to chase or welcome (${cohorts.length} cohort(s), $
                              "\"paymentLinkUrl\": $json.paymentLinkUrl } }}",
             }},
             "options": {},
-        }, version=1)
+        }, version=1.2)
 
         joining = f.add("Send joining details", "n8n-nodes-base.executeWorkflow", {
             "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
@@ -2900,7 +2923,7 @@ const IDLE_REASON = `nothing to chase or welcome (${cohorts.length} cohort(s), $
                              "\"joiningDetails\": \"Details and materials are in your student portal.\" } }}",
             }},
             "options": {},
-        }, version=1, row=1)
+        }, version=1.2, row=1)
 
         seats = f.code("Reconcile seats", """
 // One item per cohort whose count is wrong, for the PATCH that follows.
@@ -2916,8 +2939,13 @@ return ($input.first().json.seatRows || []).map(r => ({ json: r }));
     # day after — the daily-harassment outcome CHASE_EVERY_DAYS exists to
     # prevent, arriving silently because each send succeeds.
     stamp = f.twenty("Stamp the chase", "PATCH",
-                     "/rest/enrollments/{{ $('Chase, join, or count').item.json.enrollmentId }}",
+                     "/rest/enrollments/{{ $('Chase one at a time').item.json.enrollmentId }}",
                      {"paymentChasedAt": "={{ $now.toUTC().toISO() }}"})
+
+    chase_pace = f.add("Pace the chases", "n8n-nodes-base.wait",
+                       {"amount": 3, "unit": "seconds"}, version=1.1)
+    join_pace = f.add("Pace the welcomes", "n8n-nodes-base.wait",
+                      {"amount": 3, "unit": "seconds"}, version=1.1, row=1)
 
     fix_seats = f.twenty("Write seat count", "PATCH",
                          "/rest/cohorts/{{ $json.cohortId }}",
@@ -2928,12 +2956,20 @@ return ($input.first().json.seatRows || []).map(r => ({ json: r }));
 
     f.chain(trig, cohorts, enrols, plan, gate)
     f.connect(gate, route, out=0)
-    f.connect(route, chase, out=0)
-    f.connect(route, joining, out=1)
+
+    f.connect(route, chase_loop, out=0)
+    f.connect(chase_loop, log, out=0)          # loop finished
+    f.connect(chase_loop, chase, out=1)        # loop body
+    f.chain(chase, stamp, chase_pace)
+    f.connect(chase_pace, chase_loop)
+
+    f.connect(route, join_loop, out=1)
+    f.connect(join_loop, log, out=0)
+    f.connect(join_loop, joining, out=1)
+    f.chain(joining, join_pace)
+    f.connect(join_pace, join_loop)
+
     f.connect(route, seats, out=2)
-    f.chain(chase, stamp)
-    f.connect(stamp, log)
-    f.connect(joining, log)
     f.chain(seats, fix_seats)
     f.connect(fix_seats, log)
     return f
@@ -3002,6 +3038,13 @@ const IDLE_REASON = 'no appointment tomorrow and none missed';
             "booked and did not arrive is still interested — they just need\n"
             "rescheduling.", "notify")
 
+    # The reminder branch loops one at a time for the same reason as every
+    # other send: Execute Workflow's default mode collapses the whole branch
+    # into one sub-workflow call and only the first person is reminded. The
+    # no-show branch is HTTP nodes, which do run once per item.
+    remind_loop = f.add("One at a time", "n8n-nodes-base.splitInBatches",
+                        {"batchSize": 1, "options": {}}, version=3)
+
     with f.fan():
         remind = f.add("Send reminder", "n8n-nodes-base.executeWorkflow", {
             "workflowId": {"__rl": True, "value": "VEND Send Email", "mode": "list"},
@@ -3013,15 +3056,20 @@ const IDLE_REASON = 'no appointment tomorrow and none missed';
                              "\"meetingUrl\": $json.meetingUrl } }}",
             }},
             "options": {},
-        }, version=1)
+        }, version=1.2)
 
         mark = f.twenty("Mark no-show", "PATCH",
                         "/rest/appointments/{{ $json.appointmentId }}",
                         {"status": "NO_SHOW"}, row=1)
 
+    pace = f.add("Pace the reminders", "n8n-nodes-base.wait",
+                 {"amount": 3, "unit": "seconds"}, version=1.1)
+
+    # `.item`, not `.first()`: several appointments can be missed on the same
+    # day, and every task would otherwise carry the first one's time.
     reschedule = f.twenty("Task: reschedule", "POST", "/rest/tasks", {
         "title": "={{ 'No-show — reschedule (' + "
-                 "$('Reminders and no-shows').first().json.scheduledAt + ')' }}",
+                 "$('Reminders and no-shows').item.json.scheduledAt + ')' }}",
         "status": "TODO",
         "dueAt": "={{ $now.plus({ days: 1 }).toUTC().toISO() }}",
         "bodyV2": {"markdown": "They booked and did not attend. Worth one call before letting it go."},
@@ -3032,9 +3080,12 @@ const IDLE_REASON = 'no appointment tomorrow and none missed';
 
     f.chain(trig, soon, past, plan, gate)
     f.connect(gate, route, out=0)
-    f.connect(route, remind, out=0)
+    f.connect(route, remind_loop, out=0)
+    f.connect(remind_loop, log, out=0)
+    f.connect(remind_loop, remind, out=1)
+    f.chain(remind, pace)
+    f.connect(pace, remind_loop)
     f.connect(route, mark, out=1)
-    f.connect(remind, log)
     f.chain(mark, reschedule)
     f.connect(reschedule, log)
     return f
@@ -3303,6 +3354,52 @@ def _check_utc_dates(flows: list["Flow"]) -> list[str]:
     return problems
 
 
+def _check_send_loops(flow: Flow) -> list[str]:
+    """Every Execute Workflow call must be fed one item at a time.
+
+    The node's `mode` defaults to "once", which hands the WHOLE input to a
+    single sub-workflow execution. VEND Send Email reads
+    `$('When called').first()`, so a batch of ten produced exactly one email
+    and discarded the other nine — with a green run, no error, and nine people
+    who simply never heard from us.
+
+    "each" mode exists but is deprecated. The supported shape is a Loop Over
+    Items (splitInBatches) with batchSize 1 immediately upstream, so that is
+    what this enforces.
+
+    Only scheduled workflows are checked. A form or webhook execution carries
+    exactly one submission, so "once" over a single item is correct there and
+    a loop would be noise. It is the scans — which fan a query result out
+    across many people — where the default quietly drops everyone but one.
+    """
+    if not any(n["type"] == "n8n-nodes-base.scheduleTrigger" for n in flow.nodes):
+        return []
+
+    problems: list[str] = []
+    loops = {n["name"]: n for n in flow.nodes
+             if n["type"] == "n8n-nodes-base.splitInBatches"}
+    feeders: dict[str, list[str]] = {}
+    for src, out in flow.connections.items():
+        for branch in out.get("main", []):
+            for link in branch:
+                feeders.setdefault(link["node"], []).append(src)
+
+    for node in flow.nodes:
+        if node["type"] != "n8n-nodes-base.executeWorkflow":
+            continue
+        upstream = feeders.get(node["name"], [])
+        looped = [u for u in upstream
+                  if u in loops
+                  and loops[u]["parameters"].get("batchSize") == 1]
+        if upstream and not looped:
+            problems.append(
+                f"{flow.name} / {node['name']}: fed by {upstream} — not a "
+                f"batchSize-1 Loop Over Items. Execute Workflow defaults to "
+                f"mode 'once' and would pass every item to a single "
+                f"sub-workflow run, which reads only the first.")
+    return problems
+
+
 def lint(flow: Flow) -> list[str]:
     """
     Static checks for the failure modes that only show up at runtime.
@@ -3313,6 +3410,22 @@ def lint(flow: Flow) -> list[str]:
     problems: list[str] = []
     for node in flow.nodes:
         where = f"{flow.name} / {node['name']}"
+
+        # Execute Workflow below typeVersion 1.2 cannot read a resource-locator
+        # reference. The id binds correctly, the JSON looks right, and the node
+        # throws "Workflow does not exist." only when it actually runs — which
+        # for a send inside a batch means only on a day someone was due mail.
+        # LEAD Nurture Sequence shipped this way and never sent a single nudge;
+        # every proof run passed because no lead was ever old enough to be due.
+        if node.get("type") == "n8n-nodes-base.executeWorkflow":
+            ref = (node.get("parameters") or {}).get("workflowId")
+            if isinstance(ref, dict) and float(node.get("typeVersion", 1)) < 1.2:
+                problems.append(
+                    f"{where}: Execute Workflow at typeVersion "
+                    f"{node.get('typeVersion')} with a resource-locator "
+                    f"workflowId — n8n cannot resolve it and throws "
+                    f"'Workflow does not exist.' at runtime. Use version=1.2.")
+
         for key, val in (node.get("parameters") or {}).items():
             if not isinstance(val, str) or "{{" not in val:
                 continue
@@ -3386,6 +3499,7 @@ def main() -> int:
         return 0
 
     problems = [p for fl in flows for p in lint(fl)]
+    problems += [p for fl in flows for p in _check_send_loops(fl)]
     problems += _check_templates(flows)
     problems += _check_utc_dates(flows)
     if problems:

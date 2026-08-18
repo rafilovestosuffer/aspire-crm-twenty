@@ -166,6 +166,20 @@
     },
     {
       "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "161849047645",
+      "name": "One at a time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1220,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "workflowId": {
           "__rl": true,
           "value": "VEND Send Email",
@@ -183,9 +197,9 @@
       "id": "936015587866",
       "name": "Send reminder",
       "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1,
+      "typeVersion": 1.2,
       "position": [
-        1220,
+        1440,
         300
       ]
     },
@@ -211,7 +225,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1220,
+        1440,
         490
       ],
       "credentials": {
@@ -222,6 +236,20 @@
       "retryOnFail": true,
       "maxTries": 5,
       "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "seconds"
+      },
+      "id": "707729006002",
+      "name": "Pace the reminders",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1660,
+        300
+      ]
     },
     {
       "parameters": {
@@ -238,14 +266,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"title\": 'No-show \u2014 reschedule (' + $('Reminders and no-shows').first().json.scheduledAt + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 1 }).toUTC().toISO(), \"bodyV2\": {\"markdown\": \"They booked and did not attend. Worth one call before letting it go.\" } }) }}"
+        "jsonBody": "={{ JSON.stringify({\"title\": 'No-show \u2014 reschedule (' + $('Reminders and no-shows').item.json.scheduledAt + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 1 }).toUTC().toISO(), \"bodyV2\": {\"markdown\": \"They booked and did not attend. Worth one call before letting it go.\" } }) }}"
       },
       "id": "080275741885",
       "name": "Task: reschedule",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1440,
+        1880,
         490
       ],
       "credentials": {
@@ -279,7 +307,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1660,
+        2100,
         300
       ],
       "credentials": {
@@ -317,7 +345,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        1880,
+        2320,
         300
       ]
     },
@@ -343,7 +371,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2100,
+        2540,
         490
       ],
       "credentials": {
@@ -391,7 +419,7 @@
       "parameters": {
         "content": "## Remind, or record the miss\nThe reminder finally uses the template that has sat unused since\nthe first build. A no-show becomes a task, because someone who\nbooked and did not arrive is still interested \u2014 they just need\nrescheduling.",
         "height": 510,
-        "width": 1080,
+        "width": 1520,
         "color": 2
       },
       "id": "895013851435",
@@ -471,7 +499,7 @@
       "main": [
         [
           {
-            "node": "Send reminder",
+            "node": "One at a time",
             "type": "main",
             "index": 0
           }
@@ -485,11 +513,40 @@
         ]
       ]
     },
-    "Send reminder": {
+    "One at a time": {
       "main": [
         [
           {
             "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send reminder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send reminder": {
+      "main": [
+        [
+          {
+            "node": "Pace the reminders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pace the reminders": {
+      "main": [
+        [
+          {
+            "node": "One at a time",
             "type": "main",
             "index": 0
           }

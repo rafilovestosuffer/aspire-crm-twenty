@@ -236,11 +236,11 @@
     },
     {
       "parameters": {
-        "batchSize": 10,
+        "batchSize": 1,
         "options": {}
       },
-      "id": "934129958156",
-      "name": "Batch 10",
+      "id": "844629522013",
+      "name": "One at a time",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
       "position": [
@@ -267,7 +267,7 @@
       "id": "248017142522",
       "name": "Send nudge",
       "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1,
+      "typeVersion": 1.2,
       "position": [
         0,
         920
@@ -275,11 +275,11 @@
     },
     {
       "parameters": {
-        "amount": 30,
+        "amount": 3,
         "unit": "seconds"
       },
-      "id": "240593881700",
-      "name": "Pace the batches",
+      "id": "368273881428",
+      "name": "Pace the sends",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
@@ -439,7 +439,7 @@
       "main": [
         [
           {
-            "node": "Batch 10",
+            "node": "One at a time",
             "type": "main",
             "index": 0
           }
@@ -519,7 +519,7 @@
         ]
       ]
     },
-    "Batch 10": {
+    "One at a time": {
       "main": [
         [
           {
@@ -541,18 +541,18 @@
       "main": [
         [
           {
-            "node": "Pace the batches",
+            "node": "Pace the sends",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Pace the batches": {
+    "Pace the sends": {
       "main": [
         [
           {
-            "node": "Batch 10",
+            "node": "One at a time",
             "type": "main",
             "index": 0
           }

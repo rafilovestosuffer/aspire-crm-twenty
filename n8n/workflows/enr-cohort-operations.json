@@ -210,6 +210,34 @@
     },
     {
       "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "758640001530",
+      "name": "Chase one at a time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "198646063401",
+      "name": "Welcome one at a time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1440,
+        490
+      ]
+    },
+    {
+      "parameters": {
         "workflowId": {
           "__rl": true,
           "value": "VEND Send Email",
@@ -227,9 +255,9 @@
       "id": "306416049421",
       "name": "Send chase",
       "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1,
+      "typeVersion": 1.2,
       "position": [
-        1220,
+        1660,
         300
       ]
     },
@@ -252,9 +280,9 @@
       "id": "975161097457",
       "name": "Send joining details",
       "type": "n8n-nodes-base.executeWorkflow",
-      "typeVersion": 1,
+      "typeVersion": 1.2,
       "position": [
-        1220,
+        1660,
         490
       ]
     },
@@ -267,14 +295,14 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1220,
+        1660,
         680
       ]
     },
     {
       "parameters": {
         "method": "PATCH",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/enrollments/{{ $('Chase, join, or count').item.json.enrollmentId }}",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/enrollments/{{ $('Chase one at a time').item.json.enrollmentId }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -293,7 +321,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1440,
+        1880,
         300
       ],
       "credentials": {
@@ -304,6 +332,34 @@
       "retryOnFail": true,
       "maxTries": 5,
       "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "seconds"
+      },
+      "id": "054035262642",
+      "name": "Pace the chases",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "seconds"
+      },
+      "id": "159704566625",
+      "name": "Pace the welcomes",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2320,
+        490
+      ]
     },
     {
       "parameters": {
@@ -327,7 +383,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1660,
+        2540,
         680
       ],
       "credentials": {
@@ -361,7 +417,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1880,
+        2760,
         300
       ],
       "credentials": {
@@ -399,7 +455,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        2100,
+        2980,
         300
       ]
     },
@@ -425,7 +481,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2320,
+        3200,
         490
       ],
       "credentials": {
@@ -473,7 +529,7 @@
       "parameters": {
         "content": "## Chase, welcome, reconcile\nEvery message goes through the send workflow, so a student who\nopted out is refused here like anywhere else. Seat counts are\nrewritten from what the enrolments actually say.",
         "height": 680,
-        "width": 1300,
+        "width": 2180,
         "color": 2
       },
       "id": "935830465533",
@@ -553,14 +609,14 @@
       "main": [
         [
           {
-            "node": "Send chase",
+            "node": "Chase one at a time",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "Send joining details",
+            "node": "Welcome one at a time",
             "type": "main",
             "index": 0
           }
@@ -568,6 +624,24 @@
         [
           {
             "node": "Reconcile seats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chase one at a time": {
+      "main": [
+        [
+          {
+            "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send chase",
             "type": "main",
             "index": 0
           }
@@ -589,7 +663,36 @@
       "main": [
         [
           {
+            "node": "Pace the chases",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pace the chases": {
+      "main": [
+        [
+          {
+            "node": "Chase one at a time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Welcome one at a time": {
+      "main": [
+        [
+          {
             "node": "Log run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send joining details",
             "type": "main",
             "index": 0
           }
@@ -600,7 +703,18 @@
       "main": [
         [
           {
-            "node": "Log run",
+            "node": "Pace the welcomes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pace the welcomes": {
+      "main": [
+        [
+          {
+            "node": "Welcome one at a time",
             "type": "main",
             "index": 0
           }

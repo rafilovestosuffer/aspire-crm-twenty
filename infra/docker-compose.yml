@@ -210,6 +210,10 @@ services:
       # Required for a live Gmail demo so seed and proof addresses cannot leave
       # the host. Empty in production — consent is the only send-time gate.
       LIVE_MAIL_ALLOWLIST: ${LIVE_MAIL_ALLOWLIST:-}
+      # TIER=url pairs for the six bootcamp prices. ENR Bootcamp Enrolment
+      # refuses to guess: unset, every enrolment fails with a named error
+      # rather than mailing somebody an empty or wrong-priced link.
+      ENROL_PAYMENT_LINKS: ${ENROL_PAYMENT_LINKS:-}
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
 
       # Chat alerts post to an incoming webhook — a plain JSON POST, so the

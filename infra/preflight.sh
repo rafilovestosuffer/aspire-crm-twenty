@@ -138,6 +138,27 @@ else
   ok "LIVE_MAIL_ALLOWLIST" "empty — consent is the only send-time gate"
 fi
 
+# ENR Bootcamp Enrolment throws rather than guess a payment link, so an unset
+# value is not a degraded enrolment — it is no enrolment at all, once per
+# prospective student, with an alert each time. This is the revenue path, so
+# it is checked here rather than discovered by the first person who tries to
+# pay. Six tiers exist; fewer is legal (not every tier need be on sale) but
+# worth saying out loud.
+links=$(env_get ENROL_PAYMENT_LINKS)
+if [[ -z "$links" ]]; then
+  bad "ENROL_PAYMENT_LINKS" "not set — every bootcamp enrolment will fail with 'no payment link configured'. The six URLs are in GoHighLevel under Marketing → Trigger Links ('Payment Link - Training <Tier>'). Format: BRONZE=https://...,GOLD=https://..."
+else
+  tiers=$(tr ',' '\n' <<<"$links" | grep -c '=' || true)
+  malformed=$(tr ',' '\n' <<<"$links" | grep -vc '^[A-Za-z]*=https\?://' || true)
+  if [[ "$malformed" -gt 0 ]]; then
+    bad "ENROL_PAYMENT_LINKS" "$malformed entry(s) are not TIER=https://... — the tier would be unmatched and the enrolment would fail"
+  elif [[ "$tiers" -lt 6 ]]; then
+    warn "ENROL_PAYMENT_LINKS" "$tiers of 6 tiers configured — enrolments for the others will fail. Intentional only if those tiers are not on sale"
+  else
+    ok "ENROL_PAYMENT_LINKS" "$tiers tier(s) configured"
+  fi
+fi
+
 driver=$(env_get EMAIL_DRIVER)
 case "$driver" in
   smtp|SMTP) ok "EMAIL_DRIVER" "smtp" ;;
