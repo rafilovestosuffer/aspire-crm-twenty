@@ -292,6 +292,20 @@ def summarise_volume(records: Any) -> dict:
     }
 
 
+def fanout_ids(key: str) -> list[str]:
+    """Ids from an already-pulled config endpoint, for endpoints that refuse
+    a location-wide query. Returns [] when the source has not been pulled."""
+    src = RAW / f"{key}.json"
+    if not src.exists():
+        return []
+    try:
+        body = json.loads(src.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    items = body if isinstance(body, list) else []
+    return [str(i["id"]) for i in items if isinstance(i, dict) and i.get("id")]
+
+
 def paginate(client: Client, ep: dict, base_query: dict, page_size: int,
              version: str) -> tuple[int, list, str]:
     """Walk pages according to the registry's paginate style."""
@@ -417,7 +431,28 @@ def main() -> int:
         query = {k: str(v).format(**substitutions) for k, v in (ep.get("query") or {}).items()}
         version = str(ep.get("version", defaults.get("version", "2021-07-28")))
 
-        status, records, err = paginate(client, dict(ep, path=path), query, page_size, version)
+        ep_page_size = int(ep.get("page_size", page_size))
+        fan = ep.get("fanout") or {}
+
+        if fan:
+            ids = fanout_ids(str(fan.get("source", "")))
+            if not ids:
+                coverage.append({"endpoint": key, "area": ep.get("area", ""), "class": cls,
+                                 "status": "skipped", "count": "", "fields": "",
+                                 "note": f"fanout source {fan.get('source')} not pulled yet"})
+                print(f"  skip  {key:26} (needs {fan.get('source')} first)")
+                continue
+            records, status, err = [], 200, ""
+            for one in ids:
+                q = dict(query, **{str(fan.get("param")): one})
+                st, page, e = paginate(client, dict(ep, path=path), q, ep_page_size, version)
+                if e or st >= 400:
+                    status, err = st, e
+                    break
+                records.extend(page)
+        else:
+            status, records, err = paginate(client, dict(ep, path=path), query,
+                                            ep_page_size, version)
 
         if err or status >= 400:
             coverage.append({"endpoint": key, "area": ep.get("area", ""), "class": cls,

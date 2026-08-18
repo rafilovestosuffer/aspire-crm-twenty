@@ -131,8 +131,12 @@ endpoints:
     scope: calendars/events.readonly
     class: volume
     paginate: none
+    fanout: {source: calendars, param: calendarId}
+    notes: >
+      Booking volume over the evidence window. Counts only — bodies discarded.
+      Live API rejects a location-wide query with 422 "Either of userId,
+      calendarId or groupId is required", so this fans out over raw/calendars.json.
     list_key: events
-    notes: Booking volume over the evidence window. Counts only — bodies discarded.
 
   # ---------- Forms & surveys ----------
   - key: forms
@@ -161,7 +165,9 @@ endpoints:
     scope: surveys.readonly
     class: config
     paginate: limit_skip
+    page_size: 50
     list_key: surveys
+    notes: Live API caps limit at 50 here; the registry default of 100 returns 422.
 
   - key: survey_submissions
     area: Forms & Surveys
@@ -387,11 +393,12 @@ endpoints:
   - key: media_files
     area: Media & Assets
     path: /medias/files
-    query: {altId: "{locationId}", altType: location, sortBy: createdAt, sortOrder: desc}
+    query: {altId: "{locationId}", altType: location, sortBy: createdAt, sortOrder: desc, type: file}
     scope: medias.readonly
     class: config
     paginate: limit_offset
     list_key: files
+    notes: '`type` is mandatory despite being undocumented; omitted it is a 422.'
 
   # ---------- Newer / tier-dependent (expected to 404 on some accounts) ----------
   - key: voice_ai_agents
