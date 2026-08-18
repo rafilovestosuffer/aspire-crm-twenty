@@ -123,7 +123,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const soon = pageAll(\"Tomorrow's appointments\", 'appointments');\nconst past = pageAll('Past due appointments',   'appointments');\n\nconst out = [];\nfor (const a of soon) {\n  if (!a.personId) continue;\n  out.push({ json: {\n    kind: 'remind', appointmentId: a.id, personId: a.personId,\n    appointmentType: a.appointmentType || 'meeting',\n    scheduledAt: a.scheduledAt,\n    meetingUrl: a.meetingUrl?.primaryLinkUrl || '',\n  }});\n}\nfor (const a of past) {\n  out.push({ json: { kind: 'noshow', appointmentId: a.id, personId: a.personId || null,\n                     scheduledAt: a.scheduledAt } });\n}\nreturn out;"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const soon = pageAll(\"Tomorrow's appointments\", 'appointments');\nconst past = pageAll('Past due appointments',   'appointments');\n\nconst out = [];\nfor (const a of soon) {\n  if (!a.personId) continue;\n  out.push({ json: {\n    kind: 'remind', appointmentId: a.id, personId: a.personId,\n    appointmentType: a.appointmentType || 'meeting',\n    scheduledAt: a.scheduledAt,\n    meetingUrl: a.meetingUrl?.primaryLinkUrl || '',\n  }});\n}\nfor (const a of past) {\n  out.push({ json: { kind: 'noshow', appointmentId: a.id, personId: a.personId || null,\n                     scheduledAt: a.scheduledAt } });\n}\nconst IDLE_REASON = 'no appointment tomorrow and none missed';\nif (!out.length) {\n  return [{ json: { idle: true, reason: IDLE_REASON } }];\n}\nreturn out;"
       },
       "id": "018871360217",
       "name": "Reminders and no-shows",
@@ -293,6 +293,70 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.idle }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "659687797234",
+      "name": "Anything to do?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"BOOK Trainer Appointment\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id, \"errorMessage\": 'idle: ' + ($json.reason || 'nothing to do') }) }}"
+      },
+      "id": "250493703620",
+      "name": "Log idle run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2100,
+        490
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
         "content": "## Tomorrow's meetings, and yesterday's no-shows\nAspire books consultations, Splunk demos and career calls across\neight calendars. A reminder the day before is the cheapest way to\ncut no-shows; catching the ones that were missed is how a lead\ngets a second chance instead of going quiet.",
         "height": 320,
         "width": 640,
@@ -327,7 +391,7 @@
       "parameters": {
         "content": "## Remind, or record the miss\nThe reminder finally uses the template that has sat unused since\nthe first build. A no-show becomes a task, because someone who\nbooked and did not arrive is still interested \u2014 they just need\nrescheduling.",
         "height": 510,
-        "width": 640,
+        "width": 1080,
         "color": 2
       },
       "id": "895013851435",
@@ -341,6 +405,24 @@
     }
   ],
   "connections": {
+    "Anything to do?": {
+      "main": [
+        [
+          {
+            "node": "Reminder or no-show?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log idle run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Daily 10:00 UTC": {
       "main": [
         [
@@ -378,7 +460,7 @@
       "main": [
         [
           {
-            "node": "Reminder or no-show?",
+            "node": "Anything to do?",
             "type": "main",
             "index": 0
           }

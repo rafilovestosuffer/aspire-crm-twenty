@@ -123,7 +123,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const cohorts = pageAll('Cohorts',    'cohorts');\nconst enrols  = pageAll('Enrolments', 'enrollments');\n\nconst byCohort = new Map();\nfor (const c of cohorts) byCohort.set(c.id, c);\n\nconst CHASE_EVERY_DAYS = 3;\nconst CHASE_UNTIL_DAYS = 21;   // stop chasing three weeks after enrolling\nconst JOINING_LEAD_DAYS = 3;\n\nconst now = Date.now();\nconst seats = new Map();\nconst out = [];\n\nfor (const e of enrols) {\n  const c = e.cohortId ? byCohort.get(e.cohortId) : null;\n\n  if (e.status === 'PAID' || e.status === 'ATTENDING') {\n    seats.set(e.cohortId, (seats.get(e.cohortId) || 0) + 1);\n  }\n\n  if (!c || !c.startDate) continue;\n  const startsInDays = Math.ceil((new Date(c.startDate).getTime() - now) / 86400000);\n\n  if (e.status === 'PAYMENT_SENT') {\n    if (startsInDays < 0) continue;                 // cohort already started\n    const age = Math.floor((now - new Date(e.enrolledAt || e.createdAt).getTime()) / 86400000);\n    if (age > CHASE_UNTIL_DAYS) continue;\n    const lastChase = e.paymentChasedAt ? new Date(e.paymentChasedAt).getTime() : 0;\n    const sinceChase = (now - lastChase) / 86400000;\n    if (lastChase && sinceChase < CHASE_EVERY_DAYS) continue;\n    out.push({ json: {\n      enrollmentId: e.id, personId: e.personId, kind: 'chase',\n      templateKey: 'enrol_payment_chase',\n      programName: c.name || 'your Aspire bootcamp',\n      tier: e.tier || '', startDate: String(c.startDate).slice(0, 10),\n      paymentLinkUrl: e.paymentLinkUrl?.primaryLinkUrl || '',\n    }});\n    continue;\n  }\n\n  if (e.status === 'PAID' && startsInDays >= 0 && startsInDays <= JOINING_LEAD_DAYS) {\n    out.push({ json: {\n      enrollmentId: e.id, personId: e.personId, kind: 'joining',\n      templateKey: 'cohort_joining',\n      programName: c.name || 'your Aspire bootcamp',\n      startDate: String(c.startDate).slice(0, 10),\n      location: c.location || 'Online',\n    }});\n  }\n}\n\n// Seat counts are recomputed from enrolments rather than incremented, so a\n// failed run or a manual edit cannot leave them permanently wrong.\nconst seatRows = [];\nfor (const c of cohorts) {\n  const filled = seats.get(c.id) || 0;\n  if (Number(c.seatsFilled || 0) !== filled) {\n    seatRows.push({ cohortId: c.id, seatsFilled: filled });\n  }\n}\nif (seatRows.length) out.push({ json: { kind: 'seats', seatRows } });\n\nreturn out;"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const cohorts = pageAll('Cohorts',    'cohorts');\nconst enrols  = pageAll('Enrolments', 'enrollments');\n\nconst byCohort = new Map();\nfor (const c of cohorts) byCohort.set(c.id, c);\n\nconst CHASE_EVERY_DAYS = 3;\nconst CHASE_UNTIL_DAYS = 21;   // stop chasing three weeks after enrolling\nconst JOINING_LEAD_DAYS = 3;\n\nconst now = Date.now();\nconst seats = new Map();\nconst out = [];\n\nfor (const e of enrols) {\n  const c = e.cohortId ? byCohort.get(e.cohortId) : null;\n\n  if (e.status === 'PAID' || e.status === 'ATTENDING') {\n    seats.set(e.cohortId, (seats.get(e.cohortId) || 0) + 1);\n  }\n\n  if (!c || !c.startDate) continue;\n  const startsInDays = Math.ceil((new Date(c.startDate).getTime() - now) / 86400000);\n\n  if (e.status === 'PAYMENT_SENT') {\n    if (startsInDays < 0) continue;                 // cohort already started\n    const age = Math.floor((now - new Date(e.enrolledAt || e.createdAt).getTime()) / 86400000);\n    if (age > CHASE_UNTIL_DAYS) continue;\n    const lastChase = e.paymentChasedAt ? new Date(e.paymentChasedAt).getTime() : 0;\n    const sinceChase = (now - lastChase) / 86400000;\n    if (lastChase && sinceChase < CHASE_EVERY_DAYS) continue;\n    out.push({ json: {\n      enrollmentId: e.id, personId: e.personId, kind: 'chase',\n      templateKey: 'enrol_payment_chase',\n      programName: c.name || 'your Aspire bootcamp',\n      tier: e.tier || '', startDate: String(c.startDate).slice(0, 10),\n      paymentLinkUrl: e.paymentLinkUrl?.primaryLinkUrl || '',\n    }});\n    continue;\n  }\n\n  if (e.status === 'PAID' && startsInDays >= 0 && startsInDays <= JOINING_LEAD_DAYS) {\n    out.push({ json: {\n      enrollmentId: e.id, personId: e.personId, kind: 'joining',\n      templateKey: 'cohort_joining',\n      programName: c.name || 'your Aspire bootcamp',\n      startDate: String(c.startDate).slice(0, 10),\n      location: c.location || 'Online',\n    }});\n  }\n}\n\n// Seat counts are recomputed from enrolments rather than incremented, so a\n// failed run or a manual edit cannot leave them permanently wrong.\nconst seatRows = [];\nfor (const c of cohorts) {\n  const filled = seats.get(c.id) || 0;\n  if (Number(c.seatsFilled || 0) !== filled) {\n    seatRows.push({ cohortId: c.id, seatsFilled: filled });\n  }\n}\nif (seatRows.length) out.push({ json: { kind: 'seats', seatRows } });\n\nconst IDLE_REASON = `nothing to chase or welcome (${cohorts.length} cohort(s), ${enrols.length} enrolment(s))`;\nif (!out.length) {\n  return [{ json: { idle: true, reason: IDLE_REASON } }];\n}\nreturn out;"
       },
       "id": "076740922947",
       "name": "What needs doing",
@@ -274,7 +274,7 @@
     {
       "parameters": {
         "method": "PATCH",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/enrollments/{{ $('Chase, join, or count').first().json.enrollmentId }}",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/enrollments/{{ $('Chase, join, or count').item.json.enrollmentId }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -375,6 +375,70 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.idle }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "756904425027",
+      "name": "Anything to do?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"ENR Cohort Operations\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id, \"errorMessage\": 'idle: ' + ($json.reason || 'nothing to do') }) }}"
+      },
+      "id": "448798527624",
+      "name": "Log idle run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2320,
+        490
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
         "content": "## Every morning, look after the cohorts\nThree things go wrong quietly: an enrolment is never paid, a\nstudent never gets joining instructions, and the seat count on\na cohort drifts from reality. All three surface only when it is\ntoo late to fix them, so they are checked daily.",
         "height": 320,
         "width": 640,
@@ -409,7 +473,7 @@
       "parameters": {
         "content": "## Chase, welcome, reconcile\nEvery message goes through the send workflow, so a student who\nopted out is refused here like anywhere else. Seat counts are\nrewritten from what the enrolments actually say.",
         "height": 680,
-        "width": 860,
+        "width": 1300,
         "color": 2
       },
       "id": "935830465533",
@@ -423,6 +487,24 @@
     }
   ],
   "connections": {
+    "Anything to do?": {
+      "main": [
+        [
+          {
+            "node": "Chase, join, or count",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log idle run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Daily 08:00 UTC": {
       "main": [
         [
@@ -460,7 +542,7 @@
       "main": [
         [
           {
-            "node": "Chase, join, or count",
+            "node": "Anything to do?",
             "type": "main",
             "index": 0
           }

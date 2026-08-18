@@ -129,6 +129,25 @@ const pageAll = (nodeName, key) => {
 """.strip()
 
 
+# Every planning node ends with this. A Code node that returns an empty array
+# stops the workflow dead: nodes with no input items do not execute, so the
+# `Log run` at the end never fires and the day leaves no automationRun behind.
+#
+# That is invisible until it is expensive. SYS Daily Health Check asks whether
+# each scheduled job ran in the last 26 hours, and a quiet Sunday — no webinars
+# finishing, no unpaid enrolments, nobody due a nudge — would look exactly like
+# a dead worker. Six workflows would report missing at once, every quiet day,
+# and an alert that cries wolf on Sundays is an alert nobody reads on Monday.
+#
+# So "nothing to do" is a result, and it gets recorded like one.
+IDLE_MARKER_JS = """
+if (!out.length) {
+  return [{ json: { idle: true, reason: IDLE_REASON } }];
+}
+return out;
+""".strip()
+
+
 # --------------------------------------------------------------------------
 # Node helpers
 # --------------------------------------------------------------------------
@@ -496,6 +515,28 @@ class Flow:
             "startedAt": "={{ $execution.startedAt }}",
             "n8nExecutionId": "={{ $execution.id }}",
         }, row=row)
+
+    def idle_gate(self, workflow: str, *, row: int = 1) -> tuple[str, str]:
+        """Split "nothing to do" off from real work.
+
+        Returns (gate, idle_log). Wire the planning node into `gate`, output 0
+        to the work, and nothing else — output 1 already reaches a log that
+        records the quiet run. See IDLE_MARKER_JS for why this exists.
+
+        `errorMessage` carries the reason because it is the only free-text
+        field on automationRun. The status is SUCCESS: an idle run is a
+        healthy one, and the health check must not read it as a failure.
+        """
+        gate = self.iff("Anything to do?", "={{ $json.idle }}", "notExists", "")
+        idle = self.twenty("Log idle run", "POST", "/rest/automationRuns", {
+            "workflowName": workflow,
+            "status": "SUCCESS",
+            "startedAt": "={{ $execution.startedAt }}",
+            "n8nExecutionId": "={{ $execution.id }}",
+            "errorMessage": "={{ 'idle: ' + ($json.reason || 'nothing to do') }}",
+        }, row=row)
+        self.connect(gate, idle, out=1)
+        return gate, idle
 
     def to_dict(self) -> dict:
         settings: dict = {"executionOrder": "v1"}
@@ -1947,8 +1988,8 @@ for (const s of submissions) {
                        templateKey: KEYS[done] } });
   }
 }
-return out;
-""".strip())
+const IDLE_REASON = `no lead due a nudge (${submissions.length} submission(s) in window)`;
+""".strip() + "\n" + IDLE_MARKER_JS)
 
     # Opted-out people are NOT filtered here on purpose. The send sub-workflow
     # is the single place consent is decided; filtering early would put a second
@@ -1983,8 +2024,10 @@ return out;
                  {"amount": 30, "unit": "seconds"}, version=1.1)
 
     log = f.log_run("Log run", "LEAD Nurture Sequence")
+    gate, _ = f.idle_gate("LEAD Nurture Sequence")
 
-    f.chain(trig, subs, sent, people, opps, plan, batch)
+    f.chain(trig, subs, sent, people, opps, plan, gate)
+    f.connect(gate, batch, out=0)
     f.connect(batch, log, out=0)          # done
     f.connect(batch, send, out=1)         # loop
     f.connect(send, pace)                 # wait before asking for the next batch
@@ -2396,8 +2439,8 @@ for (const r of regs) {
     scheduledAt: e.scheduledAt,
   }});
 }
-return out;
-""".strip())
+const IDLE_REASON = `no reminder due (${events.length} webinar(s) in the next 48h)`;
+""".strip() + "\n" + IDLE_MARKER_JS)
 
     batch = f.add("Batch 10", "n8n-nodes-base.splitInBatches",
                   {"batchSize": 10, "options": {}}, version=3)
@@ -2417,17 +2460,25 @@ return out;
         "options": {},
     }, version=1)
 
+    # `.item`, not `.first()`. Inside a batch of ten, `.first()` is the first
+    # row of the batch for all ten items — so one registration would have its
+    # counter written ten times and the other nine would never be marked at
+    # all, which means they are reminded again on the next hourly run, and the
+    # one after that, forever. `.item` resolves the row this execution is
+    # actually working on.
     mark = f.twenty("Mark reminded", "PATCH",
                     "/rest/webinarRegistrations/"
-                    "{{ $('Batch 10').first().json.registrationId }}",
-                    {"remindersSent": "={{ $('Batch 10').first().json.remindersSent }}"})
+                    "{{ $('Batch 10').item.json.registrationId }}",
+                    {"remindersSent": "={{ $('Batch 10').item.json.remindersSent }}"})
 
     pace = f.add("Pace the batches", "n8n-nodes-base.wait",
                  {"amount": 30, "unit": "seconds"}, version=1.1)
 
     log = f.log_run("Log run", "EVT Webinar Reminders")
+    gate, _ = f.idle_gate("EVT Webinar Reminders")
 
-    f.chain(trig, events, regs, plan, batch)
+    f.chain(trig, events, regs, plan, gate)
+    f.connect(gate, batch, out=0)
     f.connect(batch, log, out=0)
     f.connect(batch, send, out=1)
     f.chain(send, mark, pace)
@@ -2502,8 +2553,8 @@ for (const e of events) {
     }});
   }
 }
-return out;
-""".strip())
+const IDLE_REASON = `no webinar finished with anyone to follow up (${events.length} in window)`;
+""".strip() + "\n" + IDLE_MARKER_JS)
 
     batch = f.add("Batch 10", "n8n-nodes-base.splitInBatches",
                   {"batchSize": 10, "options": {}}, version=3)
@@ -2526,21 +2577,38 @@ return out;
     pace = f.add("Pace the batches", "n8n-nodes-base.wait",
                  {"amount": 30, "unit": "seconds"}, version=1.1)
 
+    # The plan emits one item per registration, so several rows can belong to
+    # the same event. Closing straight off `.first()` would mark exactly one
+    # event complete no matter how many finished — and an event left open is
+    # picked up again tomorrow, sending every attendee a second survey and
+    # every no-show a second recording. Collapse to distinct events first.
+    distinct = f.code("Events to close", """
+const rows = $('Split attended from no-show').all().map(i => i.json);
+const byId = new Map();
+for (const r of rows) {
+  if (r.eventId && !byId.has(r.eventId)) byId.set(r.eventId, r);
+}
+return [...byId.values()].map(r => ({ json: {
+  eventId: r.eventId,
+  attendeeCount: r.attendeeCount,
+  registrationCount: r.registrationCount,
+}}));
+""".strip())
+
     close = f.twenty("Close the event", "PATCH",
-                     "/rest/webinarEvents/"
-                     "{{ $('Split attended from no-show').first().json.eventId }}", {
+                     "/rest/webinarEvents/{{ $json.eventId }}", {
                          "status": "COMPLETED",
-                         "attendeeCount":
-                             "={{ $('Split attended from no-show').first().json.attendeeCount }}",
-                         "registrationCount":
-                             "={{ $('Split attended from no-show').first().json.registrationCount }}",
+                         "attendeeCount": "={{ $json.attendeeCount }}",
+                         "registrationCount": "={{ $json.registrationCount }}",
                      })
 
     log = f.log_run("Log run", "EVT Post-Webinar Follow-up")
+    gate, _ = f.idle_gate("EVT Post-Webinar Follow-up")
 
-    f.chain(trig, events, regs, plan, batch)
-    f.connect(batch, close, out=0)
-    f.connect(close, log)
+    f.chain(trig, events, regs, plan, gate)
+    f.connect(gate, batch, out=0)
+    f.connect(batch, distinct, out=0)
+    f.chain(distinct, close, log)
     f.connect(batch, send, out=1)
     f.chain(send, pace)
     f.connect(pace, batch)
@@ -2773,8 +2841,8 @@ for (const c of cohorts) {
 }
 if (seatRows.length) out.push({ json: { kind: 'seats', seatRows } });
 
-return out;
-""".strip())
+const IDLE_REASON = `nothing to chase or welcome (${cohorts.length} cohort(s), ${enrols.length} enrolment(s))`;
+""".strip() + "\n" + IDLE_MARKER_JS)
 
     route = f.add("Chase, join, or count", "n8n-nodes-base.switch", {
         "rules": {"values": [
@@ -2842,8 +2910,13 @@ return ($input.first().json.seatRows || []).map(r => ({ json: r }));
     # Stamp the chase so the next run can respect CHASE_EVERY_DAYS. Without
     # this the enrolment looks never-chased every morning and the student is
     # mailed daily until they pay or report us.
+    # `.item`, not `.first()`: the switch emits every chase-due enrolment at
+    # once, so `.first()` would stamp one record repeatedly and leave the rest
+    # looking never-chased. They would then be chased again tomorrow, and every
+    # day after — the daily-harassment outcome CHASE_EVERY_DAYS exists to
+    # prevent, arriving silently because each send succeeds.
     stamp = f.twenty("Stamp the chase", "PATCH",
-                     "/rest/enrollments/{{ $('Chase, join, or count').first().json.enrollmentId }}",
+                     "/rest/enrollments/{{ $('Chase, join, or count').item.json.enrollmentId }}",
                      {"paymentChasedAt": "={{ $now.toUTC().toISO() }}"})
 
     fix_seats = f.twenty("Write seat count", "PATCH",
@@ -2851,8 +2924,10 @@ return ($input.first().json.seatRows || []).map(r => ({ json: r }));
                          {"seatsFilled": "={{ $json.seatsFilled }}"}, row=2)
 
     log = f.log_run("Log run", "ENR Cohort Operations")
+    gate, _ = f.idle_gate("ENR Cohort Operations")
 
-    f.chain(trig, cohorts, enrols, plan, route)
+    f.chain(trig, cohorts, enrols, plan, gate)
+    f.connect(gate, route, out=0)
     f.connect(route, chase, out=0)
     f.connect(route, joining, out=1)
     f.connect(route, seats, out=2)
@@ -2916,8 +2991,8 @@ for (const a of past) {
   out.push({ json: { kind: 'noshow', appointmentId: a.id, personId: a.personId || null,
                      scheduledAt: a.scheduledAt } });
 }
-return out;
-""".strip())
+const IDLE_REASON = 'no appointment tomorrow and none missed';
+""".strip() + "\n" + IDLE_MARKER_JS)
 
     route = f.iff("Reminder or no-show?", "={{ $json.kind }}", "equals", "remind")
 
@@ -2953,8 +3028,10 @@ return out;
     }, row=1)
 
     log = f.log_run("Log run", "BOOK Trainer Appointment")
+    gate, _ = f.idle_gate("BOOK Trainer Appointment")
 
-    f.chain(trig, soon, past, plan, route)
+    f.chain(trig, soon, past, plan, gate)
+    f.connect(gate, route, out=0)
     f.connect(route, remind, out=0)
     f.connect(route, mark, out=1)
     f.connect(remind, log)
@@ -3130,8 +3207,8 @@ for (const t of tags) {
   if (t.category === category && t.migrationAction === action) continue;
   out.push({ json: { id: t.id, name, category, migrationAction: action, why } });
 }
-return out;
-""".strip())
+const IDLE_REASON = `all ${tags.length} tag(s) already classified`;
+""".strip() + "\n" + IDLE_MARKER_JS)
 
     batch = f.add("Batch 20", "n8n-nodes-base.splitInBatches",
                   {"batchSize": 20, "options": {}}, version=3)
@@ -3148,8 +3225,10 @@ return out;
                      })
 
     log = f.log_run("Log run", "SEG Tag Sync")
+    gate, _ = f.idle_gate("SEG Tag Sync")
 
-    f.chain(trig, tags, classify, batch)
+    f.chain(trig, tags, classify, gate)
+    f.connect(gate, batch, out=0)
     f.connect(batch, log, out=0)
     f.connect(batch, write, out=1)
     f.connect(write, batch)

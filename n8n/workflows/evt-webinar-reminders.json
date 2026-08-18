@@ -123,7 +123,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};// A short read here means someone silently never gets reminded, which shows\n// up as a low attendance rate that nobody can explain.\nconst events = pageAll('Upcoming webinars', 'webinarEvents');\nconst regs   = pageAll('Registrations',     'webinarRegistrations');\n\nconst byEvent = new Map();\nfor (const e of events) byEvent.set(e.id, e);\n\nconst now = Date.now();\nconst out = [];\n\nfor (const r of regs) {\n  const e = byEvent.get(r.webinarEventId);\n  if (!e || !e.scheduledAt) continue;\n  if (r.attended === true) continue;\n\n  const hoursAway = (new Date(e.scheduledAt).getTime() - now) / 3600000;\n  if (hoursAway <= 0) continue;\n\n  // remindersSent is the idempotency key: 0 -> the 24h note is still owed,\n  // 1 -> only the 1h note remains, 2 -> done. Sending on a time window alone\n  // would re-send every hour the window stayed open.\n  const done = Number(r.remindersSent || 0);\n  let key = null;\n  if (hoursAway <= 1.5 && done < 2) key = 'webinar_reminder_1h';\n  else if (hoursAway <= 24 && done < 1) key = 'webinar_reminder_24h';\n  if (!key) continue;\n\n  out.push({ json: {\n    registrationId: r.id,\n    personId: r.personId,\n    templateKey: key,\n    remindersSent: key === 'webinar_reminder_1h' ? 2 : 1,\n    webinarTitle: e.name || e.topic || 'Aspire webinar',\n    scheduledAt: e.scheduledAt,\n  }});\n}\nreturn out;"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};// A short read here means someone silently never gets reminded, which shows\n// up as a low attendance rate that nobody can explain.\nconst events = pageAll('Upcoming webinars', 'webinarEvents');\nconst regs   = pageAll('Registrations',     'webinarRegistrations');\n\nconst byEvent = new Map();\nfor (const e of events) byEvent.set(e.id, e);\n\nconst now = Date.now();\nconst out = [];\n\nfor (const r of regs) {\n  const e = byEvent.get(r.webinarEventId);\n  if (!e || !e.scheduledAt) continue;\n  if (r.attended === true) continue;\n\n  const hoursAway = (new Date(e.scheduledAt).getTime() - now) / 3600000;\n  if (hoursAway <= 0) continue;\n\n  // remindersSent is the idempotency key: 0 -> the 24h note is still owed,\n  // 1 -> only the 1h note remains, 2 -> done. Sending on a time window alone\n  // would re-send every hour the window stayed open.\n  const done = Number(r.remindersSent || 0);\n  let key = null;\n  if (hoursAway <= 1.5 && done < 2) key = 'webinar_reminder_1h';\n  else if (hoursAway <= 24 && done < 1) key = 'webinar_reminder_24h';\n  if (!key) continue;\n\n  out.push({ json: {\n    registrationId: r.id,\n    personId: r.personId,\n    templateKey: key,\n    remindersSent: key === 'webinar_reminder_1h' ? 2 : 1,\n    webinarTitle: e.name || e.topic || 'Aspire webinar',\n    scheduledAt: e.scheduledAt,\n  }});\n}\nconst IDLE_REASON = `no reminder due (${events.length} webinar(s) in the next 48h)`;\nif (!out.length) {\n  return [{ json: { idle: true, reason: IDLE_REASON } }];\n}\nreturn out;"
       },
       "id": "004977696386",
       "name": "Who to remind",
@@ -176,7 +176,7 @@
     {
       "parameters": {
         "method": "PATCH",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarRegistrations/{{ $('Batch 10').first().json.registrationId }}",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarRegistrations/{{ $('Batch 10').item.json.registrationId }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -188,7 +188,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"remindersSent\": $('Batch 10').first().json.remindersSent }) }}"
+        "jsonBody": "={{ JSON.stringify({\"remindersSent\": $('Batch 10').item.json.remindersSent }) }}"
       },
       "id": "763039235470",
       "name": "Mark reminded",
@@ -257,6 +257,70 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.idle }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "487499913214",
+      "name": "Anything to do?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"EVT Webinar Reminders\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id, \"errorMessage\": 'idle: ' + ($json.reason || 'nothing to do') }) }}"
+      },
+      "id": "618470280300",
+      "name": "Log idle run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2320,
+        490
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
         "content": "## Every hour, look at what is coming up\nReminders are the difference between a registration and an\nattendee. This runs hourly rather than daily because a one-hour\nreminder sent at the wrong time of day is worse than none.",
         "height": 300,
         "width": 640,
@@ -290,8 +354,8 @@
     {
       "parameters": {
         "content": "## Send it and mark it sent\nThe counter is written straight after the send. If the send\nfails the counter does not move, so the next hourly run tries\nagain rather than skipping the person entirely.",
-        "height": 300,
-        "width": 860,
+        "height": 490,
+        "width": 1300,
         "color": 2
       },
       "id": "075589529102",
@@ -305,6 +369,24 @@
     }
   ],
   "connections": {
+    "Anything to do?": {
+      "main": [
+        [
+          {
+            "node": "Batch 10",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log idle run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Hourly": {
       "main": [
         [
@@ -342,7 +424,7 @@
       "main": [
         [
           {
-            "node": "Batch 10",
+            "node": "Anything to do?",
             "type": "main",
             "index": 0
           }

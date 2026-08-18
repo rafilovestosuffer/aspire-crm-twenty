@@ -223,7 +223,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const KEYS = [\"nurture_1\", \"nurture_2\", \"nurture_3\"];  // generated from TEMPLATE_KEYS\nconst TOUCHES = [3, 7, 14];      // days after the enquiry\nconst MAX_AGE = 21;              // past this, stop looking entirely\n\n// A short read here is a lead that silently never gets followed up, or \u2014 worse\n// \u2014 a missing send record that makes an already-nudged person look untouched\n// and start the sequence again.\nconst submissions = pageAll('Recent form submissions', 'formSubmissions');\nconst messages    = pageAll('Nurture already sent',    'messageLogs');\nconst people      = pageAll('People',                  'people');\nconst opps        = pageAll('Open opportunities',      'opportunities');\n\nconst companyByPerson = new Map();\nfor (const p of people) {\n  if (p.id && p.companyId) companyByPerson.set(p.id, p.companyId);\n}\nconst openCompany = new Set();\nfor (const o of opps) {\n  if (o.companyId) openCompany.add(o.companyId);\n}\n\n// How many nurture messages has each person already had, and did any reply?\nconst touches = new Map();\nconst replied = new Set();\nfor (const m of messages) {\n  const pid = m.personId;\n  if (!pid) continue;\n  touches.set(pid, (touches.get(pid) || 0) + 1);\n  if (m.status === 'REPLIED') replied.add(pid);\n}\n\nconst now = Date.now();\nconst out = [];\nconst seen = new Set();\n\nfor (const s of submissions) {\n  const pid = s.personId;\n  if (!pid || seen.has(pid)) continue;        // one nudge per person per day\n  seen.add(pid);\n\n  // Prefer submittedAt: that is the business timestamp the form wrote, and\n  // it is the field a live demo can backdate. createdAt is insert time and\n  // Twenty will not let us rewrite it.\n  const when = s.submittedAt || s.createdAt;\n  const age = Math.floor((now - new Date(when).getTime()) / 86400000);\n  if (age > MAX_AGE) continue;                // too old, let it go\n  if (replied.has(pid)) continue;             // they answered \u2014 stop\n  const companyId = companyByPerson.get(pid);\n  if (companyId && openCompany.has(companyId)) continue;  // real opportunity\n\n  const done = touches.get(pid) || 0;\n  if (done >= TOUCHES.length) continue;       // sequence finished\n\n  if (age >= TOUCHES[done]) {\n    out.push({ json: { personId: pid, touch: done + 1, ageDays: age,\n                       templateKey: KEYS[done] } });\n  }\n}\nreturn out;"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const KEYS = [\"nurture_1\", \"nurture_2\", \"nurture_3\"];  // generated from TEMPLATE_KEYS\nconst TOUCHES = [3, 7, 14];      // days after the enquiry\nconst MAX_AGE = 21;              // past this, stop looking entirely\n\n// A short read here is a lead that silently never gets followed up, or \u2014 worse\n// \u2014 a missing send record that makes an already-nudged person look untouched\n// and start the sequence again.\nconst submissions = pageAll('Recent form submissions', 'formSubmissions');\nconst messages    = pageAll('Nurture already sent',    'messageLogs');\nconst people      = pageAll('People',                  'people');\nconst opps        = pageAll('Open opportunities',      'opportunities');\n\nconst companyByPerson = new Map();\nfor (const p of people) {\n  if (p.id && p.companyId) companyByPerson.set(p.id, p.companyId);\n}\nconst openCompany = new Set();\nfor (const o of opps) {\n  if (o.companyId) openCompany.add(o.companyId);\n}\n\n// How many nurture messages has each person already had, and did any reply?\nconst touches = new Map();\nconst replied = new Set();\nfor (const m of messages) {\n  const pid = m.personId;\n  if (!pid) continue;\n  touches.set(pid, (touches.get(pid) || 0) + 1);\n  if (m.status === 'REPLIED') replied.add(pid);\n}\n\nconst now = Date.now();\nconst out = [];\nconst seen = new Set();\n\nfor (const s of submissions) {\n  const pid = s.personId;\n  if (!pid || seen.has(pid)) continue;        // one nudge per person per day\n  seen.add(pid);\n\n  // Prefer submittedAt: that is the business timestamp the form wrote, and\n  // it is the field a live demo can backdate. createdAt is insert time and\n  // Twenty will not let us rewrite it.\n  const when = s.submittedAt || s.createdAt;\n  const age = Math.floor((now - new Date(when).getTime()) / 86400000);\n  if (age > MAX_AGE) continue;                // too old, let it go\n  if (replied.has(pid)) continue;             // they answered \u2014 stop\n  const companyId = companyByPerson.get(pid);\n  if (companyId && openCompany.has(companyId)) continue;  // real opportunity\n\n  const done = touches.get(pid) || 0;\n  if (done >= TOUCHES.length) continue;       // sequence finished\n\n  if (age >= TOUCHES[done]) {\n    out.push({ json: { personId: pid, touch: done + 1, ageDays: age,\n                       templateKey: KEYS[done] } });\n  }\n}\nconst IDLE_REASON = `no lead due a nudge (${submissions.length} submission(s) in window)`;\nif (!out.length) {\n  return [{ json: { idle: true, reason: IDLE_REASON } }];\n}\nreturn out;"
       },
       "id": "471645779552",
       "name": "Who is due today",
@@ -269,8 +269,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1,
       "position": [
-        1660,
-        300
+        0,
+        920
       ]
     },
     {
@@ -283,8 +283,8 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        1880,
-        300
+        220,
+        920
       ]
     },
     {
@@ -309,8 +309,72 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        2100,
-        300
+        440,
+        920
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.idle }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "896305967012",
+      "name": "Anything to do?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        920
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"LEAD Nurture Sequence\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id, \"errorMessage\": 'idle: ' + ($json.reason || 'nothing to do') }) }}"
+      },
+      "id": "839209352548",
+      "name": "Log idle run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        880,
+        1110
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -356,8 +420,8 @@
     {
       "parameters": {
         "content": "## Send it the only way anything can be sent\nEach nudge goes through the send sub-workflow, so the consent gate\napplies exactly as it does everywhere else. Someone who opted out\nyesterday is refused here today, without this workflow needing to\nknow the rule.",
-        "height": 320,
-        "width": 640,
+        "height": 510,
+        "width": 1080,
         "color": 2
       },
       "id": "611570152186",
@@ -365,12 +429,30 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1640,
-        140
+        -20,
+        760
       ]
     }
   ],
   "connections": {
+    "Anything to do?": {
+      "main": [
+        [
+          {
+            "node": "Batch 10",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log idle run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Daily 13:00 UTC": {
       "main": [
         [
@@ -430,7 +512,7 @@
       "main": [
         [
           {
-            "node": "Batch 10",
+            "node": "Anything to do?",
             "type": "main",
             "index": 0
           }

@@ -123,7 +123,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const events = pageAll('Finished webinars', 'webinarEvents');\nconst regs   = pageAll('Registrations',     'webinarRegistrations');\n\nconst byEvent = new Map();\nfor (const r of regs) {\n  if (!r.webinarEventId) continue;\n  if (!byEvent.has(r.webinarEventId)) byEvent.set(r.webinarEventId, []);\n  byEvent.get(r.webinarEventId).push(r);\n}\n\nconst out = [];\nfor (const e of events) {\n  // COMPLETED is the guard against sending the same follow-up on consecutive\n  // mornings \u2014 the three-day window above deliberately overlaps so a failed\n  // run gets another chance, and without this flag that retry becomes a\n  // duplicate send to everyone who already had one.\n  if (e.status === 'COMPLETED') continue;\n  const rows = byEvent.get(e.id) || [];\n  const attended = rows.filter(r => r.attended === true);\n\n  for (const r of rows) {\n    out.push({ json: {\n      personId: r.personId,\n      templateKey: r.attended === true ? 'webinar_survey' : 'webinar_replay',\n      webinarTitle: e.name || e.topic || 'Aspire webinar',\n      eventId: e.id,\n      attendeeCount: attended.length,\n      registrationCount: rows.length,\n    }});\n  }\n}\nreturn out;"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const events = pageAll('Finished webinars', 'webinarEvents');\nconst regs   = pageAll('Registrations',     'webinarRegistrations');\n\nconst byEvent = new Map();\nfor (const r of regs) {\n  if (!r.webinarEventId) continue;\n  if (!byEvent.has(r.webinarEventId)) byEvent.set(r.webinarEventId, []);\n  byEvent.get(r.webinarEventId).push(r);\n}\n\nconst out = [];\nfor (const e of events) {\n  // COMPLETED is the guard against sending the same follow-up on consecutive\n  // mornings \u2014 the three-day window above deliberately overlaps so a failed\n  // run gets another chance, and without this flag that retry becomes a\n  // duplicate send to everyone who already had one.\n  if (e.status === 'COMPLETED') continue;\n  const rows = byEvent.get(e.id) || [];\n  const attended = rows.filter(r => r.attended === true);\n\n  for (const r of rows) {\n    out.push({ json: {\n      personId: r.personId,\n      templateKey: r.attended === true ? 'webinar_survey' : 'webinar_replay',\n      webinarTitle: e.name || e.topic || 'Aspire webinar',\n      eventId: e.id,\n      attendeeCount: attended.length,\n      registrationCount: rows.length,\n    }});\n  }\n}\nconst IDLE_REASON = `no webinar finished with anyone to follow up (${events.length} in window)`;\nif (!out.length) {\n  return [{ json: { idle: true, reason: IDLE_REASON } }];\n}\nreturn out;"
       },
       "id": "718643976367",
       "name": "Split attended from no-show",
@@ -189,8 +189,21 @@
     },
     {
       "parameters": {
+        "jsCode": "const rows = $('Split attended from no-show').all().map(i => i.json);\nconst byId = new Map();\nfor (const r of rows) {\n  if (r.eventId && !byId.has(r.eventId)) byId.set(r.eventId, r);\n}\nreturn [...byId.values()].map(r => ({ json: {\n  eventId: r.eventId,\n  attendeeCount: r.attendeeCount,\n  registrationCount: r.registrationCount,\n}}));"
+      },
+      "id": "452805444052",
+      "name": "Events to close",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1660,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "method": "PATCH",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarEvents/{{ $('Split attended from no-show').first().json.eventId }}",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/webinarEvents/{{ $json.eventId }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -202,14 +215,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"status\": \"COMPLETED\", \"attendeeCount\": $('Split attended from no-show').first().json.attendeeCount, \"registrationCount\": $('Split attended from no-show').first().json.registrationCount }) }}"
+        "jsonBody": "={{ JSON.stringify({\"status\": \"COMPLETED\", \"attendeeCount\": $json.attendeeCount, \"registrationCount\": $json.registrationCount }) }}"
       },
       "id": "656699681871",
       "name": "Close the event",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1660,
+        1880,
         300
       ],
       "credentials": {
@@ -243,8 +256,72 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1880,
+        2100,
         300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.idle }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "320317010872",
+      "name": "Anything to do?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"EVT Post-Webinar Follow-up\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id, \"errorMessage\": 'idle: ' + ($json.reason || 'nothing to do') }) }}"
+      },
+      "id": "818508787805",
+      "name": "Log idle run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        2540,
+        490
       ],
       "credentials": {
         "httpHeaderAuth": {
@@ -290,8 +367,8 @@
     {
       "parameters": {
         "content": "## Send, then close the event\nNumbers are written back onto the event so 'did that topic\nwork' is a saved view rather than a spreadsheet someone builds\nby hand after the fact.",
-        "height": 300,
-        "width": 860,
+        "height": 490,
+        "width": 1520,
         "color": 2
       },
       "id": "148074978867",
@@ -305,6 +382,24 @@
     }
   ],
   "connections": {
+    "Anything to do?": {
+      "main": [
+        [
+          {
+            "node": "Batch 10",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log idle run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Daily 11:00 UTC": {
       "main": [
         [
@@ -342,7 +437,7 @@
       "main": [
         [
           {
-            "node": "Batch 10",
+            "node": "Anything to do?",
             "type": "main",
             "index": 0
           }
@@ -353,7 +448,7 @@
       "main": [
         [
           {
-            "node": "Close the event",
+            "node": "Events to close",
             "type": "main",
             "index": 0
           }
@@ -361,6 +456,17 @@
         [
           {
             "node": "Send follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Events to close": {
+      "main": [
+        [
+          {
+            "node": "Close the event",
             "type": "main",
             "index": 0
           }

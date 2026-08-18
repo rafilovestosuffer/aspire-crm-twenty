@@ -73,7 +73,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const tags = pageAll('Existing tags', 'crmTags');\n\n// Patterns come from reading all 57 tags in the account, not from guesswork.\nconst RULES = [\n  { re: /^(new|new lead|cold|warm|hot lead|qualified|prospect|follow up|important|urgent|high priority|vip client)$/i,\n    category: 'LIFECYCLE',  action: 'DROP',\n    why: 'Opportunity stage already carries this. A tag that duplicates a field goes stale on one of the two.' },\n  { re: /(registered|bootcamp|workshop_|soc_|_may|jan-|cohort)/i,\n    category: 'SEGMENT',    action: 'CONVERT_TO_FIELD',\n    why: 'This is cohort membership. It belongs on a cohort record, where seats and dates live.' },\n  { re: /(webinar|watched training)/i,\n    category: 'INTEREST',   action: 'CONVERT_TO_FIELD',\n    why: 'Attendance is a webinarRegistration field, and the strongest enrolment signal we have.' },\n  { re: /(fb-ads|mass media|yelp|name via lookup|mannual|manual)/i,\n    category: 'SOURCE',     action: 'KEEP_AS_TAG',\n    why: 'Acquisition source. Low cardinality, no lifecycle meaning \u2014 a tag is the right shape.' },\n  { re: /(bd-|ba-|bank|ngo|ministry|police|government|it company|student|university|careerchanger|dubai)/i,\n    category: 'SEGMENT',    action: 'KEEP_AS_TAG',\n    why: 'Audience list used for targeting. Keep, but it must never gate consent.' },\n  { re: /(aspir|internal|spam likely|auto contacted|auto touched|couldn)/i,\n    category: 'LEGACY',     action: 'DROP',\n    why: 'Operational residue from GHL. Nothing in Twenty reads it.' },\n];\n\nconst out = [];\nfor (const t of tags) {\n  const name = String(t.name || t.ghlTagName || '');\n  if (!name) continue;\n  const rule = RULES.find(r => r.re.test(name));\n  const category = rule ? rule.category : 'SEGMENT';\n  const action = rule ? rule.action : 'KEEP_AS_TAG';\n  const why = rule ? rule.why : 'Unmatched by any rule \u2014 classify by hand before migrating.';\n\n  // Only write when the classification would actually change something.\n  // Rewriting identical values every morning makes the audit log useless for\n  // spotting the day a tag's meaning was reconsidered.\n  if (t.category === category && t.migrationAction === action) continue;\n  out.push({ json: { id: t.id, name, category, migrationAction: action, why } });\n}\nreturn out;"
+        "jsCode": "const pageAll = (nodeName, key) => {\n  const pages = $(nodeName).all();\n  const rows = [];\n  for (const p of pages) rows.push(...(p.json.data?.[key] || []));\n  const total = pages.length ? pages[0].json.totalCount : 0;\n  if (typeof total === 'number' && total > rows.length) {\n    throw new Error(\n      `${nodeName}: read ${rows.length} of ${total} ${key} over ${pages.length} page(s) \u2014 ` +\n      `the scan stopped early, so this run saw only part of the data. ` +\n      `Raise maxRequests on that node.`);\n  }\n  return rows;\n};const tags = pageAll('Existing tags', 'crmTags');\n\n// Patterns come from reading all 57 tags in the account, not from guesswork.\nconst RULES = [\n  { re: /^(new|new lead|cold|warm|hot lead|qualified|prospect|follow up|important|urgent|high priority|vip client)$/i,\n    category: 'LIFECYCLE',  action: 'DROP',\n    why: 'Opportunity stage already carries this. A tag that duplicates a field goes stale on one of the two.' },\n  { re: /(registered|bootcamp|workshop_|soc_|_may|jan-|cohort)/i,\n    category: 'SEGMENT',    action: 'CONVERT_TO_FIELD',\n    why: 'This is cohort membership. It belongs on a cohort record, where seats and dates live.' },\n  { re: /(webinar|watched training)/i,\n    category: 'INTEREST',   action: 'CONVERT_TO_FIELD',\n    why: 'Attendance is a webinarRegistration field, and the strongest enrolment signal we have.' },\n  { re: /(fb-ads|mass media|yelp|name via lookup|mannual|manual)/i,\n    category: 'SOURCE',     action: 'KEEP_AS_TAG',\n    why: 'Acquisition source. Low cardinality, no lifecycle meaning \u2014 a tag is the right shape.' },\n  { re: /(bd-|ba-|bank|ngo|ministry|police|government|it company|student|university|careerchanger|dubai)/i,\n    category: 'SEGMENT',    action: 'KEEP_AS_TAG',\n    why: 'Audience list used for targeting. Keep, but it must never gate consent.' },\n  { re: /(aspir|internal|spam likely|auto contacted|auto touched|couldn)/i,\n    category: 'LEGACY',     action: 'DROP',\n    why: 'Operational residue from GHL. Nothing in Twenty reads it.' },\n];\n\nconst out = [];\nfor (const t of tags) {\n  const name = String(t.name || t.ghlTagName || '');\n  if (!name) continue;\n  const rule = RULES.find(r => r.re.test(name));\n  const category = rule ? rule.category : 'SEGMENT';\n  const action = rule ? rule.action : 'KEEP_AS_TAG';\n  const why = rule ? rule.why : 'Unmatched by any rule \u2014 classify by hand before migrating.';\n\n  // Only write when the classification would actually change something.\n  // Rewriting identical values every morning makes the audit log useless for\n  // spotting the day a tag's meaning was reconsidered.\n  if (t.category === category && t.migrationAction === action) continue;\n  out.push({ json: { id: t.id, name, category, migrationAction: action, why } });\n}\nconst IDLE_REASON = `all ${tags.length} tag(s) already classified`;\nif (!out.length) {\n  return [{ json: { idle: true, reason: IDLE_REASON } }];\n}\nreturn out;"
       },
       "id": "895138642968",
       "name": "Classify",
@@ -168,6 +168,70 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.idle }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "691108350472",
+      "name": "Anything to do?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\"workflowName\": \"SEG Tag Sync\", \"status\": \"SUCCESS\", \"startedAt\": $execution.startedAt, \"n8nExecutionId\": $execution.id, \"errorMessage\": 'idle: ' + ($json.reason || 'nothing to do') }) }}"
+      },
+      "id": "870829637078",
+      "name": "Log idle run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1780,
+        490
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
         "content": "## Tags are a data model nobody designed\nGHL accumulated 57 tags doing four different jobs at once:\nlifecycle state, lead source, cohort membership and audience\nlists. Migrated as-is they become 57 unexplained labels, so each\none is classified and given a recommended action.",
         "height": 380,
         "width": 540,
@@ -201,8 +265,8 @@
     {
       "parameters": {
         "content": "## Write the decision down\nThe classification lands on the tag record itself, so the\nmigration decision travels with the thing it is about instead of\nliving in someone's notes.",
-        "height": 340,
-        "width": 540,
+        "height": 490,
+        "width": 860,
         "color": 4
       },
       "id": "854404084883",
@@ -211,11 +275,29 @@
       "typeVersion": 1,
       "position": [
         1100,
-        120
+        160
       ]
     }
   ],
   "connections": {
+    "Anything to do?": {
+      "main": [
+        [
+          {
+            "node": "Batch 20",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log idle run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Daily 05:00 UTC": {
       "main": [
         [
@@ -242,7 +324,7 @@
       "main": [
         [
           {
-            "node": "Batch 20",
+            "node": "Anything to do?",
             "type": "main",
             "index": 0
           }
