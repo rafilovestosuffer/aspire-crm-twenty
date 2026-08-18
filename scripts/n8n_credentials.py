@@ -201,7 +201,17 @@ def main() -> int:
     if smtp["host"] == "mailpit":
         print("\n  Next: python scripts/n8n_deploy.py --dev")
     else:
+        allow = (env.get("LIVE_MAIL_ALLOWLIST") or "").strip()
+        if not allow:
+            print("\n  WARNING: LIVE_MAIL_ALLOWLIST is empty and SMTP is a real "
+                  "relay.\n           Seeded .example.com addresses and proof "
+                  "domains will be eligible to send.\n           Set "
+                  "LIVE_MAIL_ALLOWLIST to your address before a Gmail demo, "
+                  "then recreate n8n\n           so the env var reaches the "
+                  "container (./infra/up.sh).")
         print("\n  Next: python scripts/n8n_deploy.py --activate")
+        print("        python scripts/prove_workflows.py --live-email <you>")
+        print("        python scripts/prove_live_mail.py")
     return 0
 
 

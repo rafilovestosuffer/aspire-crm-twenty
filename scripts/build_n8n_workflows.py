@@ -630,6 +630,18 @@ if (!email)                       return [{ json: { send:false, reason:'no_email
 if (!latest)                      return [{ json: { send:false, reason:'no_consent_record' }}];
 if (latest.status !== 'OPTED_IN') return [{ json: { send:false, reason:`consent_${latest.status}` }}];
 
+// Second gate, only when LIVE_MAIL_ALLOWLIST is set. An empty list means
+// "consent is enough" — production. A non-empty list is how a live Gmail
+// demo on a laptop cannot accidentally SMTP a seeded .example.com address
+// or a prove_workflows fake domain. The refusal is logged the same way as
+// a consent block, so it shows up on the person, not only in n8n.
+const allow = String($env.LIVE_MAIL_ALLOWLIST || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const dest = String(email).trim().toLowerCase();
+if (allow.length && !allow.includes(dest)) {
+  return [{ json: { send:false, reason:'not_on_allowlist' }}];
+}
+
 return [{ json: {
   send: true, email,
   firstName: person.name?.firstName || '',
@@ -1641,7 +1653,11 @@ for (const s of submissions) {
   if (!pid || seen.has(pid)) continue;        // one nudge per person per day
   seen.add(pid);
 
-  const age = Math.floor((now - new Date(s.createdAt).getTime()) / 86400000);
+  // Prefer submittedAt: that is the business timestamp the form wrote, and
+  // it is the field a live demo can backdate. createdAt is insert time and
+  // Twenty will not let us rewrite it.
+  const when = s.submittedAt || s.createdAt;
+  const age = Math.floor((now - new Date(when).getTime()) / 86400000);
   if (age > MAX_AGE) continue;                // too old, let it go
   if (replied.has(pid)) continue;             // they answered — stop
 

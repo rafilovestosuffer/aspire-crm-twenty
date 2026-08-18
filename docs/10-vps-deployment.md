@@ -51,6 +51,7 @@ EMAIL_SMTP_HOST=smtp-relay.gmail.com
 EMAIL_SMTP_PORT=587
 EMAIL_SMTP_USER=<workspace user>
 EMAIL_SMTP_PASSWORD=<app password>
+# smtp-relay.gmail.com is Workspace-only; personal Gmail uses smtp.gmail.com.
 
 # Required. The default in .env.example points at a workflow that only exists
 # on a dev machine, so on a server every alert 404s inside the error handler.
@@ -314,6 +315,9 @@ EMAIL_SMTP_PORT=587
 EMAIL_SMTP_USER=<workspace user>
 EMAIL_SMTP_PASSWORD=<app password>
 ```
+
+`smtp-relay.gmail.com` is Workspace-only. A personal `@gmail.com` will not
+authenticate there — use `smtp.gmail.com` instead.
 
 ## Step 5 — Change the default login
 
