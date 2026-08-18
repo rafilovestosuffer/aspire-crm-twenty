@@ -8,10 +8,23 @@ This file only adds cloud-environment caveats.
 ## Cursor Cloud specific instructions
 
 The demonstrable application is the **self-hosted Twenty CRM + n8n stack** in
-`infra/` (Docker Compose). The other half of the repo is a **read-only GHL
-audit** (`scripts/ghl_pull.py` → `scripts/build_audit.py`); running it end to end
-needs live `GHL_TOKEN` + `GHL_LOCATION` in `.env` (external secrets), so it
-cannot be exercised here without those credentials.
+`infra/` (Docker Compose).
+
+### GHL audit — already pulled (do not re-request a token)
+The read-only GoHighLevel inventory was taken 2026-08-18 (GET only, no PII).
+Findings live in [`docs/12-ghl-account-inventory.md`](docs/12-ghl-account-inventory.md);
+`out/feature_audit.csv` has named evidence for 47 of 111 features. The Private
+Integration token used for that pull was one-shot and **should not be stored**.
+Do not ask for `GHL_TOKEN` unless the user explicitly wants a re-pull.
+
+- Location ID (from the GHL URL, not a secret): `62iXlYxxHYUv14IS2LjG`
+- Account timezone: `America/New_York` — set `TZ=America/New_York` on the new
+  stack (and keep Twenty datetime writes as UTC `Z` via `.toUTC().toISO()`).
+- A re-pull still needs a *new* PIT in `.env` (`GHL_TOKEN` + `GHL_LOCATION`).
+  Cloudflare blocks urllib's default User-Agent (error 1010); `/surveys/`
+  rejects `limit>50`; `/medias/files` requires `type`; `/calendars/events`
+  must be queried once per calendar. Workflow internals are not on the public
+  API. Payment subscriptions 401'd on the original token's scopes.
 
 ### Docker is required and the daemon does not auto-start
 Docker (with the `fuse-overlayfs` storage driver and `iptables-legacy`) is
