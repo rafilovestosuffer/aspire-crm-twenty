@@ -66,8 +66,26 @@ if command -v python3 >/dev/null 2>&1; then
   pv=$(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])')
   python3 -c 'import sys;sys.exit(0 if sys.version_info>=(3,9) else 1)' \
     && ok "python3" "$pv" || bad "python3" "$pv — needs 3.9 or newer"
+  python3 -c 'import yaml' >/dev/null 2>&1 \
+    && ok "PyYAML" "needed to provision the object model" \
+    || bad "PyYAML" "missing — sudo apt install -y python3-yaml. Without it deploy.sh dies at the object-model step"
 else
-  bad "python3" "not installed — sudo apt install -y python3"
+  bad "python3" "not installed — sudo apt install -y python3 python3-yaml"
+fi
+
+command -v openssl >/dev/null 2>&1 \
+  && ok "openssl" \
+  || bad "openssl" "not installed — sudo apt install -y openssl"
+
+command -v curl >/dev/null 2>&1 \
+  && ok "curl" \
+  || bad "curl" "not installed — sudo apt install -y curl"
+
+if git -C "$HERE/.." rev-parse --abbrev-ref HEAD >/dev/null 2>&1; then
+  br=$(git -C "$HERE/.." rev-parse --abbrev-ref HEAD)
+  [[ "$br" == "main" ]] \
+    && ok "git branch" "main" \
+    || warn "git branch" "$br — production deploys from main (see docs/10-vps-deployment.md)"
 fi
 
 # ------------------------------------------------------------------- the plan
@@ -76,7 +94,7 @@ printf "\n${D}Configuration${O}\n"
 if [[ -f "$ENV_FILE" ]]; then
   ok "infra/.env exists"
 else
-  bad "infra/.env" "missing — cp infra/.env.example infra/.env"
+  bad "infra/.env" "missing — on the VPS run ./infra/init-vps-env.sh --yes, then fill the lines it lists"
 fi
 
 CRM_DOMAIN=$(env_get CRM_DOMAIN)
@@ -117,8 +135,13 @@ fi
 # Forms and webhooks are minted from N8N_PUBLIC_URL. Wrong value → the form
 # renders and submits nowhere, which looks like an n8n bug rather than this line.
 N8N_PUBLIC_URL=$(env_get N8N_PUBLIC_URL)
+N8N_HOST=$(env_get N8N_HOST)
+N8N_PROTOCOL=$(env_get N8N_PROTOCOL)
 if [[ -n "$AUTO_DOMAIN" ]]; then
   expected_n8n="https://$AUTO_DOMAIN"
+  if [[ $INTERNAL -eq 1 ]]; then
+    expected_n8n="https://$AUTO_DOMAIN"
+  fi
   if [[ -z "$N8N_PUBLIC_URL" ]]; then
     bad "N8N_PUBLIC_URL" "not set — expected $expected_n8n. Forms would render at a URL that cannot submit."
   elif [[ "$N8N_PUBLIC_URL" == "$expected_n8n" ]]; then
@@ -126,6 +149,31 @@ if [[ -n "$AUTO_DOMAIN" ]]; then
   else
     bad "N8N_PUBLIC_URL" "is '$N8N_PUBLIC_URL', expected '$expected_n8n' — the public form submits to the wrong host"
   fi
+  # Copied from .env.example, N8N_HOST stays localhost even after the public
+  # URL is fixed. n8n then mints cookies and editor links for localhost.
+  if [[ -z "$N8N_HOST" || "$N8N_HOST" == "localhost" ]]; then
+    bad "N8N_HOST" "is '${N8N_HOST:-empty}' — expected $AUTO_DOMAIN. Run ./infra/init-vps-env.sh --yes"
+  elif [[ "$N8N_HOST" != "$AUTO_DOMAIN" ]]; then
+    bad "N8N_HOST" "is '$N8N_HOST', expected '$AUTO_DOMAIN'"
+  else
+    ok "N8N_HOST matches AUTOMATION_DOMAIN" "$N8N_HOST"
+  fi
+  if [[ "$N8N_PROTOCOL" != "https" ]]; then
+    bad "N8N_PROTOCOL" "is '${N8N_PROTOCOL:-empty}', expected https — session cookies would not be Secure"
+  else
+    ok "N8N_PROTOCOL" "https"
+  fi
+fi
+
+# Workflow mail reads ASPIRE_FROM_EMAIL. Empty From is accepted by n8n and
+# refused by a real relay, so the send "succeeds" in the editor and never
+# arrives. EMAIL_FROM_ADDRESS is Twenty's own transactional driver (invites).
+from=$(env_get ASPIRE_FROM_EMAIL)
+[[ -z "$from" ]] && from=$(env_get EMAIL_FROM_ADDRESS)
+if [[ -z "$from" ]]; then
+  bad "ASPIRE_FROM_EMAIL" "not set — workflow mail would send with an empty From. Set it to a mailbox the SMTP user is allowed to send as"
+else
+  ok "ASPIRE_FROM_EMAIL" "$from"
 fi
 
 # Laptop live-Gmail demo sets this so seed and proof addresses cannot leave

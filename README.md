@@ -28,11 +28,27 @@ the recipe; Docker runs the kitchen.
 
 ## Quick start
 
-```bash
-# Build the CRM and prove it works — see docs/08-local-build.md
-./infra/rebuild.sh          # zero to proven, ~12 min, stops at the first failure
+**Laptop (demo):**
 
-# or step by step
+```bash
+./infra/rebuild.sh          # zero to proven, ~12 min, stops at the first failure
+```
+
+**Company VPS:** DNS for `crm.aspiretss.com` and `auto.aspiretss.com` must
+already point here. Then:
+
+```bash
+./infra/init-vps-env.sh --yes
+nano infra/.env             # SMTP, office IPs, chat webhook, payment links
+./infra/preflight.sh
+./infra/deploy.sh
+```
+
+Full sequence, including Docker install: [`docs/10-vps-deployment.md`](docs/10-vps-deployment.md).
+
+Laptop, step by step — see [`docs/08-local-build.md`](docs/08-local-build.md):
+
+```bash
 ./infra/up.sh                             # stack up, secrets generated
 python scripts/stack_verify.py            # every layer, worker included
 python scripts/bootstrap_workspace.py     # Twenty user, workspace, API key
@@ -83,7 +99,8 @@ infra/docker-compose.yml             Twenty + n8n + Postgres + Redis + backups
 infra/up.sh                          one-command bring-up, generates secrets
 infra/rebuild.sh                     zero to proven, every step a gate (demo machine)
 infra/preflight.sh                   is this server ready? run before deploying
-infra/deploy.sh                      one-command server deploy, ten gated steps
+infra/init-vps-env.sh                generate secrets + public hostnames on a VPS
+infra/deploy.sh                      one-command server deploy, eleven gated steps
 infra/Caddyfile                      reverse proxy + Let's Encrypt (internet-facing)
 infra/Caddyfile.internal             reverse proxy + local CA (office network)
 scripts/verify_restore.py            restores a backup and compares row counts

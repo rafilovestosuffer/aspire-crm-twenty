@@ -7,7 +7,7 @@ Everything below is explained in detail further down. This is the sequence.
 ```bash
 # --- on the server, as a normal user with sudo ---
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y ufw git python3 curl
+sudo apt install -y ufw git python3 python3-yaml curl openssl
 sudo ufw allow 22/tcp && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
 sudo ufw --force enable                      # SSH rule FIRST or you lock yourself out
 
@@ -25,59 +25,34 @@ git checkout main
 git pull
 git log -1 --format='%an %h %s'
 # Author must be Rafiur Rahman. Tip must include, or sit after,
-# "fix n8n healthcheck: hit 127.0.0.1, not localhost"
-# Do not checkout cursor/live-gmail-demo-8f94 — that branch is behind
-# the training model, the workflow proofs, and the n8n healthcheck.
-cp infra/.env.example infra/.env
+# "Deploy from main and fail if the training objects are missing"
+# Stay on main. Do not checkout cursor/live-gmail-demo-8f94.
 
-# print four secrets, paste them into infra/.env
-for k in PG_DATABASE_PASSWORD ENCRYPTION_KEY APP_SECRET N8N_ENCRYPTION_KEY; do
-  printf '%s=%s\n' "$k" "$(openssl rand -base64 32)"
-done
+./infra/init-vps-env.sh --yes
+# generates the four secrets, sets https hostnames, lists what is still blank
+nano infra/.env        # paste only the lines it listed
 
-nano infra/.env        # set the four secrets + the block below
+./infra/preflight.sh   # 20 seconds. Fix anything it calls a blocker
+./infra/deploy.sh      # ~15 minutes
 ```
 
-The minimum that must be set:
+`init-vps-env.sh` fills the public hostnames (`crm.aspiretss.com` /
+`auto.aspiretss.com`), `https`, empty `LIVE_MAIL_ALLOWLIST`, and a real
+From address. You still paste four things it cannot know:
 
 ```ini
-SERVER_URL=https://crm.aspiretss.com
-N8N_HOST=auto.aspiretss.com
-N8N_PROTOCOL=https
-N8N_PUBLIC_URL=https://auto.aspiretss.com
-
-CRM_DOMAIN=crm.aspiretss.com
-AUTOMATION_DOMAIN=auto.aspiretss.com
-ACME_EMAIL=it@aspiretss.com
-
-# Office/VPN ranges allowed to open the n8n editor. Unset, the proxy will
-# not start — see step 2. From inside the office: curl ifconfig.me
+# From the office, not the server: curl ifconfig.me
 N8N_EDITOR_ALLOWED_IPS=203.0.113.0/24
 
-EMAIL_SMTP_HOST=smtp-relay.gmail.com
-EMAIL_SMTP_PORT=587
 EMAIL_SMTP_USER=<workspace user>
 EMAIL_SMTP_PASSWORD=<app password>
-# smtp-relay.gmail.com is Workspace-only; personal Gmail uses smtp.gmail.com.
+# smtp-relay.gmail.com is already set. A personal @gmail.com uses smtp.gmail.com.
 
-# Must stay empty on the server. Set, VEND Send Email will refuse every
-# other recipient. preflight.sh blocks if this is copied from a laptop demo.
-LIVE_MAIL_ALLOWLIST=
-
-# Required. The default in .env.example points at a workflow that only exists
-# on a dev machine, so on a server every alert 404s inside the error handler.
 ALERT_WEBHOOK_URL=<real chat webhook>
 
 # Six FastPayDirect URLs from GHL Marketing → Trigger Links
 # ("Payment Link - Training <Tier>"). Unset, every enrolment returns 500.
 ENROL_PAYMENT_LINKS=BRONZE=https://...,SILVER=https://...,GOLD=https://...,PLATINUM=https://...,DIAMOND=https://...,TITANIUM=https://...
-```
-
-Then:
-
-```bash
-./infra/preflight.sh     # 20 seconds. Fix anything it calls a blocker
-./infra/deploy.sh        # ~15 minutes
 ```
 
 `preflight.sh` checks RAM, disk, Docker, every required setting, that DNS
@@ -221,45 +196,19 @@ will feel slow under any real load.
 
 ---
 
-## Step 1 — Bring the stack up on the server
+## Step 1 — Prepare `infra/.env` on the server
+
+Same clone as the sequence at the top. Then:
 
 ```bash
-git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
-cd aspire-crm-twenty
-git checkout main
-git pull
-git log -1 --format='%an %h %s'
-# Author must be Rafiur Rahman. Tip must include, or sit after,
-# "fix n8n healthcheck: hit 127.0.0.1, not localhost"
-cp infra/.env.example infra/.env
+./infra/init-vps-env.sh --yes
+nano infra/.env        # SMTP user/password, office IPs, chat webhook, payment links
 ```
 
-Generate the four secrets:
-
-```bash
-for k in PG_DATABASE_PASSWORD ENCRYPTION_KEY APP_SECRET N8N_ENCRYPTION_KEY; do
-  printf '%s=%s\n' "$k" "$(openssl rand -base64 32)"
-done
-```
-
-Paste those into `infra/.env`, then set:
-
-```ini
-SERVER_URL=https://crm.aspiretss.com
-N8N_HOST=auto.aspiretss.com
-N8N_PROTOCOL=https
-N8N_PUBLIC_URL=https://auto.aspiretss.com
-
-CRM_DOMAIN=crm.aspiretss.com
-AUTOMATION_DOMAIN=auto.aspiretss.com
-ACME_EMAIL=it@aspiretss.com
-N8N_EDITOR_ALLOWED_IPS=<your office range — step 2>
-
-ALERT_WEBHOOK_URL=<the real chat webhook>
-
-# Six FastPayDirect URLs from GHL Marketing → Trigger Links.
-ENROL_PAYMENT_LINKS=BRONZE=https://...,SILVER=https://...,GOLD=https://...,PLATINUM=https://...,DIAMOND=https://...,TITANIUM=https://...
-```
+The script generates the four secrets (and will not rotate ones already set),
+points the public hostnames at `crm.aspiretss.com` / `auto.aspiretss.com`,
+sets `https`, empties `LIVE_MAIL_ALLOWLIST`, and clears the local alert-sink
+URL. Do not copy a laptop `.env` onto this machine.
 
 > **Back up `ENCRYPTION_KEY` and `N8N_ENCRYPTION_KEY` to a password manager
 > before going further.** Lose the first and every secret Twenty holds — OAuth
@@ -329,18 +278,14 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.vps.yml \
 Real certificates arrive within a minute. Renewal is automatic — there is no
 cron job to add and nothing to diarise.
 
-## Step 4 — Build the CRM
+## Step 4 — Deploy
 
-Identical to the laptop, minus the mail catcher:
+Do not run the python steps by hand. One command is the whole build, including
+the restore proof and the proxy-rule proof that the hand list below skips:
 
 ```bash
-python3 scripts/bootstrap_workspace.py
-python3 scripts/bootstrap_n8n.py
-python3 scripts/twenty_provision.py
-python3 scripts/n8n_credentials.py
-python3 scripts/validate_workflow_queries.py
-python3 scripts/n8n_deploy.py --activate
-python3 scripts/stack_verify.py
+./infra/preflight.sh
+./infra/deploy.sh
 ```
 
 **Do not run `seed_demo_data.py` on the server.** It is demo data. Real records
@@ -350,35 +295,29 @@ arrive in Phase 4.
 that should go to the real chat webhook, and the failure probe, which throws on
 purpose.
 
-Set real SMTP in `infra/.env` before deploying credentials, or `n8n_credentials.py`
-points at a Mailpit container that does not exist here:
-
-```ini
-EMAIL_SMTP_HOST=smtp-relay.gmail.com
-EMAIL_SMTP_PORT=587
-EMAIL_SMTP_USER=<workspace user>
-EMAIL_SMTP_PASSWORD=<app password>
-```
-
 `smtp-relay.gmail.com` is Workspace-only. A personal `@gmail.com` will not
-authenticate there — use `smtp.gmail.com` instead.
+authenticate there — use `smtp.gmail.com` instead. `init-vps-env.sh` already
+set the host and port; you only paste the user and app password.
+
+If `deploy.sh` stops part-way, fix what it named and run it again. Every step
+is idempotent.
 
 ## Step 5 — Change the default login
 
-`bootstrap_workspace.py` creates `admin@aspiretss.com` with the documented
-demo password. Change it in the CRM under Settings, and change the n8n owner
-password too. Both are in a public repository.
+`deploy.sh` creates `admin@aspiretss.com` with the documented demo password.
+Change it in the CRM under Settings, and change the n8n owner password too.
+Both are in a public repository.
 
-## Step 6 — Prove the restore, here
+## Step 6 — The restore was already proven
+
+`deploy.sh` ran `scripts/verify_restore.py` against both databases on this
+machine's disk. Re-run it monthly; an untested backup is not a backup. The
+date of the last success is recorded in `out/restore_verification.json`.
 
 ```bash
 python3 scripts/verify_restore.py
 python3 scripts/verify_restore.py --database n8n
 ```
-
-Backups on the laptop restoring cleanly says nothing about this machine's disk,
-its volumes, or its Postgres. Run it here, on day one, and again monthly. The
-date of the last success is recorded in `out/restore_verification.json`.
 
 ---
 

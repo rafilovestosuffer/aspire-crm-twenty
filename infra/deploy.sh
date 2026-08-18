@@ -121,6 +121,7 @@ start_stack() {
       printf "\n  ${G}ok${O}    CRM healthy\n"
       [[ $INTERNAL -eq 1 ]] && { trust_internal_ca || return 1; }
       [[ $INTERNAL -eq 0 ]] && { wait_for_tls || return 1; }
+      wait_for_n8n || return 1
       return 0
     fi
     printf "."; sleep 5
@@ -155,6 +156,27 @@ wait_for_tls() {
   printf "\n  ${R}FAIL${O}  the server cannot GET %s/healthz\n" "$url"
   printf "       Metadata calls will 500. Check Caddy, the compose network\n"
   printf "       aliases for the public hostname, and the certificate.\n"
+  return 1
+}
+
+wait_for_n8n() {
+  # bootstrap_n8n.py talks to the published port on the host. On a first boot
+  # n8n is still migrating its database while Twenty is already healthy, so
+  # waiting on the CRM alone races the owner-setup step.
+  local port
+  port=$(grep -E '^N8N_PORT=' "$HERE/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'')
+  port="${port:-5678}"
+  printf "  waiting for n8n"
+  local i
+  for i in $(seq 1 36); do
+    if curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
+      printf "\n  ${G}ok${O}    n8n healthy on 127.0.0.1:%s\n" "$port"
+      return 0
+    fi
+    printf "."; sleep 5
+  done
+  printf "\n  ${R}FAIL${O}  n8n never answered /healthz on 127.0.0.1:%s\n" "$port"
+  printf "       docker compose %s logs n8n\n" "${OVERLAY[*]}"
   return 1
 }
 

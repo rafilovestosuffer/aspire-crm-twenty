@@ -268,18 +268,20 @@ permanently unreadable. There is no recovery path.
 
 ### Moving to the company VPS
 
-The laptop stack and the VPS stack are the same files. Nothing is thrown away
-and nothing is untested at cutover.
+Follow [`docs/10-vps-deployment.md`](10-vps-deployment.md). The laptop stack
+and the VPS stack are the same files; what changes is `infra/.env`, the VPS
+compose overlay, and Caddy in front.
 
 ```bash
-docker compose -f infra/docker-compose.yml -f infra/docker-compose.vps.yml up -d
+./infra/init-vps-env.sh --yes
+nano infra/.env          # SMTP, office IPs, chat webhook, payment links
+./infra/preflight.sh
+./infra/deploy.sh
 ```
 
-The overlay binds both ports to loopback so only the reverse proxy reaches them.
-In `infra/.env`, set `SERVER_URL`, `N8N_HOST`, `N8N_PROTOCOL=https` and
-`N8N_PUBLIC_URL` to the real hostnames, and point `ALERT_WEBHOOK_URL` at the
-real chat webhook instead of the local sink. Terminate TLS at the proxy —
-several Twenty and n8n features require a secure context.
+Do not `docker compose up` the overlay by itself — that starts containers
+without the workspace, object model, credentials, or workflow deploy.
+`deploy.sh` is those steps, gated.
 
 ## 9. The demo — 10 minutes
 
