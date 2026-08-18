@@ -24,7 +24,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?order_by=startedAt[DescNullsLast]&limit=20",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?limit=1",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {
@@ -38,7 +38,7 @@
       "id": "503252026463",
       "name": "CRM answering?",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "typeVersion": 4,
       "position": [
         220,
         300
@@ -47,18 +47,114 @@
         "httpHeaderAuth": {
           "name": "Twenty API"
         }
-      }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
     },
     {
       "parameters": {
-        "jsCode": "const runs = $input.first().json.data?.automationRuns || [];\n\n// 26 hours, not 24: a daily job that drifts by an hour must not raise a false\n// alarm every single morning. An alert people learn to ignore is worthless.\nconst cutoff = Date.now() - 26 * 3600_000;\nconst recent = runs.filter(r => new Date(r.startedAt).getTime() > cutoff);\n\nconst EXPECTED = ['SUB Renewal Escalation', 'OPS Scheduled Sweeps'];\nconst seen = new Set(recent.map(r => r.workflowName));\nconst missing = EXPECTED.filter(w => !seen.has(w));\nconst failed = recent.filter(r => r.status === 'FAILED');\n\nconst problems = [];\nif (missing.length) {\n  problems.push(`did not run in the last 26h: ${missing.join(', ')}`);\n}\nif (failed.length) {\n  problems.push(`${failed.length} failed run(s): ` +\n                failed.slice(0, 3).map(r => r.workflowName).join(', '));\n}\n\nreturn [{ json: {\n  healthy: problems.length === 0,\n  problems: problems.join(' | '),\n  checked: recent.length,\n}}];"
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter=workflowName[eq]:{{ encodeURIComponent('SUB Renewal Escalation') }},startedAt[gte]:{{ encodeURIComponent($now.minus({ hours: 26 }).toUTC().toISO()) }}&order_by=startedAt[DescNullsLast]&limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "670631977054",
+      "name": "Renewal runs last 26h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        560,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter=workflowName[eq]:{{ encodeURIComponent('OPS Scheduled Sweeps') }},startedAt[gte]:{{ encodeURIComponent($now.minus({ hours: 26 }).toUTC().toISO()) }}&order_by=startedAt[DescNullsLast]&limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "941852735334",
+      "name": "Sweep runs last 26h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        780,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.TWENTY_BASE_URL }}/rest/automationRuns?filter=workflowName[eq]:{{ encodeURIComponent('LEAD Nurture Sequence') }},startedAt[gte]:{{ encodeURIComponent($now.minus({ hours: 26 }).toUTC().toISO()) }}&order_by=startedAt[DescNullsLast]&limit=20",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false
+            }
+          }
+        }
+      },
+      "id": "587984983000",
+      "name": "Nurture runs last 26h",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1000,
+        300
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Twenty API"
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const named = [\n  ['SUB Renewal Escalation', 'Renewal runs last 26h'],\n  ['OPS Scheduled Sweeps',   'Sweep runs last 26h'],\n  ['LEAD Nurture Sequence',  'Nurture runs last 26h'],\n];\n\n// 26 hours, not 24: a daily job that drifts by an hour must not raise a false\n// alarm every single morning. An alert people learn to ignore is worthless.\nconst missing = [];\nconst failed = [];\nfor (const [label, node] of named) {\n  const page = $(node).first().json || {};\n  const rows = page.data?.automationRuns || [];\n  const n = typeof page.totalCount === 'number' ? page.totalCount : rows.length;\n  if (!n) missing.push(label);\n  for (const r of rows) {\n    if (r.status === 'FAILED') failed.push(r.workflowName || label);\n  }\n}\n\nconst problems = [];\nif (missing.length) {\n  problems.push(`did not run in the last 26h: ${missing.join(', ')}`);\n}\nif (failed.length) {\n  problems.push(`${failed.length} failed run(s): ` +\n                [...new Set(failed)].slice(0, 3).join(', '));\n}\n\nreturn [{ json: {\n  healthy: problems.length === 0,\n  problems: problems.join(' | '),\n  checked: named.length,\n}}];"
       },
       "id": "865011195768",
       "name": "Anything missing?",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        560,
+        1220,
         300
       ]
     },
@@ -88,7 +184,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        780,
+        1440,
         300
       ]
     },
@@ -114,7 +210,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1120,
+        1660,
         300
       ],
       "credentials": {
@@ -140,7 +236,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        1120,
+        1660,
         490
       ],
       "retryOnFail": true,
@@ -166,9 +262,9 @@
     },
     {
       "parameters": {
-        "content": "## Did the daily automations run?\nThree workflows are supposed to run every morning. If none of them\nleft a record in the last twenty-six hours, either the worker is\ndead, n8n's scheduler is stuck, or the CRM stopped accepting\nwrites. All three are invisible from the outside.",
-        "height": 380,
-        "width": 540,
+        "content": "## Did the daily automations run?\nThree workflows are supposed to run every morning. Each is asked\nfor by name and time, not pulled off the latest page of every\nautomationRun in the CRM. Form intake writes a run on every\nsubmit; past twenty recent rows the schedules used to fall off\nthe page and this check reported a dead worker on a healthy one.",
+        "height": 340,
+        "width": 1080,
         "color": 6
       },
       "id": "490030893347",
@@ -177,13 +273,13 @@
       "typeVersion": 1,
       "position": [
         540,
-        80
+        120
       ]
     },
     {
       "parameters": {
-        "content": "## Say something only when something is wrong\nA green tick every morning trains people to stop reading. This\nsends nothing on a good day, and names exactly what is missing on\na bad one.",
-        "height": 530,
+        "content": "## Say something only when something is wrong\nA green tick every morning trains people to stop reading. This\nsends nothing on a good day, and names exactly what is missing on\na bad one. It does not check backup freshness \u2014 that is\nverify_restore.py, on a schedule the operator owns.",
+        "height": 550,
         "width": 540,
         "color": 2
       },
@@ -192,8 +288,8 @@
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        1100,
-        120
+        1640,
+        100
       ]
     }
   ],
@@ -210,6 +306,39 @@
       ]
     },
     "CRM answering?": {
+      "main": [
+        [
+          {
+            "node": "Renewal runs last 26h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Renewal runs last 26h": {
+      "main": [
+        [
+          {
+            "node": "Sweep runs last 26h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sweep runs last 26h": {
+      "main": [
+        [
+          {
+            "node": "Nurture runs last 26h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Nurture runs last 26h": {
       "main": [
         [
           {
