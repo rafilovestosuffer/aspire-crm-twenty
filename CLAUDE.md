@@ -66,6 +66,32 @@ docs/                                method, findings, open decisions
 - `GET /custom-fields/object-key/{key}` supports **Custom Objects and Company
   only** — not Contacts/Opportunities. Use `GET /locations/{id}/customFields`
   for those.
+
+### GHL live API — verified 18 Aug 2026 against location `62iXlYxx`
+
+The token was deleted after this pull, so these cannot be re-derived without a
+new one. `raw/` was gitignored and did not survive the session.
+
+- **`/emails/builder` returns its array as `builders`, not `data`.** With the
+  wrong key it answers **HTTP 200 and an empty list** — the pull recorded
+  *zero* templates when there were **14**. A silent zero behind a 200 is the
+  worst failure mode in this repo; check `list_key` against a real response
+  before believing any count of 0.
+- `/locations/{id}/templates` genuinely returns **0** for both email and SMS.
+  The template library is `/emails/builder`. `editorData` is not readable
+  back — only HTML migrates, not the drag-and-drop structure.
+- **`/calendars/events` refuses a location-wide query**: 422 *"Either of
+  userId, calendarId or groupId is required"*. Must fan out per calendar.
+- **`/surveys/` caps `limit` at 50.** 100 is a 422.
+- **`/medias/files` requires an undocumented `type` parameter.** Omitted, 422.
+- **Cloudflare answers 1010 to the default Python-urllib User-Agent.** It
+  reads as an auth failure and is not one. Send a User-Agent.
+- A sub-account Private Integration cannot discover its own location id —
+  `/locations/search` is 403 and `/oauth/installedLocations` is out of scope.
+  The location id must come from the browser URL.
+- `/payments/transactions` is authorised even when
+  `/payments/subscriptions` is not, and returned **0** — no card revenue runs
+  through GHL. The 126 invoices are *issued* there, not *collected* there.
 - Twenty's `Send Email` workflow action sends from a **synced mailbox, one
   recipient at a time**. Twenty has no campaign engine, no suppression list, no
   domain warm-up, no SMS, no telephony, no forms, no landing pages.
