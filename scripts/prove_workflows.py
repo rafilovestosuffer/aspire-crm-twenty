@@ -407,6 +407,14 @@ def check(name: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
+def _iso_in(**delta) -> str:
+    """A UTC timestamp Twenty will accept. Offsets like +00:00 are a 400 in
+    both filters and write bodies, so this always renders a trailing Z."""
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) + timedelta(**delta)).strftime(
+        "%Y-%m-%dT%H:%M:%S.000Z")
+
+
 def prove_lead_form() -> None:
     print(f"\n{BOLD}LEAD Form Intake — public form to CRM record{OFF}")
     tag = uuid.uuid4().hex[:8]
@@ -417,8 +425,13 @@ def prove_lead_form() -> None:
     if not LIVE_EMAIL:
         mailpit_clear()
 
+    # Positional, so the order must match the form trigger exactly:
+    # first, last, email, company, phone, interest, certification, message,
+    # consent. Adding a field to the form without changing this sends every
+    # later value into the wrong slot, and the form still answers 200.
     status = submit_form(["Proof", f"Lead{tag}", email, f"Northgate {tag}",
-                          "555-0100", "SOC / managed detection",
+                          "555-0100", "Splunk bootcamp",
+                          "Splunk Core Certified User",
                           "Automated proof run.", "true"])
     if not check("form accepts submission", status == 200, f"HTTP {status}"):
         return
@@ -462,7 +475,8 @@ def prove_consent_gate() -> None:
         mailpit_clear()
 
     status = submit_form(["NoConsent", f"Test{tag}", email, f"Bluffpoint {tag}",
-                          "555-0101", "Incident response",
+                          "555-0101", "An upcoming webinar or workshop",
+                          "Not sure yet",
                           "Consent gate proof.", "false"])
     if not check("form accepts submission", status == 200, f"HTTP {status}"):
         return
@@ -595,7 +609,8 @@ def prove_inbound_events() -> None:
     tag = uuid.uuid4().hex[:8]
     email = LIVE_EMAIL or f"loop.{tag}@ridgeline-{tag}.com"
     fields = ["Loop", f"Test{tag}", email, f"Ridgeline {tag}", "555-0144",
-              "CMMC or compliance", "Consent loop proof.", "true"]
+              "Cloud security certification training", "Not sure yet",
+              "Consent loop proof.", "true"]
 
     # --- 1. opted in: the acknowledgement must actually send -------------
     existing = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
@@ -672,11 +687,240 @@ def prove_inbound_events() -> None:
           blocked[0]["subject"] if blocked else "none")
 
 
+def post_json(path: str, body: dict) -> tuple[int, dict]:
+    """POST JSON to an n8n webhook. A 200 says the webhook received it and
+    nothing at all about whether the workflow succeeded — every caller below
+    asserts on the record that was written, never on this status."""
+    status, raw, _ = http("POST", f"{N8N}/webhook/{path}",
+                          headers={"Content-Type": "application/json"},
+                          data=json.dumps(body).encode())
+    try:
+        return status, json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return status, {}
+
+
+def prove_webinar() -> None:
+    """Registration through to a confirmation, on the busiest path in the
+    business. Asserts the registration record, not the webhook's 200."""
+    print(f"\n{BOLD}EVT Webinar Registration — the top of the funnel{OFF}")
+    tag = uuid.uuid4().hex[:8]
+    email = LIVE_EMAIL or f"webinar.{tag}@crestwood-{tag}.com"
+
+    existing = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
+    sent_before = (len(sent_logs(existing[0]["id"], "smtp/webinar_confirm"))
+                   if existing else 0)
+    if not LIVE_EMAIL:
+        mailpit_clear()
+
+    try:
+        event = twenty_post("webinarEvents", {
+            "name": f"Proof webinar {tag}",
+            "topic": "Splunk SIEM migration",
+            "status": "OPEN_FOR_REGISTRATION",
+            "scheduledAt": _iso_in(hours=30),
+            "registrationCount": 0,
+            "attendeeCount": 0,
+        })
+    except RuntimeError as e:
+        check("a webinar exists to register for", False, str(e)[:90])
+        return
+    CREATED.append(("webinarEvents", event["id"]))
+    check("a webinar exists to register for", bool(event.get("id")), tag)
+
+    status, _ = post_json("webinar-register", {
+        "email": email, "firstName": "Proof", "lastName": f"Webinar{tag}",
+        "webinarId": event["id"], "webinarTitle": event["name"],
+        "source": "Email", "consent": True,
+    })
+    if not check("registration webhook accepts the post", status < 400,
+                 f"HTTP {status}"):
+        return
+    time.sleep(7)
+
+    people = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
+    if not check("person created", len(people) == 1, f"{len(people)} found"):
+        return
+    pid = people[0]["id"]
+    CREATED.append(("people", pid))
+
+    regs = rows("webinarRegistrations", f"filter=personId[eq]:{pid}")
+    if check("registration linked to person and event", bool(regs),
+             f"{len(regs)} found"):
+        CREATED.append(("webinarRegistrations", regs[0]["id"]))
+        check("registration points at the right webinar",
+              regs[0].get("webinarEventId") == event["id"],
+              str(regs[0].get("webinarEventId")))
+        check("reminder counter starts at zero",
+              (regs[0].get("remindersSent") or 0) == 0,
+              str(regs[0].get("remindersSent")))
+
+    consent = rows("consentRecords", f"filter=personId[eq]:{pid}")
+    check("consent recorded for the registration",
+          bool(consent) and consent[0].get("status") == "OPTED_IN",
+          consent[0].get("status") if consent else "none")
+
+    ok, detail = wait_for(
+        lambda: ack_reached(email, pid, before=sent_before,
+                            vendor="smtp/webinar_confirm"),
+        timeout=60 if LIVE_EMAIL else 0)
+    check("confirmation sent", ok, detail)
+
+
+def prove_enrolment() -> None:
+    """The revenue path. An enrolment must never be recorded as paid just
+    because a payment link was sent."""
+    print(f"\n{BOLD}ENR Bootcamp Enrolment — the revenue path{OFF}")
+    tag = uuid.uuid4().hex[:8]
+    email = LIVE_EMAIL or f"enrol.{tag}@fairhaven-{tag}.com"
+    if not LIVE_EMAIL:
+        mailpit_clear()
+
+    status, _ = post_json("enrol", {
+        "email": email, "firstName": "Proof", "lastName": f"Enrol{tag}",
+        "tier": "GOLD", "programName": f"Proof bootcamp {tag}", "amount": 1500,
+    })
+    if not check("enrolment webhook accepts the post", status < 400,
+                 f"HTTP {status}"):
+        return
+    time.sleep(7)
+
+    people = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
+    if not check("person created", len(people) == 1, f"{len(people)} found"):
+        return
+    pid = people[0]["id"]
+    CREATED.append(("people", pid))
+
+    enrols = rows("enrollments", f"filter=personId[eq]:{pid}")
+    if not check("enrolment created", bool(enrols), f"{len(enrols)} found"):
+        return
+    CREATED.append(("enrollments", enrols[0]["id"]))
+    e = enrols[0]
+    check("tier recorded as sent", e.get("tier") == "GOLD", str(e.get("tier")))
+    # The single most important assertion here. Marking an enrolment PAID on
+    # the strength of a link being emailed would put unpaid students in the
+    # room and take them out of the chase.
+    check("status is PAYMENT_SENT, not PAID",
+          e.get("status") == "PAYMENT_SENT", str(e.get("status")))
+    check("a payment link was attached",
+          bool((e.get("paymentLinkUrl") or {}).get("primaryLinkUrl")),
+          str((e.get("paymentLinkUrl") or {}).get("primaryLinkUrl"))[:50])
+
+    tasks = rows("tasks", "order_by=createdAt[DescNullsLast]")
+    hit = [t for t in tasks if tag in (t.get("title") or "")
+           or "GOLD" in (t.get("title") or "")]
+    check("a task was raised for a human", bool(hit),
+          hit[0]["title"] if hit else "none")
+
+
+def prove_enrolment_rejects_bad_tier() -> None:
+    """An unknown tier must fail loudly. Falling back to a default would
+    charge the wrong amount, which is a refund and an apology."""
+    print(f"\n{BOLD}ENR Bootcamp Enrolment — an unknown tier is refused{OFF}")
+    tag = uuid.uuid4().hex[:8]
+    email = f"badtier.{tag}@fairhaven-{tag}.com"
+    before = count("enrollments")
+
+    post_json("enrol", {"email": email, "firstName": "Bad",
+                        "lastName": f"Tier{tag}", "tier": "UNOBTAINIUM"})
+    time.sleep(5)
+
+    people = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
+    for p in people:
+        CREATED.append(("people", p["id"]))
+    after = count("enrollments")
+    check("no enrolment created for an unknown tier", after == before,
+          f"{before} -> {after}")
+
+
+def prove_frontdesk_ai() -> None:
+    print(f"\n{BOLD}AI FrontDesk Handover — conversations keep their history{OFF}")
+    tag = uuid.uuid4().hex[:8]
+    email = f"fdai.{tag}@brookline-{tag}.com"
+
+    status, _ = post_json("frontdesk-ai", {
+        "email": email, "firstName": "Proof", "lastName": f"AI{tag}",
+        "fdai_intent": "asking about the Splunk bootcamp price",
+        "fdai_convo_summary": f"Proof conversation {tag}.",
+        "fdai_handover_reason": "wants to speak to a trainer",
+        "fdai_nps": 9,
+        "fdai_page_url": "https://aspiretss.com/cyber-security-certifications",
+    })
+    if not check("AI webhook accepts the post", status < 400, f"HTTP {status}"):
+        return
+    time.sleep(7)
+
+    people = rows("people", f"filter=emails.primaryEmail[eq]:{parse.quote(email)}")
+    if not check("person created", len(people) == 1, f"{len(people)} found"):
+        return
+    pid = people[0]["id"]
+    CREATED.append(("people", pid))
+
+    convos = rows("aiConversations", f"filter=personId[eq]:{pid}")
+    if not check("conversation stored as its own record", bool(convos),
+                 f"{len(convos)} found"):
+        return
+    CREATED.append(("aiConversations", convos[0]["id"]))
+    c = convos[0]
+    check("the summary survived", tag in (c.get("summary") or ""),
+          (c.get("summary") or "")[:40])
+    check("NPS captured as a number", c.get("nps") == 9, str(c.get("nps")))
+    check("marked as handed over", c.get("handedOver") is True,
+          str(c.get("handedOver")))
+
+    tasks = rows("tasks", "order_by=createdAt[DescNullsLast]")
+    hit = [t for t in tasks if "AI handover" in (t.get("title") or "")]
+    check("handover raised a task", bool(hit),
+          hit[0]["title"][:50] if hit else "none")
+
+
+def prove_tag_sync(sess: N8nSession, ids: dict) -> None:
+    print(f"\n{BOLD}SEG Tag Sync — 57 tags get a migration decision{OFF}")
+    tag = uuid.uuid4().hex[:8]
+    # A cohort-shaped name, which the classifier should send to a cohort record
+    # rather than keep as a label.
+    try:
+        row = twenty_post("crmTags", {
+            "name": f"registered splunk bootcamp jan-{tag}",
+            "ghlTagName": f"registered splunk bootcamp jan-{tag}",
+        })
+    except RuntimeError as e:
+        check("a tag exists to classify", False, str(e)[:90])
+        return
+    CREATED.append(("crmTags", row["id"]))
+    check("a tag exists to classify", bool(row.get("id")), tag)
+
+    name = "SEG Tag Sync"
+    wid = ids.get(name)
+    if not check(f"{name} deployed", bool(wid), "" if wid else "not found"):
+        return
+    wf = sess.workflow(wid)
+    trig = next((n["name"] for n in wf.get("nodes", [])
+                 if "schedule" in n.get("type", "").lower()), "Daily 05:00 UTC")
+    exec_id = sess.run(wid, trig)
+    if not check(f"{name} starts", bool(exec_id)):
+        return
+    sess.wait(exec_id)
+    time.sleep(4)
+
+    after = rows("crmTags", f"filter=id[eq]:{row['id']}")
+    got = after[0] if after else {}
+    check("tag classified as a cohort segment",
+          got.get("category") == "SEGMENT", str(got.get("category")))
+    check("recommended action is to convert it to a field",
+          got.get("migrationAction") == "CONVERT_TO_FIELD",
+          str(got.get("migrationAction")))
+
+
 def prove_scheduled(sess: N8nSession, ids: dict) -> None:
-    print(f"\n{BOLD}Scheduled workflows — renewals and sweeps{OFF}")
+    print(f"\n{BOLD}Scheduled workflows — every job that runs unattended{OFF}")
     for name, trigger in (("SUB Renewal Escalation", "Every morning"),
                           ("OPS Scheduled Sweeps", "Every morning"),
-                          ("LEAD Nurture Sequence", "Every morning")):
+                          ("LEAD Nurture Sequence", "Every morning"),
+                          ("ENR Cohort Operations", "Every morning"),
+                          ("EVT Webinar Reminders", "Hourly"),
+                          ("EVT Post-Webinar Follow-up", "Every morning"),
+                          ("BOOK Trainer Appointment", "Every morning")):
         wid = ids.get(name)
         if not wid:
             check(f"{name} deployed", False, "not found")
@@ -781,7 +1025,8 @@ def cleanup() -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Prove the workflows work")
     ap.add_argument("--only", default="",
-                    help="lead, consent, link, inbound, error, scheduled, health")
+                    help="lead, consent, link, inbound, webinar, enrol, ai, "
+                         "tags, error, scheduled, health")
     ap.add_argument("--email", default="admin@aspiretss.com")
     ap.add_argument("--password", default="AspireDemo2026!")
     ap.add_argument("--keep", action="store_true",
@@ -847,6 +1092,11 @@ def main() -> int:
     run("consent", prove_consent_gate)
     run("link", prove_tracked_link)
     run("inbound", prove_inbound_events)
+    run("webinar", prove_webinar)
+    run("enrol", prove_enrolment)
+    run("enrol", prove_enrolment_rejects_bad_tier)
+    run("ai", prove_frontdesk_ai)
+    run("tags", prove_tag_sync, sess, ids)
     if args.production:
         if not want or "error" in want:
             print(f"\n{BOLD}SYS Error Handler — skipped on --production{OFF}")

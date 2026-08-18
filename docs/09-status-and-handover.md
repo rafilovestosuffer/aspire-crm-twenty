@@ -42,30 +42,52 @@ patches and backs up.
 
 | | |
 |---|---|
-| Objects in the CRM | **53** — 28 Twenty standard, **25 custom** |
-| Fields and relations provisioned | **177**, from a version-controlled schema, 0 failures |
+| Objects in the CRM | **59** — 28 Twenty standard, **31 custom** |
+| Fields and relations provisioned | **198**, from a version-controlled schema |
 | Demo dataset | **448** records, deterministic — identical on every rebuild |
-| Automations | **9** live workflows, plus 2 that exist only to test the others |
-| Automated checks against the running system | **37**, all passing |
+| Automations | **17** live workflows, plus 2 that exist only to test the others |
 
-The four objects that carry the business: `serviceSubscription`,
-`complianceEngagement`, `trainingAccount`, `phishingBaseline`. Two more carry
-the discipline: `consentRecord` (who may be contacted, on which channel, with
-proof) and `automationRun` (the execution history GHL never exposed).
+Counts change when the model does; re-derive them with
+`scripts/implementation_audit.py` rather than trusting this table after a
+schema change.
 
-### The nine workflows
+The 18 August 2026 GHL pull moved this substantially. Six objects and eight
+workflows were added to model the training funnel the account actually runs —
+webinar, nurture, trainer meeting, bootcamp enrolment, cohort — which nothing
+in the original design covered. See `docs/13-model-realignment.md`.
+
+The objects that carry the business are the training funnel:
+`trainingProgram`, `cohort`, `enrollment`, `webinarEvent`,
+`webinarRegistration` and `aiConversation`. Two more carry the discipline:
+`consentRecord` (who may be contacted, on which channel, with proof) and
+`automationRun` (the execution history GHL never exposed).
+
+`serviceSubscription`, `complianceEngagement` and `phishingBaseline` remain
+provisioned and empty. They describe a managed-security business that does not
+appear anywhere in the GHL account; they are kept because absence from the
+marketing system is not proof of absence from the company.
+
+### The seventeen workflows
 
 | Workflow | What it does |
 |---|---|
-| `LEAD Form Intake` | Public form → dedupe → person + company → consent record → score → owner → task → acknowledgement email → sales notification |
+| `LEAD Form Intake` | Public form → dedupe → person, and a company only when the address is not a personal one → consent → score on intent → route to a queue with an SLA → task → acknowledgement → sales notification |
 | `VEND Send Email` | The **only** path to SMTP. Checks consent, renders the template, logs a `messageLog`. No other workflow may send directly |
-| `SUB Renewal Escalation` | Daily. 90/60/30/7 days before renewal, raises tasks and opportunities. GHL cannot do this — it has no subscription object |
 | `MSG Tracked Link Redirect` | Click tracking; counts the click, then redirects |
+| `MSG Inbound Events` | Closes the consent loop: an unsubscribe or bounce flips the consent record, and a later form submission cannot quietly undo it |
+| `LEAD Nurture Sequence` | Day 3, 7 and 14 after an enquiry, then stops. Stops early on a reply, an opt-out, or a real opportunity on that person's company |
+| `EVT Webinar Registration` | Public webhook. Person, registration, consent, confirmation — the top of the funnel |
+| `EVT Webinar Reminders` | Hourly. The 24-hour and 1-hour reminders, counted on the registration so a re-run cannot send twice |
+| `EVT Post-Webinar Follow-up` | Daily. Recording to the absent, survey to the present, attendance written back onto the event |
+| `ENR Bootcamp Enrolment` | Public webhook. Creates the enrolment as PAYMENT_SENT, issues the tier's payment link, raises a task. Never marks anything paid |
+| `ENR Cohort Operations` | Daily. Chases unpaid enrolments every third day, sends joining instructions, recomputes seat counts from the enrolments themselves |
+| `BOOK Trainer Appointment` | Daily. Reminds about tomorrow's meetings across the eight calendars and flags the ones nobody attended |
+| `AI FrontDesk Handover` | Webhook for the AI receptionist. One record per conversation instead of seven fields that overwrote each other, and a task when it asks for a human |
+| `SEG Tag Sync` | Daily. Classifies each tag and records whether it should stay a tag, become a field, or be dropped |
+| `SUB Renewal Escalation` | Daily. 90/60/30/7 days before renewal. Dormant while no subscriptions exist, and says so rather than reporting success over an empty table |
 | `OPS Scheduled Sweeps` | Finds what did *not* happen — stale opportunities, no-shows, overdue invoices |
 | `SYS Error Handler` | Catches any failure, records it, alerts, and suppresses alert storms |
-| `MSG Inbound Events` | Closes the consent loop: an unsubscribe or bounce from the mail provider flips the consent record, and a later form submission cannot quietly undo it |
-| `LEAD Nurture Sequence` | Day 3, 7 and 14 after an enquiry, then stops. Stops early on a reply, an opt-out, or a real opportunity on that person's company |
-| `SYS Daily Health Check` | Asks every morning whether the three scheduled jobs (renewal, sweeps, nurture) ran in the last 26 hours — each queried by name, not pulled off the latest page of `automationRun`. Does not check backup freshness; that is `verify_restore.py`. |
+| `SYS Daily Health Check` | Asks every morning whether the seven scheduled jobs ran in the last 26 hours — each queried by name, not pulled off the latest page of `automationRun`. Does not check backup freshness; that is `verify_restore.py` |
 
 ## 4. What "proven" means here
 

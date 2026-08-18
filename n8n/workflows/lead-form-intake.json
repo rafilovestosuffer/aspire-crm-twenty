@@ -5,7 +5,7 @@
       "parameters": {
         "path": "aspire-contact",
         "formTitle": "Talk to Aspire Tech",
-        "formDescription": "Tell us what you need and a security specialist will reply within one business day.",
+        "formDescription": "Tell us what you are after and a trainer will reply within one business day.",
         "formFields": {
           "values": [
             {
@@ -17,34 +17,43 @@
               "requiredField": true
             },
             {
-              "fieldLabel": "Work email",
+              "fieldLabel": "Email",
               "fieldType": "email",
               "requiredField": true
             },
             {
-              "fieldLabel": "Company",
-              "requiredField": true
+              "fieldLabel": "Company or university",
+              "fieldType": "text"
             },
             {
               "fieldLabel": "Phone",
               "fieldType": "text"
             },
             {
-              "fieldLabel": "What do you need help with?",
+              "fieldLabel": "What are you interested in?",
               "fieldType": "dropdown",
               "fieldOptions": {
                 "values": [
                   {
-                    "option": "SOC / managed detection"
+                    "option": "Cloud security certification training"
                   },
                   {
-                    "option": "CMMC or compliance"
+                    "option": "Splunk bootcamp"
                   },
                   {
-                    "option": "Security awareness training"
+                    "option": "An upcoming webinar or workshop"
                   },
                   {
-                    "option": "Incident response"
+                    "option": "Corporate or group training"
+                  },
+                  {
+                    "option": "Security awareness training for our staff"
+                  },
+                  {
+                    "option": "A one-to-one career consultation"
+                  },
+                  {
+                    "option": "Internship or career change"
                   },
                   {
                     "option": "Something else"
@@ -52,6 +61,41 @@
                 ]
               },
               "requiredField": true
+            },
+            {
+              "fieldLabel": "Which certification?",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  {
+                    "option": "Not sure yet"
+                  },
+                  {
+                    "option": "SC-200: Microsoft Security Operations Analyst"
+                  },
+                  {
+                    "option": "SC-100: Microsoft Cybersecurity Architect"
+                  },
+                  {
+                    "option": "AZ-900: Microsoft Azure Fundamentals"
+                  },
+                  {
+                    "option": "SC-900: Microsoft Security, Compliance and Identity"
+                  },
+                  {
+                    "option": "Splunk Core Certified User"
+                  },
+                  {
+                    "option": "Splunk Core Certified Power User"
+                  },
+                  {
+                    "option": "Splunk Core Certified Advanced Power User"
+                  },
+                  {
+                    "option": "GCP Cloud Digital Leader"
+                  }
+                ]
+              }
             },
             {
               "fieldLabel": "Message",
@@ -81,7 +125,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Normalise at the edge. Everything downstream can then assume clean values.\nconst j = $input.first().json;\nconst email = String(j['Work email'] || '').trim().toLowerCase();\nconst phoneRaw = String(j['Phone'] || '').replace(/[^0-9+]/g, '');\n\nreturn [{ json: {\n  firstName: String(j['First name'] || '').trim(),\n  lastName:  String(j['Last name']  || '').trim(),\n  email,\n  phone: phoneRaw ? (phoneRaw.startsWith('+') ? phoneRaw : '+1' + phoneRaw) : '',\n  companyName: String(j['Company'] || '').trim(),\n  interest: j['What do you need help with?'] || '',\n  message: String(j['Message'] || '').slice(0, 2000),\n  consent: j['I agree to be contacted by Aspire Tech'] === true,\n  emailDomain: email.split('@')[1] || '',\n}}];"
+        "jsCode": "// Normalise at the edge. Everything downstream can then assume clean values.\nconst j = $input.first().json;\nconst email = String(j['Email'] || j['Work email'] || '').trim().toLowerCase();\nconst phoneRaw = String(j['Phone'] || '').replace(/[^0-9+]/g, '');\nconst interest = String(j['What are you interested in?'] ||\n                        j['What do you need help with?'] || '');\n\n// One enquiry can only be one kind of thing, and the kind decides which\n// follow-up it gets. Classifying here rather than in four places downstream\n// means the routing rule has exactly one definition.\nconst KINDS = [\n  [/webinar|workshop/i,                     'WEBINAR'],\n  [/bootcamp|splunk/i,                      'BOOTCAMP'],\n  [/certification|cloud security/i,         'CERTIFICATION'],\n  [/corporate|group/i,                      'CORPORATE'],\n  [/awareness/i,                            'AWARENESS'],\n  [/consultation|career/i,                  'CONSULTATION'],\n  [/internship/i,                           'INTERNSHIP'],\n];\nconst kind = (KINDS.find(([re]) => re.test(interest)) || [null, 'GENERAL'])[1];\n\nconst cert = String(j['Which certification?'] || '').trim();\n\nreturn [{ json: {\n  firstName: String(j['First name'] || '').trim(),\n  lastName:  String(j['Last name']  || '').trim(),\n  email,\n  phone: phoneRaw ? (phoneRaw.startsWith('+') ? phoneRaw : '+1' + phoneRaw) : '',\n  companyName: String(j['Company or university'] || j['Company'] || '').trim(),\n  interest,\n  kind,\n  certification: cert === 'Not sure yet' ? '' : cert,\n  message: String(j['Message'] || '').slice(0, 2000),\n  consent: j['I agree to be contacted by Aspire Tech'] === true,\n  emailDomain: email.split('@')[1] || '',\n}}];"
       },
       "id": "278271306411",
       "name": "Normalise",
@@ -281,7 +325,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const found = ($input.first().json.data?.companies || [])[0];\nreturn [{ json: { ...$('Normalise').first().json, companyId: found?.id || null } }];"
+        "jsCode": "const FREE = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com',\n              'icloud.com','protonmail.com','live.com','msn.com','ymail.com',\n              'googlemail.com','yandex.com','mail.com','gmx.com','qq.com'];\nconst d = $('Normalise').first().json;\nconst found = ($input.first().json.data?.companies || [])[0];\nconst personal = !d.emailDomain || FREE.includes(d.emailDomain);\nreturn [{ json: { ...d,\n  companyId: found?.id || null,\n  // No usable company name is as disqualifying as a personal domain: a\n  // company called \"\" helps nobody and cannot be merged later.\n  personal: personal || !d.companyName,\n}}];"
       },
       "id": "358358435317",
       "name": "Company exists?",
@@ -307,14 +351,22 @@
                 "type": "string",
                 "operation": "notExists"
               }
+            },
+            {
+              "leftValue": "={{ $json.personal }}",
+              "rightValue": "false",
+              "operator": {
+                "type": "boolean",
+                "operation": "false"
+              }
             }
           ],
           "combinator": "and"
         },
         "options": {}
       },
-      "id": "380117175547",
-      "name": "New company?",
+      "id": "824896657675",
+      "name": "Create a company?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
@@ -385,7 +437,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"companyId\": $('Company exists?').first().json.companyId || $('Create company').first().json.data.createCompany.id }) }}"
+        "jsonBody": "={{ JSON.stringify({\"companyId\": $('Company exists?').first().json.companyId || $('Create company').first().json?.data?.createCompany?.id || null }) }}"
       },
       "id": "869453614042",
       "name": "Link person to company",
@@ -518,7 +570,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Transparent scoring \u2014 a rule anyone can read and argue with, unlike GHL's\n// opaque engagement score.\nconst d = $('Normalise').first().json;\nconst FREE = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com'];\n\nlet score = 0;\nif (d.emailDomain && !FREE.includes(d.emailDomain)) score += 30; else score -= 40;\nif (/cmmc|compliance|soc|incident/i.test(d.interest)) score += 25;\nif (/cmmc|cui|fci|dfars|nist/i.test(d.message))       score += 20;\nif (d.phone)                                          score += 10;\n\n// Deterministic round-robin: hashing the email keeps a person with the same\n// rep across re-runs, and needs no counter stored anywhere.\n// $env, not process.env: with N8N_RUNNERS_ENABLED the Code node executes\n// in a sandboxed task runner where `process` does not exist at all.\nconst REPS = String($env.ASPIRE_REP_IDS || '').split(',').filter(Boolean);\nconst hash = [...d.email].reduce((a, c) => a + c.charCodeAt(0), 0);\n\nreturn [{ json: { ...d, score,\n  band: score >= 60 ? 'HOT' : score >= 30 ? 'WARM' : 'COLD',\n  assigneeId: REPS.length ? REPS[hash % REPS.length] : null }}];"
+        "jsCode": "// Transparent scoring \u2014 a rule anyone can read and argue with, unlike GHL's\n// opaque engagement score.\n//\n// A free email address is NOT a penalty here. This version scored -40 for\n// gmail, which was written for a business selling managed security to\n// companies. Aspire sells certification training, and its biggest audiences\n// are students, career changers and government employees signing up with\n// personal addresses \u2014 the account's own tags say so. That rule marked the\n// core customer COLD on arrival. A work domain is still worth something,\n// because a corporate enquiry is worth more per head, but the absence of one\n// says nothing bad about an individual buying a course.\nconst d = $('Normalise').first().json;\nconst FREE = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com'];\n\nlet score = 0;\nif (d.emailDomain && !FREE.includes(d.emailDomain)) score += 20;\n\n// Intent is what actually predicts revenue in this funnel. Someone naming a\n// bootcamp or a certification is much closer to buying than someone browsing\n// a webinar, and a corporate or group enquiry is several seats at once.\nconst BY_KIND = {\n  CORPORATE: 45, BOOTCAMP: 40, CERTIFICATION: 35, AWARENESS: 30,\n  CONSULTATION: 25, WEBINAR: 15, GENERAL: 5, INTERNSHIP: 0,\n};\nscore += BY_KIND[d.kind] ?? 5;\n\n// Naming the exact certification means they have already done the research.\nif (d.certification)                                  score += 15;\nif (/team|staff|employees|colleagues|company/i.test(d.message)) score += 15;\nif (d.phone)                                          score += 10;\n\n// Deterministic round-robin: hashing the email keeps a person with the same\n// rep across re-runs, and needs no counter stored anywhere.\n// $env, not process.env: with N8N_RUNNERS_ENABLED the Code node executes\n// in a sandboxed task runner where `process` does not exist at all.\nconst REPS = String($env.ASPIRE_REP_IDS || '').split(',').filter(Boolean);\nconst hash = [...d.email].reduce((a, c) => a + c.charCodeAt(0), 0);\n\nreturn [{ json: { ...d, score,\n  band: score >= 60 ? 'HOT' : score >= 30 ? 'WARM' : 'COLD',\n  assigneeId: REPS.length ? REPS[hash % REPS.length] : null }}];"
       },
       "id": "287281425068",
       "name": "Score and route",
@@ -526,6 +578,19 @@
       "typeVersion": 2,
       "position": [
         440,
+        1540
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\n\n// Hours to first response, by what they asked for. These are commitments the\n// task's due date enforces, not decoration.\nconst SLA_HOURS = {\n  CORPORATE: 4, BOOTCAMP: 8, CERTIFICATION: 12, AWARENESS: 12,\n  CONSULTATION: 24, WEBINAR: 48, GENERAL: 24, INTERNSHIP: 72,\n};\nconst OWNER_QUEUE = {\n  CORPORATE: 'sales', BOOTCAMP: 'sales', CERTIFICATION: 'sales',\n  AWARENESS: 'sales', CONSULTATION: 'trainer', WEBINAR: 'marketing',\n  GENERAL: 'sales', INTERNSHIP: 'people',\n};\n\nreturn [{ json: { ...d,\n  slaHours: SLA_HOURS[d.kind] ?? 24,\n  queue: OWNER_QUEUE[d.kind] ?? 'sales',\n  taskTitle: `${d.kind}: ${d.firstName} ${d.lastName} (${d.band}, score ${d.score})`,\n}}];"
+      },
+      "id": "880549443222",
+      "name": "Route by enquiry kind",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
         1540
       ]
     },
@@ -544,14 +609,14 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"title\": 'Follow up: ' + $json.firstName + ' ' + $json.lastName + ' (' + $json.band + ', score ' + $json.score + ')', \"status\": \"TODO\", \"dueAt\": $now.plus({ days: 1 }).toUTC().toISO(), \"bodyV2\": {\"markdown\": $json.interest + '\\n\\n' + $json.message } }) }}"
+        "jsonBody": "={{ JSON.stringify({\"title\": $json.taskTitle, \"status\": \"TODO\", \"dueAt\": $now.plus({ hours: $json.slaHours }).toUTC().toISO(), \"bodyV2\": {\"markdown\": 'Interest: ' + $json.interest + '\\nCertification: ' + ($json.certification || 'not specified') + '\\nQueue: ' + $json.queue + '\\n\\n' + $json.message } }) }}"
       },
       "id": "423306921783",
       "name": "Create task",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
-        660,
+        880,
         1540
       ],
       "credentials": {
@@ -594,7 +659,7 @@
         "url": "={{ $env.SALES_WEBHOOK_URL || $env.ALERT_WEBHOOK_URL }}",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\"channel\": \"#sales\", \"text\": `:inbox_tray: *New lead \u2014 ${$('Score and route').first().json.band}* (score ${$('Score and route').first().json.score})\n*${$('Score and route').first().json.firstName} ${$('Score and route').first().json.lastName}* \u2014 ${$('Score and route').first().json.companyName}\nInterest: ${$('Score and route').first().json.interest}\n${$('Score and route').first().json.email}` }) }}",
+        "jsonBody": "={{ JSON.stringify({\"channel\": \"#sales\", \"text\": `:inbox_tray: *${$('Route by enquiry kind').first().json.kind} enquiry \u2014 ${$('Route by enquiry kind').first().json.band}* (score ${$('Route by enquiry kind').first().json.score}, reply within ${$('Route by enquiry kind').first().json.slaHours}h)\n*${$('Route by enquiry kind').first().json.firstName} ${$('Route by enquiry kind').first().json.lastName}* \u2014 ${$('Route by enquiry kind').first().json.companyName || 'individual'}\nInterest: ${$('Route by enquiry kind').first().json.interest}\nQueue: ${$('Route by enquiry kind').first().json.queue}\n${$('Route by enquiry kind').first().json.email}` }) }}",
         "options": {}
       },
       "id": "528275264840",
@@ -678,18 +743,18 @@
     },
     {
       "parameters": {
-        "content": "## Attach them to the right company\nMatch on the email domain, not the company name they typed.\nPeople write Meridian, Meridian Defense and meridian defense\nsystems for the same account, and each spelling would create\nanother company. The domain is the same every time.",
-        "height": 510,
+        "content": "## Attach them to a company, if there is one\nMatch on the email domain, not the company name they typed.\nPeople write Meridian, Meridian Defense and meridian defense\nsystems for the same account, and each spelling would create\nanother company. Individuals signing up with a personal address\nget no company at all, which is the honest answer.",
+        "height": 530,
         "width": 1740,
         "color": 4
       },
-      "id": "665977484784",
-      "name": "3. Attach them to the right company",
+      "id": "916883184814",
+      "name": "3. Attach them to a company, if there is one",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
         -20,
-        760
+        740
       ]
     },
     {
@@ -710,18 +775,18 @@
     },
     {
       "parameters": {
-        "content": "## Score it and give it an owner\nRate the lead against rules anyone can read \u2014 company size,\nwhat they asked for, whether it is a work email \u2014 then hand it\nto the next sales rep in turn and raise a task with a due date.\nNothing sits in an inbox waiting to be noticed.",
-        "height": 380,
+        "content": "## Score it, route it, give it an owner\nRate the enquiry on what they asked for rather than on their\nemail domain, because most people here are individuals. Urgency\nfollows the kind of enquiry: someone asking about a bootcamp\nthat starts in three weeks cannot wait the same day as someone\nbrowsing a webinar.",
+        "height": 420,
         "width": 540,
         "color": 6
       },
-      "id": "827258568942",
-      "name": "5. Score it and give it an owner",
+      "id": "690068500262",
+      "name": "5. Score it, route it, give it an owner",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
         640,
-        1320
+        1280
       ]
     },
     {
@@ -852,14 +917,14 @@
       "main": [
         [
           {
-            "node": "New company?",
+            "node": "Create a company?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "New company?": {
+    "Create a company?": {
       "main": [
         [
           {
@@ -955,6 +1020,17 @@
       ]
     },
     "Score and route": {
+      "main": [
+        [
+          {
+            "node": "Route by enquiry kind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by enquiry kind": {
       "main": [
         [
           {

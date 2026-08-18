@@ -890,26 +890,46 @@ def wf_lead_form() -> Flow:
             "lower-cases the email, strips spaces from the phone — so the\n"
             "same person is recognised however they type it.", "capture")
 
+    # The options are the account's own vocabulary, not a guess at what a
+    # security company sells. "Company" is optional and the email is "Email",
+    # not "Work email", because most people entering this funnel are
+    # individuals — students and career changers — and a required work address
+    # would turn the largest audience away at the first field.
     trig = f.add("Public form", "n8n-nodes-base.formTrigger", {
         "path": FORM_PATH,
         "formTitle": "Talk to Aspire Tech",
-        "formDescription": "Tell us what you need and a security specialist "
-                           "will reply within one business day.",
+        "formDescription": "Tell us what you are after and a trainer will "
+                           "reply within one business day.",
         "formFields": {"values": [
             {"fieldLabel": "First name", "requiredField": True},
             {"fieldLabel": "Last name", "requiredField": True},
-            {"fieldLabel": "Work email", "fieldType": "email", "requiredField": True},
-            {"fieldLabel": "Company", "requiredField": True},
+            {"fieldLabel": "Email", "fieldType": "email", "requiredField": True},
+            {"fieldLabel": "Company or university", "fieldType": "text"},
             {"fieldLabel": "Phone", "fieldType": "text"},
-            {"fieldLabel": "What do you need help with?",
+            {"fieldLabel": "What are you interested in?",
              "fieldType": "dropdown",
              "fieldOptions": {"values": [
-                 {"option": "SOC / managed detection"},
-                 {"option": "CMMC or compliance"},
-                 {"option": "Security awareness training"},
-                 {"option": "Incident response"},
+                 {"option": "Cloud security certification training"},
+                 {"option": "Splunk bootcamp"},
+                 {"option": "An upcoming webinar or workshop"},
+                 {"option": "Corporate or group training"},
+                 {"option": "Security awareness training for our staff"},
+                 {"option": "A one-to-one career consultation"},
+                 {"option": "Internship or career change"},
                  {"option": "Something else"}]},
              "requiredField": True},
+            {"fieldLabel": "Which certification?",
+             "fieldType": "dropdown",
+             "fieldOptions": {"values": [
+                 {"option": "Not sure yet"},
+                 {"option": "SC-200: Microsoft Security Operations Analyst"},
+                 {"option": "SC-100: Microsoft Cybersecurity Architect"},
+                 {"option": "AZ-900: Microsoft Azure Fundamentals"},
+                 {"option": "SC-900: Microsoft Security, Compliance and Identity"},
+                 {"option": "Splunk Core Certified User"},
+                 {"option": "Splunk Core Certified Power User"},
+                 {"option": "Splunk Core Certified Advanced Power User"},
+                 {"option": "GCP Cloud Digital Leader"}]}},
             {"fieldLabel": "Message", "fieldType": "textarea"},
             {"fieldLabel": "I agree to be contacted by Aspire Tech",
              "fieldType": "checkbox", "requiredField": True},
@@ -921,16 +941,36 @@ def wf_lead_form() -> Flow:
     norm = f.code("Normalise", """
 // Normalise at the edge. Everything downstream can then assume clean values.
 const j = $input.first().json;
-const email = String(j['Work email'] || '').trim().toLowerCase();
+const email = String(j['Email'] || j['Work email'] || '').trim().toLowerCase();
 const phoneRaw = String(j['Phone'] || '').replace(/[^0-9+]/g, '');
+const interest = String(j['What are you interested in?'] ||
+                        j['What do you need help with?'] || '');
+
+// One enquiry can only be one kind of thing, and the kind decides which
+// follow-up it gets. Classifying here rather than in four places downstream
+// means the routing rule has exactly one definition.
+const KINDS = [
+  [/webinar|workshop/i,                     'WEBINAR'],
+  [/bootcamp|splunk/i,                      'BOOTCAMP'],
+  [/certification|cloud security/i,         'CERTIFICATION'],
+  [/corporate|group/i,                      'CORPORATE'],
+  [/awareness/i,                            'AWARENESS'],
+  [/consultation|career/i,                  'CONSULTATION'],
+  [/internship/i,                           'INTERNSHIP'],
+];
+const kind = (KINDS.find(([re]) => re.test(interest)) || [null, 'GENERAL'])[1];
+
+const cert = String(j['Which certification?'] || '').trim();
 
 return [{ json: {
   firstName: String(j['First name'] || '').trim(),
   lastName:  String(j['Last name']  || '').trim(),
   email,
   phone: phoneRaw ? (phoneRaw.startsWith('+') ? phoneRaw : '+1' + phoneRaw) : '',
-  companyName: String(j['Company'] || '').trim(),
-  interest: j['What do you need help with?'] || '',
+  companyName: String(j['Company or university'] || j['Company'] || '').trim(),
+  interest,
+  kind,
+  certification: cert === 'Not sure yet' ? '' : cert,
   message: String(j['Message'] || '').slice(0, 2000),
   consent: j['I agree to be contacted by Aspire Tech'] === true,
   emailDomain: email.split('@')[1] || '',
@@ -984,23 +1024,51 @@ return [{ json: { ...$('Normalise').first().json,
     # Match the company on email domain, not on typed company name: people
     # write "Meridian", "Meridian Defense" and "meridian defense systems" for
     # the same account, and each spelling would create another record.
-    f.phase("Attach them to the right company",
+    f.phase("Attach them to a company, if there is one",
             "Match on the email domain, not the company name they typed.\n"
             "People write Meridian, Meridian Defense and meridian defense\n"
             "systems for the same account, and each spelling would create\n"
-            "another company. The domain is the same every time.", "record")
+            "another company. Individuals signing up with a personal address\n"
+            "get no company at all, which is the honest answer.", "record")
 
     find_co = f.twenty("Find company", "GET",
                        "/rest/companies"
                        "?filter=domainName.primaryLinkUrl[ilike]:"
                        "%{{ encodeURIComponent($('Normalise').first().json.emailDomain) }}%&limit=1")
 
+    # Most people in a training funnel are individuals. Creating a company from
+    # a personal address would put a "gmail.com" record in the CRM and attach
+    # every unrelated student on gmail to it — one company with hundreds of
+    # strangers inside, and every company-scoped rule (the nurture
+    # open-opportunity exit among them) then treats them as colleagues.
     co_branch = f.code("Company exists?", """
+const FREE = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com',
+              'icloud.com','protonmail.com','live.com','msn.com','ymail.com',
+              'googlemail.com','yandex.com','mail.com','gmx.com','qq.com'];
+const d = $('Normalise').first().json;
 const found = ($input.first().json.data?.companies || [])[0];
-return [{ json: { ...$('Normalise').first().json, companyId: found?.id || null } }];
+const personal = !d.emailDomain || FREE.includes(d.emailDomain);
+return [{ json: { ...d,
+  companyId: found?.id || null,
+  // No usable company name is as disqualifying as a personal domain: a
+  // company called "" helps nobody and cannot be merged later.
+  personal: personal || !d.companyName,
+}}];
 """.strip())
 
-    new_co = f.iff("New company?", "={{ $json.companyId }}", "notExists", "")
+    new_co = f.add("Create a company?", "n8n-nodes-base.if", {
+        "conditions": {
+            "options": {"caseSensitive": True, "typeValidation": "loose"},
+            "conditions": [
+                {"leftValue": "={{ $json.companyId }}", "rightValue": "",
+                 "operator": {"type": "string", "operation": "notExists"}},
+                {"leftValue": "={{ $json.personal }}", "rightValue": "false",
+                 "operator": {"type": "boolean", "operation": "false"}},
+            ],
+            "combinator": "and",
+        },
+        "options": {},
+    }, version=2)
 
     create_co = f.twenty("Create company", "POST", "/rest/companies", {
         "name": "={{ $json.companyName }}",
@@ -1009,8 +1077,12 @@ return [{ json: { ...$('Normalise').first().json, companyId: found?.id || null }
     co_merge = f.add("Company ready", "n8n-nodes-base.merge",
                      {"mode": "append", "options": {}}, version=3, row=1)
 
-    company_id = ("={{ $('Company exists?').first().json.companyId || "
-                  "$('Create company').first().json.data.createCompany.id }}")
+    # `?? null` rather than `||`: an individual has no company and no created
+    # company, and PATCHing companyId with undefined is a 400 that would take
+    # the whole intake down for every student who used a personal address.
+    company_id = ("={{ $('Company exists?').first().json.companyId "
+                  "|| $('Create company').first().json?.data?.createCompany?.id "
+                  "|| null }}")
 
     link_co = f.twenty("Link person to company", "PATCH",
                        "/rest/people/" + person_id.replace("={{ ", "{{ "),
@@ -1075,13 +1147,33 @@ return [{ json: {
     score = f.code("Score and route", """
 // Transparent scoring — a rule anyone can read and argue with, unlike GHL's
 // opaque engagement score.
+//
+// A free email address is NOT a penalty here. This version scored -40 for
+// gmail, which was written for a business selling managed security to
+// companies. Aspire sells certification training, and its biggest audiences
+// are students, career changers and government employees signing up with
+// personal addresses — the account's own tags say so. That rule marked the
+// core customer COLD on arrival. A work domain is still worth something,
+// because a corporate enquiry is worth more per head, but the absence of one
+// says nothing bad about an individual buying a course.
 const d = $('Normalise').first().json;
 const FREE = ['gmail.com','yahoo.com','hotmail.com','outlook.com','aol.com','icloud.com'];
 
 let score = 0;
-if (d.emailDomain && !FREE.includes(d.emailDomain)) score += 30; else score -= 40;
-if (/cmmc|compliance|soc|incident/i.test(d.interest)) score += 25;
-if (/cmmc|cui|fci|dfars|nist/i.test(d.message))       score += 20;
+if (d.emailDomain && !FREE.includes(d.emailDomain)) score += 20;
+
+// Intent is what actually predicts revenue in this funnel. Someone naming a
+// bootcamp or a certification is much closer to buying than someone browsing
+// a webinar, and a corporate or group enquiry is several seats at once.
+const BY_KIND = {
+  CORPORATE: 45, BOOTCAMP: 40, CERTIFICATION: 35, AWARENESS: 30,
+  CONSULTATION: 25, WEBINAR: 15, GENERAL: 5, INTERNSHIP: 0,
+};
+score += BY_KIND[d.kind] ?? 5;
+
+// Naming the exact certification means they have already done the research.
+if (d.certification)                                  score += 15;
+if (/team|staff|employees|colleagues|company/i.test(d.message)) score += 15;
 if (d.phone)                                          score += 10;
 
 // Deterministic round-robin: hashing the email keeps a person with the same
@@ -1096,21 +1188,50 @@ return [{ json: { ...d, score,
   assigneeId: REPS.length ? REPS[hash % REPS.length] : null }}];
 """.strip())
 
-    f.phase("Score it and give it an owner",
-            "Rate the lead against rules anyone can read — company size,\n"
-            "what they asked for, whether it is a work email — then hand it\n"
-            "to the next sales rep in turn and raise a task with a due date.\n"
-            "Nothing sits in an inbox waiting to be noticed.", "decide")
+    f.phase("Score it, route it, give it an owner",
+            "Rate the enquiry on what they asked for rather than on their\n"
+            "email domain, because most people here are individuals. Urgency\n"
+            "follows the kind of enquiry: someone asking about a bootcamp\n"
+            "that starts in three weeks cannot wait the same day as someone\n"
+            "browsing a webinar.", "decide")
+
+    # The routing the account needed and never had. GHL ran 44 forms into one
+    # undifferentiated pile; the follow-up a corporate training enquiry needs
+    # has nothing in common with an internship application, and treating them
+    # identically is why most of those forms went quiet.
+    route = f.code("Route by enquiry kind", """
+const d = $input.first().json;
+
+// Hours to first response, by what they asked for. These are commitments the
+// task's due date enforces, not decoration.
+const SLA_HOURS = {
+  CORPORATE: 4, BOOTCAMP: 8, CERTIFICATION: 12, AWARENESS: 12,
+  CONSULTATION: 24, WEBINAR: 48, GENERAL: 24, INTERNSHIP: 72,
+};
+const OWNER_QUEUE = {
+  CORPORATE: 'sales', BOOTCAMP: 'sales', CERTIFICATION: 'sales',
+  AWARENESS: 'sales', CONSULTATION: 'trainer', WEBINAR: 'marketing',
+  GENERAL: 'sales', INTERNSHIP: 'people',
+};
+
+return [{ json: { ...d,
+  slaHours: SLA_HOURS[d.kind] ?? 24,
+  queue: OWNER_QUEUE[d.kind] ?? 'sales',
+  taskTitle: `${d.kind}: ${d.firstName} ${d.lastName} (${d.band}, score ${d.score})`,
+}}];
+""".strip())
 
     task = f.twenty("Create task", "POST", "/rest/tasks", {
-        "title": "={{ 'Follow up: ' + $json.firstName + ' ' + $json.lastName + "
-                 "' (' + $json.band + ', score ' + $json.score + ')' }}",
+        "title": "={{ $json.taskTitle }}",
         "status": "TODO",
-        "dueAt": "={{ $now.plus({ days: 1 }).toUTC().toISO() }}",
+        "dueAt": "={{ $now.plus({ hours: $json.slaHours }).toUTC().toISO() }}",
         # Twenty's task body is `bodyV2`, a RICH_TEXT composite: it takes
         # {"markdown": ...} and rejects a bare string with a 400. A plain
         # `body` key is silently not a field at all.
-        "bodyV2": {"markdown": "={{ $json.interest + '\\n\\n' + $json.message }}"},
+        "bodyV2": {"markdown": "={{ 'Interest: ' + $json.interest + "
+                               "'\\nCertification: ' + ($json.certification || 'not specified') + "
+                               "'\\nQueue: ' + $json.queue + "
+                               "'\\n\\n' + $json.message }}"},
     })
 
     f.phase("Reply, tell sales, keep the receipt",
@@ -1130,13 +1251,16 @@ return [{ json: { ...d, score,
     }, version=1.2)
 
     notify = f.notify("Notify sales", SALES_CHANNEL, hook=SALES_HOOK,
-                      text="=:inbox_tray: *New lead — {{ $('Score and route').first().json.band }}* "
-                     "(score {{ $('Score and route').first().json.score }})\n"
-                     "*{{ $('Score and route').first().json.firstName }} "
-                     "{{ $('Score and route').first().json.lastName }}* — "
-                     "{{ $('Score and route').first().json.companyName }}\n"
-                     "Interest: {{ $('Score and route').first().json.interest }}\n"
-                     "{{ $('Score and route').first().json.email }}")
+                      text="=:inbox_tray: *{{ $('Route by enquiry kind').first().json.kind }} "
+                     "enquiry — {{ $('Route by enquiry kind').first().json.band }}* "
+                     "(score {{ $('Route by enquiry kind').first().json.score }}, "
+                     "reply within {{ $('Route by enquiry kind').first().json.slaHours }}h)\n"
+                     "*{{ $('Route by enquiry kind').first().json.firstName }} "
+                     "{{ $('Route by enquiry kind').first().json.lastName }}* — "
+                     "{{ $('Route by enquiry kind').first().json.companyName || 'individual' }}\n"
+                     "Interest: {{ $('Route by enquiry kind').first().json.interest }}\n"
+                     "Queue: {{ $('Route by enquiry kind').first().json.queue }}\n"
+                     "{{ $('Route by enquiry kind').first().json.email }}")
 
     log = f.log_run("Log run", "LEAD Form Intake")
 
@@ -1151,7 +1275,7 @@ return [{ json: { ...d, score,
     f.connect(create_co, co_merge)
     f.connect(new_co, co_merge, out=1)
     f.chain(co_merge, link_co, prior, decide_consent,
-            consent, submission, score, task, ack, notify, log)
+            consent, submission, score, route, task, ack, notify, log)
     return f
 
 
