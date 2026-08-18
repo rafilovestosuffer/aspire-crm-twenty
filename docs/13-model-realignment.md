@@ -107,6 +107,30 @@ named `New Workflow : <timestamp>`.
 **Verify before cutover.** An inference that is 90% right is
 indistinguishable from one that is 100% right until go-live day.
 
+## What was verified here, and what was not
+
+This machine has no Twenty or n8n running, so nothing below was executed
+against a live stack.
+
+| Check | Result |
+|---|---|
+| `build_n8n_workflows.py` — lints and emits | 19 workflows, clean |
+| `validate_workflow_queries.py --offline` | 85 Twenty calls, 0 problems |
+| Write bodies vs schema | 48 bodies, all fields declared, all dates `.toUTC().toISO()` |
+| Enum options build | 31 objects, 232 options |
+| Negative control | injected `orderBy=`, an unknown field and `limit=500`; all three caught |
+
+`--offline` was added to the validator for exactly this situation. It checks
+against `reference/twenty_schema.yaml` rather than a running instance, so it
+cannot see drift or anything provisioned by hand, and it says so in its own
+output rather than claiming a live pass.
+
+**Still required before this is trusted:** `twenty_provision.py` against a
+real instance to create the six new objects, then
+`validate_workflow_queries.py` without `--offline`, then
+`prove_workflows.py`. The new proof suites — `webinar`, `enrol`, `ai`,
+`tags` — have never been executed.
+
 ## SUB Renewal Escalation
 
 Kept, but it no longer reports success over an empty table. It now

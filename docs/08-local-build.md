@@ -165,6 +165,8 @@ example *Opportunity stage → Proposal* creates a follow-up task.
 ```bash
 python scripts/build_n8n_workflows.py       # regenerate (already committed)
 python scripts/validate_workflow_queries.py # every Twenty call vs live schema
+# ...or, with no stack running (weaker — schema file, not the live instance):
+python scripts/validate_workflow_queries.py --offline
 python scripts/n8n_deploy.py --dev          # --dev adds the local alert sink
 python scripts/prove_workflows.py           # run them and check what happened
 ```

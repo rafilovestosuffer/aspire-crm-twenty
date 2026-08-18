@@ -16,12 +16,19 @@ failure that reached a live run:
     filter      filter=field[op]:value      NOT filter[field][op]=value
     in          filter=f[in]:[A,B]          bare comma list is a 400
     order       order_by=field[Desc...]     `orderBy` is silently ignored
+    limit       limit=200 is the ceiling    500 returns 200 rows, HTTP 200
     fields      must exist on the object    unknown ones are ignored or 400
     enums       must be a declared option   wrong values 400 at runtime
 
 Usage:
     python scripts/validate_workflow_queries.py
-    python scripts/validate_workflow_queries.py --quiet   # exit code only
+    python scripts/validate_workflow_queries.py --quiet     # exit code only
+    python scripts/validate_workflow_queries.py --offline   # no stack needed
+
+--offline checks against reference/twenty_schema.yaml rather than a running
+instance. It cannot see drift or anything provisioned by hand, so it does not
+replace the live run — but it catches the syntax and typo classes above on a
+machine with nothing running, which is better than checking nothing at all.
 """
 
 from __future__ import annotations
@@ -59,6 +66,81 @@ def read_env() -> dict[str, str]:
         if os.environ.get(k):
             env[k] = os.environ[k]
     return env
+
+
+# Standard Twenty objects the workflows touch. They are not in
+# reference/twenty_schema.yaml — that file deliberately defines only the custom
+# layer — so offline mode would otherwise report every task and person write as
+# an unknown object. Only the fields these workflows actually use are listed;
+# offline mode is a syntax and typo net, not a substitute for the live check.
+STANDARD_OBJECTS: dict[str, dict[str, dict]] = {
+    "people": {f: {"type": None, "options": []} for f in (
+        "id name emails phones companyId city jobTitle avatarUrl "
+        "createdAt updatedAt deletedAt position").split()},
+    "companies": {f: {"type": None, "options": []} for f in (
+        "id name domainName address employees accountOwnerId "
+        "createdAt updatedAt deletedAt position").split()},
+    "opportunities": {f: {"type": None, "options": []} for f in (
+        "id name closeDate amount companyId pointOfContactId "
+        "createdAt updatedAt deletedAt position").split()} | {
+        # Twenty ships these five and no WON. Getting this wrong is a runtime
+        # 400 on a stage that looks perfectly reasonable in a diff.
+        "stage": {"type": "SELECT",
+                  "options": ["NEW", "SCREENING", "MEETING",
+                              "PROPOSAL", "CUSTOMER"]}},
+    "tasks": {f: {"type": None, "options": []} for f in (
+        "id title bodyV2 dueAt assigneeId createdAt updatedAt "
+        "deletedAt position").split()} | {
+        "status": {"type": "SELECT",
+                   "options": ["TODO", "IN_PROGRESS", "DONE"]}},
+    "notes": {f: {"type": None, "options": []} for f in (
+        "id title bodyV2 createdAt updatedAt deletedAt position").split()},
+}
+
+
+def option_value(label: str) -> str:
+    """'Renewal Due' -> 'RENEWAL_DUE'. Mirrors scripts/twenty_provision.py.
+
+    If these two ever disagree, offline validation passes and the live
+    instance 400s — so the duplication is deliberate but must stay in step.
+    """
+    return re.sub(r"[^A-Za-z0-9]+", "_", label).strip("_").upper() or "OPTION"
+
+
+def load_schema_offline() -> dict[str, dict]:
+    """Build the same shape as load_schema() from the version-controlled YAML.
+
+    The live check is better and stays the default: it sees what was actually
+    provisioned, including drift and anything added by hand. This exists so the
+    generator's output can be checked on a machine with no stack running —
+    during review, in CI, or before the first deploy — where the alternative is
+    checking nothing at all.
+    """
+    try:
+        import yaml  # type: ignore
+    except ImportError:
+        raise SystemExit("PyYAML is required for --offline: "
+                         "pip install -r scripts/requirements.txt")
+
+    doc = yaml.safe_load((ROOT / "reference" / "twenty_schema.yaml")
+                         .read_text(encoding="utf-8"))
+    schema: dict[str, dict] = {k: dict(v) for k, v in STANDARD_OBJECTS.items()}
+
+    for o in doc.get("objects", []):
+        fields: dict[str, dict] = {
+            f: {"type": None, "options": []}
+            for f in ("id createdAt updatedAt deletedAt position "
+                      "name searchVector").split()
+        }
+        for f in o.get("fields", []):
+            fields[f["name"]] = {
+                "type": f.get("type"),
+                "options": [option_value(x) for x in (f.get("options") or [])],
+            }
+        for r in o.get("relations", []):
+            fields[r["to"] + "Id"] = {"type": "UUID", "options": []}
+        schema[o["namePlural"]] = fields
+    return schema
 
 
 def load_schema(base: str, key: str) -> dict[str, dict]:
@@ -161,6 +243,15 @@ def check_call(obj: str, query: str, schema: dict[str, dict],
 
     params = parse.parse_qs(query.lstrip("?"), keep_blank_values=True)
 
+    # 200 is a hard ceiling, not a default. Ask for 500 and Twenty returns 200
+    # rows with HTTP 200 and no warning of any kind, so a scan written this way
+    # reports on a subset and looks entirely healthy doing it.
+    for raw in params.get("limit", []):
+        if raw.isdigit() and int(raw) > 200:
+            problems.append(
+                f"{where}: `limit={raw}` exceeds Twenty's ceiling — it returns "
+                f"200 rows, HTTP 200, no warning. Use limit=200 and paginate.")
+
     for raw in params.get("filter", []):
         for fm in GOOD_FILTER.finditer(raw):
             name, op = fm.group(1), fm.group(2)
@@ -225,29 +316,43 @@ def check_body(obj: str, body: str, schema: dict[str, dict],
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate workflow queries")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--offline", action="store_true",
+                    help="check against reference/twenty_schema.yaml instead "
+                         "of a live instance. Weaker — it cannot see drift or "
+                         "anything provisioned by hand — but it runs anywhere.")
     args = ap.parse_args()
 
     env = read_env()
     base = env.get("TWENTY_BASE_URL", "http://localhost:3000")
     key = env.get("TWENTY_API_KEY", "")
-    if not key:
-        print("ERROR: TWENTY_API_KEY not set.", file=sys.stderr)
-        return 2
 
-    try:
-        schema = load_schema(base, key)
-    except (error.HTTPError, OSError) as e:
-        print(f"ERROR: cannot read schema from {base} — {e}", file=sys.stderr)
-        return 2
+    if args.offline:
+        schema = load_schema_offline()
+        probe = None
+        source = "reference/twenty_schema.yaml (offline)"
+    else:
+        if not key:
+            print("ERROR: TWENTY_API_KEY not set. Use --offline to check "
+                  "against the schema file instead.", file=sys.stderr)
+            return 2
+        try:
+            schema = load_schema(base, key)
+        except (error.HTTPError, OSError) as e:
+            print(f"ERROR: cannot read schema from {base} — {e}", file=sys.stderr)
+            return 2
+        source = base
 
-    probe_cache: dict[tuple[str, str], bool] = {}
+        probe_cache: dict[tuple[str, str], bool] = {}
 
-    def probe(obj: str, field: str) -> bool:
-        hit = probe_cache.get((obj, field))
-        if hit is None:
-            hit = field_exists(base, key, obj, field)
-            probe_cache[(obj, field)] = hit
-        return hit
+        def probe(obj: str, field: str) -> bool:  # type: ignore[misc]
+            hit = probe_cache.get((obj, field))
+            if hit is None:
+                hit = field_exists(base, key, obj, field)
+                probe_cache[(obj, field)] = hit
+            return hit
+
+    if not args.quiet:
+        print(f"schema source: {source}")
 
     problems: list[str] = []
     calls = 0
@@ -266,7 +371,8 @@ def main() -> int:
             obj, query = m.group(1), m.group(2) or ""
             if obj not in seen_objects:
                 seen_objects.add(obj)
-                enrich_from_sample(base, key, obj, schema)
+                if not args.offline:
+                    enrich_from_sample(base, key, obj, schema)
             where = f"{flow['name']} / {node['name']}"
             problems += check_call(obj, query, schema, where, probe)
             body = params.get("jsonBody")
@@ -274,11 +380,20 @@ def main() -> int:
                 problems += check_body(obj, body, schema, where, probe)
 
     if not args.quiet:
-        print(f"Checked {calls} Twenty API call(s) against {base}\n")
+        print(f"Checked {calls} Twenty API call(s) against {source}\n")
         for p in problems:
             print(f"  {p}")
-        print(f"\n{len(problems)} problem(s)."
-              if problems else "\nAll calls valid against the live schema.")
+        if problems:
+            print(f"\n{len(problems)} problem(s).")
+        elif args.offline:
+            # Never claim the live check passed when it did not run. The whole
+            # point of this script is that Twenty fails silently, and a
+            # validator that overstates its own coverage is the same bug.
+            print("\nAll calls valid against the schema file. This does NOT "
+                  "prove them against a running instance —\nre-run without "
+                  "--offline once the stack is up.")
+        else:
+            print("\nAll calls valid against the live schema.")
     return 1 if problems else 0
 
 
