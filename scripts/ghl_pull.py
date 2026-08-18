@@ -199,6 +199,9 @@ class Client:
         req.add_header("Accept", "application/json")
         req.add_header("Authorization", f"Bearer {self._token}")
         req.add_header("Version", version or self._version)
+        # Cloudflare 1010s the default Python-urllib User-Agent from some
+        # clouds. This identifies a read-only audit client, nothing else.
+        req.add_header("User-Agent", "AspireGHLAudit/1.0 (+readonly; GET-only)")
 
         for attempt in range(MAX_RETRIES):
             self._throttle()
