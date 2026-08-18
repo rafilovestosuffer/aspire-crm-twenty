@@ -21,12 +21,13 @@ Log back in, then:
 ```bash
 git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
 cd aspire-crm-twenty
-# Default `main` is still 6d83b60 and is missing the VPS gates. Until that
-# merge lands, deploy from this branch or the stack will start without them.
-git checkout cursor/live-gmail-demo-8f94
+git checkout main
+git pull
 git log -1 --format='%an %h %s'
 # Author must be Rafiur Rahman. Tip must include, or sit after,
-# "Close the VPS defects that would fail or lie on first deploy"
+# "fix n8n healthcheck: hit 127.0.0.1, not localhost"
+# Do not checkout cursor/live-gmail-demo-8f94 — that branch is behind
+# the training model, the workflow proofs, and the n8n healthcheck.
 cp infra/.env.example infra/.env
 
 # print four secrets, paste them into infra/.env
@@ -66,6 +67,10 @@ LIVE_MAIL_ALLOWLIST=
 # Required. The default in .env.example points at a workflow that only exists
 # on a dev machine, so on a server every alert 404s inside the error handler.
 ALERT_WEBHOOK_URL=<real chat webhook>
+
+# Six FastPayDirect URLs from GHL Marketing → Trigger Links
+# ("Payment Link - Training <Tier>"). Unset, every enrolment returns 500.
+ENROL_PAYMENT_LINKS=BRONZE=https://...,SILVER=https://...,GOLD=https://...,PLATINUM=https://...,DIAMOND=https://...,TITANIUM=https://...
 ```
 
 Then:
@@ -116,6 +121,7 @@ provider is wired there, only the scripted unsubscribe path is proven.
 | SMTP | Host, user, app password. Without it the deploy stops rather than half-working |
 | Office IP range | `N8N_EDITOR_ALLOWED_IPS`. Run `curl ifconfig.me` **from the office**. Without it the proxy will not start |
 | Chat webhook | `ALERT_WEBHOOK_URL`. Google Chat: a space → Apps & integrations → Webhooks. Two minutes, and without it no failure ever reaches a person |
+| Payment links | `ENROL_PAYMENT_LINKS`. Six FastPayDirect URLs from GHL Marketing → Trigger Links. Unset, every bootcamp enrolment returns 500 |
 
 ### Three things immediately after
 
@@ -220,10 +226,11 @@ will feel slow under any real load.
 ```bash
 git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
 cd aspire-crm-twenty
-git checkout cursor/live-gmail-demo-8f94
+git checkout main
+git pull
 git log -1 --format='%an %h %s'
 # Author must be Rafiur Rahman. Tip must include, or sit after,
-# "Close the VPS defects that would fail or lie on first deploy"
+# "fix n8n healthcheck: hit 127.0.0.1, not localhost"
 cp infra/.env.example infra/.env
 ```
 
@@ -249,6 +256,9 @@ ACME_EMAIL=it@aspiretss.com
 N8N_EDITOR_ALLOWED_IPS=<your office range — step 2>
 
 ALERT_WEBHOOK_URL=<the real chat webhook>
+
+# Six FastPayDirect URLs from GHL Marketing → Trigger Links.
+ENROL_PAYMENT_LINKS=BRONZE=https://...,SILVER=https://...,GOLD=https://...,PLATINUM=https://...,DIAMOND=https://...,TITANIUM=https://...
 ```
 
 > **Back up `ENCRYPTION_KEY` and `N8N_ENCRYPTION_KEY` to a password manager
@@ -452,10 +462,16 @@ nightly:
 rsync -az --delete infra/backups/ backup-host:/srv/aspire-crm/
 ```
 
-**Upgrades.** The image tag is pinned in `infra/.env` and must stay pinned.
-`latest` can run migrations you did not choose, at a time you did not choose.
-To upgrade: read the release notes, verify a restore, bump `TAG`, `up -d`,
-then `stack_verify.py`.
+**Upgrades.** The image tags (`TAG` for Twenty, `N8N_TAG` for n8n) are pinned
+in `infra/.env` and must stay pinned. `latest` can run migrations you did not
+choose, at a time you did not choose. To upgrade: read the release notes,
+verify a restore, bump the tag, `up -d`, then `stack_verify.py` and
+`prove_workflows.py`.
+
+The n8n healthcheck must hit `127.0.0.1:5678/healthz`, not `localhost`. The
+container listens on IPv4 only; `localhost` often resolves to `::1` and the
+check fails forever while the API is fine. `deploy.sh` waits on that
+healthcheck. If you change it back, the stack never leaves "starting".
 
 **Logs.**
 

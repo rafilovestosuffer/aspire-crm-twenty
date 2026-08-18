@@ -192,13 +192,22 @@ def main() -> int:
                 objs = []
             names = {o.get("nameSingular") for o in objs if isinstance(o, dict)}
             custom = sum(1 for o in objs if isinstance(o, dict) and o.get("isCustom"))
-            aspire = sum(1 for o in ("serviceSubscription", "complianceEngagement",
-                                     "trainingAccount", "phishingBaseline")
-                         if o in names)
+            required = (
+                "serviceSubscription", "complianceEngagement",
+                "trainingAccount", "phishingBaseline",
+                "trainingProgram", "cohort", "enrollment",
+                "webinarEvent", "webinarRegistration", "aiConversation",
+            )
+            present = [o for o in required if o in names]
+            missing = [o for o in required if o not in names]
             rep.add("twenty REST API", OK, f"{len(objs)} objects ({custom} custom)")
-            rep.add("aspire custom objects", OK if aspire == 4 else WARN,
-                    "all present" if aspire == 4
-                    else f"{aspire}/4 — run scripts/twenty_provision.py")
+            if missing:
+                rep.add("aspire custom objects", FAIL,
+                        f"{len(present)}/{len(required)} — missing "
+                        f"{', '.join(missing)}; run scripts/twenty_provision.py")
+            else:
+                rep.add("aspire custom objects", OK,
+                        f"{len(required)}/{len(required)} including training funnel")
         elif status in (401, 403):
             rep.add("twenty REST API", FAIL, "key rejected")
         else:
