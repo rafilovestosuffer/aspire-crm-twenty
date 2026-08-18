@@ -237,8 +237,11 @@ endpoints:
     scope: emails/builder.readonly
     class: config
     paginate: limit_offset
-    list_key: data
-    notes: Builder-designed email templates. editorData is not readable back — HTML only.
+    list_key: builders
+    notes: >
+      Builder-designed email templates. editorData is not readable back — HTML
+      only. The array is `builders`, not `data`: with list_key `data` this
+      endpoint returns HTTP 200 and silently records zero templates.
 
   - key: email_schedules
     area: Email & Templates

@@ -14,6 +14,10 @@ before anything is written. Raw output is in gitignored `raw/`; coverage is
 Integration, so the two agency endpoints (snapshots, sub-account list) were
 skipped, not failed.
 
+Everything the public API can reach has been pulled. The remaining unknowns
+(workflow internals, the suppression list) are **not reachable with a Private
+Integration token at all**, so keeping this one alive buys nothing.
+
 ---
 
 ## What is actually in the account
@@ -37,7 +41,8 @@ skipped, not failed.
 | Invoices | 126 | all `sent`, all `source: workflow` |
 | Media files | 188 | |
 | Social accounts | 5 | 2 Google, Facebook, Instagram, LinkedIn |
-| Email/SMS templates | **0** | via `/locations/{id}/templates` — see caveat |
+| Email builder templates | **14** | the real template library — see below |
+| Email/SMS templates | 0 | `/locations/{id}/templates` genuinely returns 0 |
 | Campaigns | 0 | |
 | Payment orders / estimates / subscriptions | 0 / 0 / n-a | subscriptions blocked by scope |
 
@@ -96,15 +101,24 @@ Automation` has to keep producing them.
 | Endpoint | Result | Meaning |
 |---|---|---|
 | `blog_authors`, `blog_categories` | 401 scope | token lacks `blogs.readonly`; `blog_sites` returned 0, so likely nothing there |
-| `payment_subscriptions` | 401 scope | **recurring revenue is unmeasured** — the one gap worth closing |
+| `payment_subscriptions` | 401 scope | token lacks `payments/subscriptions.readonly`. `/payments/transactions` **is** authorised and returns `totalCount: 0`, so there is no card revenue flowing through GHL — the 126 invoices are issued, not collected here |
 | `custom_menus` | 401 scope | marked unverified in the registry; low value |
 | `snapshots`, `sub_accounts` | skipped | agency token only |
 
-`templates_email` and `templates_sms` both returned **0** from
-`/locations/{id}/templates`. With 6 published workflows and 126
-workflow-generated invoices, zero templates is more likely an endpoint or
-scope artifact than the truth. **Do not record "no templates" as a finding**
-until it is checked in the UI.
+`templates_email` and `templates_sms` genuinely return **0** from
+`/locations/{id}/templates`, re-checked with and without a `type` filter. The
+template library lives at `/emails/builder` instead — **14 templates**:
+
+Splunk-Demo-Scheduing-Confirmation · Receipt - Cloud Security Training ·
+Email Signature · Training-Thanks-Webinar · Welcome Sequence Training ·
+UAE - Campaign · Holiday Campaign · Splunk Certification Bootcamp 2026 ·
+9 Feb 26-Webinar AI-Powered Threat Detection · Payment · Newsletter ·
+23rd- May2026-Workshop-Automate SOC Level-1 · Eid Templates ·
+Promotion-The Infinity AI Build Fest 2026
+
+`editorData` is not readable back, so the **HTML** is what migrates, not the
+drag-and-drop structure. Rebuilding these is manual work in whatever sending
+tool replaces GHL.
 
 **Workflow internals remain unavailable.** This pull confirms what
 `docs/02-ghl-api-findings.md` predicted: `GET /workflows/` returns id, name,
@@ -117,7 +131,15 @@ Rebuilding those 6 workflows still needs the authenticated-session route
 
 ## Three registry defects the live API exposed
 
-Fixed in `reference/ghl_endpoints.yaml` and re-pulled successfully:
+Fixed in `reference/ghl_endpoints.yaml` and re-pulled successfully. The fourth
+is the dangerous kind — HTTP 200 and a wrong answer:
+
+0. **`/emails/builder`** returns its array as `builders`, not `data`. The
+   registry's `list_key: data` recorded **0 templates** with no error at all.
+   There are **14**. A silent zero is worse than a failure: it would have gone
+   into the audit as "GHL has no templates" and nobody would have questioned
+   a 200.
+
 
 1. **`/calendars/events`** rejects a location-wide query — 422 *"Either of
    userId, calendarId or groupId is required"*. Now fans out over the 8
