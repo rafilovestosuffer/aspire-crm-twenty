@@ -231,6 +231,11 @@ out/*
 !out/proxy_rule_verification.json
 !out/*.pdf
 docs/migration-guide/_combined.html
+docs/build-handbook/_combined.html
+# The handbook prints real captured output rather than paraphrasing it, so
+# these transcripts are source, not logs. The blanket *.log rule above would
+# otherwise drop them and the handbook would not build for anyone else.
+!docs/build-handbook/transcripts/*.log
 .session_curl.txt
 docs/migration-guide/_combined_bn.html
 infra/.env

@@ -19,7 +19,7 @@ the recipe; Docker runs the kitchen.
 | [`docs/02-ghl-api-findings.md`](docs/02-ghl-api-findings.md) | Verified API facts with sources — read before writing anything against GHL |
 | [`docs/03-replacement-stack.md`](docs/03-replacement-stack.md) | What "no GHL in Phase 1" actually requires. 52 ESCALATE rows → 8 vendor decisions |
 | [`docs/04-manual-sweep.md`](docs/04-manual-sweep.md) | Tier 5 checklist for everything no API serves |
-| [`docs/06-twenty-object-model.md`](docs/06-twenty-object-model.md) | The 25-object GHL parity model provisioned into Twenty |
+| [`docs/06-twenty-object-model.md`](docs/06-twenty-object-model.md) | The 31-object GHL parity model provisioned into Twenty |
 | [`docs/09-status-and-handover.md`](docs/09-status-and-handover.md) | **Start here.** What exists, what is proven, what is left, what it costs, how to run it |
 | [`docs/11-internal-server-deployment.md`](docs/11-internal-server-deployment.md) | **Office server** (private IP, no inbound internet). Written for a first-time server admin |
 | [`docs/10-vps-deployment.md`](docs/10-vps-deployment.md) | Company server: DNS, TLS, the editor allowlist, and what this doc does *not* do |
@@ -53,12 +53,12 @@ Laptop, step by step — see [`docs/08-local-build.md`](docs/08-local-build.md):
 python scripts/stack_verify.py            # every layer, worker included
 python scripts/bootstrap_workspace.py     # Twenty user, workspace, API key
 python scripts/bootstrap_n8n.py           # n8n owner + API key
-python scripts/twenty_provision.py        # 25 objects, 132 fields
+python scripts/twenty_provision.py        # 31 objects, 198 field definitions
 python scripts/seed_demo_data.py          # 448 demo records
 python scripts/n8n_credentials.py         # Twenty header auth + SMTP
 python scripts/validate_workflow_queries.py    # every query vs the live schema
-python scripts/n8n_deploy.py --dev --activate  # 8 workflows (2 dev-only)
-python scripts/prove_workflows.py         # 25 checks against the running stack
+python scripts/n8n_deploy.py --dev --activate  # 19 workflows (2 dev-only)
+python scripts/prove_workflows.py         # 77 checks against the running stack
 python scripts/implementation_audit.py    # honest per-feature status
 
 # Audit GHL
@@ -83,7 +83,7 @@ on this account tier.
 ```
 reference/ghl_feature_taxonomy.csv   111-feature master checklist — the spine
 reference/ghl_endpoints.yaml         43 read-only endpoints driving the puller
-reference/twenty_schema.yaml         25-object GHL parity model for Twenty
+reference/twenty_schema.yaml         31-object GHL parity model for Twenty
 scripts/ghl_pull.py                  GET-only, throttled, PII-classified puller
 scripts/twenty_probe.py              reads the live Twenty instance's real capability
 scripts/twenty_provision.py          builds the object model via the Metadata API
@@ -94,7 +94,7 @@ scripts/n8n_credentials.py           creates the n8n credentials headlessly
 scripts/n8n_deploy.py                pushes workflows into n8n (idempotent)
 scripts/prove_workflows.py           runs the workflows, asserts what happened
 scripts/implementation_audit.py      per-feature status, measured not claimed
-n8n/workflows/                       8 workflows — 6 real, 2 dev-only (alert sink, failure probe)
+n8n/workflows/                       19 workflows — 17 real, 2 dev-only (alert sink, failure probe)
 infra/docker-compose.yml             Twenty + n8n + Postgres + Redis + backups
 infra/up.sh                          one-command bring-up, generates secrets
 infra/rebuild.sh                     zero to proven, every step a gate (demo machine)

@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Aspire CRM — The Build Handbook</title>
+<style>
+@page {
+  size: A4; margin: 20mm 17mm 18mm 17mm;
+  @top-center { content: "Aspire CRM · The Build Handbook"; font-size: 7.5pt; color: #8a94a6; padding-bottom: 3mm; }
+  @bottom-right { content: counter(page); font-size: 8.5pt; color: #5a6478; }
+  @bottom-left { content: "Aspire Tech · Internal"; font-size: 7.5pt; color: #8a94a6; }
+}
+@page :first { @top-center { content: ""; } @bottom-left { content: ""; } @bottom-right { content: ""; } }
+
+body { font-family: "DejaVu Sans", "Liberation Sans", sans-serif; font-size: 9.4pt; line-height: 1.52; color: #1c2430; margin: 0; }
+
+h1.part { bookmark-level: 1; bookmark-label: content(); font-size: 21pt; color: #0d2b4e;
+          margin: 0 0 4mm 0; line-height: 1.15; page-break-before: always; page-break-after: avoid; }
+h1.part .num { display: block; font-size: 9pt; letter-spacing: 2.6pt; text-transform: uppercase;
+               color: #2d6cb5; margin-bottom: 2.5mm; }
+h2 { bookmark-level: 2; bookmark-label: content(); font-size: 13pt; color: #12325a;
+     margin: 8mm 0 2.5mm 0; padding-bottom: 1.5mm; border-bottom: 1.6pt solid #12325a; page-break-after: avoid; }
+h3 { font-size: 10.6pt; color: #1c4a80; margin: 6mm 0 2mm 0; page-break-after: avoid; }
+h4 { font-size: 9.6pt; color: #24344a; margin: 4.5mm 0 1.5mm 0; page-break-after: avoid; }
+p { margin: 0 0 2.6mm 0; }
+ul, ol { margin: 0 0 2.6mm 0; padding-left: 5.5mm; }
+li { margin-bottom: 1.3mm; }
+b, strong { color: #10243d; }
+
+code { font-family: "DejaVu Sans Mono", monospace; font-size: 8.1pt; background: #eef2f7;
+       padding: 0.3mm 1mm; border-radius: 1.5px; color: #0f3d6e; }
+pre { font-family: "DejaVu Sans Mono", monospace; font-size: 7.7pt; background: #f5f8fb;
+      border-left: 2.5pt solid #2d6cb5; padding: 2.5mm 3mm; margin: 2.5mm 0;
+      white-space: pre-wrap; line-height: 1.4; page-break-inside: avoid; }
+pre.cmd { background: #10243d; color: #dce6f2; border-left-color: #4b8fd6; }
+pre.cmd .p { color: #6fd08c; }
+pre.cmd .c { color: #8a9bb0; }
+
+/* Real terminal output, colours preserved from the capture. */
+pre.term { background: #10243d; color: #d6e2ee; border-left: 2.5pt solid #4b8fd6;
+           font-size: 7.2pt; line-height: 1.42; }
+pre.term.missing { background: #fbf0f0; color: #a02c2c; border-left-color: #a02c2c; }
+.a-g { color: #6fd08c; } .a-r { color: #f28a8a; } .a-y { color: #e8c26a; }
+.a-c { color: #7fd4e8; } .a-b { color: #8ab4f8; } .a-m { color: #d8a8f0; }
+.a-w { color: #e8eef5; } .a-k { color: #8a9bb0; }
+.a-bold { font-weight: bold; color: #ffffff; } .a-dim { color: #93a5ba; }
+.term-trim { font-size: 7pt; color: #8a94a6; margin: -1.5mm 0 3mm 1mm; font-style: italic; }
+
+table { border-collapse: collapse; width: 100%; margin: 2.5mm 0 4mm 0; font-size: 8.2pt; page-break-inside: avoid; }
+th { background: #12325a; color: #fff; text-align: left; padding: 1.8mm 2mm; font-weight: bold; font-size: 8.1pt; }
+td { border-bottom: 0.5pt solid #d5dde8; padding: 1.6mm 2mm; vertical-align: top; }
+tr:nth-child(even) td { background: #f7fafd; }
+td.num, th.num { text-align: right; }
+tr.sec td { background: #e4ecf6; font-weight: bold; color: #12325a; font-size: 8pt; }
+.wide { page-break-inside: auto; } .wide tr { page-break-inside: avoid; }
+.small { font-size: 7.7pt; color: #4a5768; }
+
+/* Screenshots. The PNG is never modified: pins are positioned over it. */
+figure.fig { margin: 4mm 0 5mm; page-break-inside: avoid; }
+figure.fig .shot { position: relative; display: block; border: 0.6pt solid #c8d2e0; border-radius: 2px; overflow: hidden; }
+figure.fig img { display: block; width: 100%; }
+figure.fig .pin { position: absolute; transform: translate(-50%, -50%);
+                  width: 5.2mm; height: 5.2mm; line-height: 5.2mm; text-align: center;
+                  border-radius: 50%; background: #d13b3b; color: #fff;
+                  font-size: 7.4pt; font-weight: bold; border: 0.7pt solid #fff; }
+figcaption { font-size: 8.1pt; color: #48566c; line-height: 1.45; margin-top: 2mm;
+             padding-left: 2.5mm; border-left: 2pt solid #c8d2e0; }
+ol.fig-legend { list-style: none; padding-left: 0; margin: 2mm 0 0 0; font-size: 8pt; }
+ol.fig-legend li { margin-bottom: 1.2mm; padding-left: 6.5mm; text-indent: -6.5mm; color: #3a4757; }
+.pin-n { display: inline-block; width: 4.4mm; height: 4.4mm; line-height: 4.4mm; text-align: center;
+         border-radius: 50%; background: #d13b3b; color: #fff; font-size: 6.8pt;
+         font-weight: bold; margin-right: 2mm; text-indent: 0; }
+.fig.missing { border: 0.6pt dashed #a02c2c; color: #a02c2c; padding: 4mm; font-size: 8pt; }
+
+.callout { border-left: 3pt solid #2d6cb5; background: #f0f5fb; padding: 3mm 3.5mm; margin: 3.5mm 0; page-break-inside: avoid; }
+.callout.warn { border-left-color: #b8860b; background: #fdf8ec; }
+.callout.danger { border-left-color: #a02c2c; background: #fbf0f0; }
+.callout.ok { border-left-color: #1e7a4a; background: #eefaf3; }
+.callout .lbl { font-weight: bold; font-size: 8.2pt; text-transform: uppercase; letter-spacing: 0.7pt; color: #2d6cb5; display: block; margin-bottom: 1.5mm; }
+.callout.warn .lbl { color: #8a6508; }
+.callout.danger .lbl { color: #a02c2c; }
+.callout.ok .lbl { color: #1e7a4a; }
+.callout p:last-child { margin-bottom: 0; }
+
+.step { border-left: 2.5pt solid #2d6cb5; padding-left: 4mm; margin: 5mm 0; page-break-inside: avoid; }
+.step .n { display: inline-block; background: #2d6cb5; color: #fff; font-size: 7.6pt; font-weight: bold;
+           padding: 0.6mm 2.2mm; border-radius: 2px; letter-spacing: 0.4pt; margin-bottom: 1.8mm; }
+
+.cover { padding-top: 34mm; page-break-after: always; }
+.cover .eyebrow { font-size: 9.5pt; color: #2d6cb5; letter-spacing: 2.6pt; text-transform: uppercase; margin-bottom: 6mm; }
+.cover h1 { bookmark-level: none; font-size: 33pt; line-height: 1.1; margin: 0 0 5mm 0; color: #0d2b4e; }
+.cover .sub { font-size: 12.5pt; color: #48566c; margin-bottom: 20mm; line-height: 1.45; }
+.cover .rule { height: 3pt; background: #2d6cb5; width: 52mm; margin-bottom: 8mm; }
+.cover .meta { font-size: 9pt; color: #48566c; line-height: 1.8; border-top: 0.5pt solid #c8d2e0; padding-top: 5mm; }
+.cover .meta b { color: #12325a; }
+
+.toc { page-break-after: always; }
+.toc h1 { border: none; font-size: 17pt; margin-bottom: 3mm; color: #0d2b4e; }
+.toc-part { font-weight: bold; color: #12325a; margin-top: 2.8mm; margin-bottom: 1mm; font-size: 9.1pt; border-bottom: 0.5pt solid #c8d2e0; padding-bottom: 0.7mm; }
+.toc-row { display: flex; justify-content: space-between; font-size: 8.2pt; margin-bottom: 0.3mm; }
+.toc-row span:first-child { color: #24344a; }
+.toc-row span:last-child { color: #8a94a6; }
+.newpage { page-break-before: always; }
+
+.lede { font-size: 10.4pt; color: #2c3e55; line-height: 1.5; margin-bottom: 4mm; }
+.kv { font-size: 8.4pt; }
+.kv td:first-child { width: 32%; font-weight: bold; color: #12325a; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="eyebrow">Aspire Tech</div>
+  <div class="rule"></div>
+  <h1>The Build<br>Handbook</h1>
+  <div class="sub">Build the Aspire CRM from an empty machine to a working,<br>
+  proven system — every command, every screen, every trap.</div>
+  <div class="meta">
+    <b>The system:</b> Twenty (CRM, self-hosted) + n8n (automation), on one server, on your own database<br>
+    <b>Who this is for:</b> a builder with no prior Docker, CRM or automation experience — and the engineer who follows them<br>
+    <b>What you end with:</b> 31 custom objects, 19 automations, a public form that files real leads, and a suite that proves it works<br>
+    <b>How to trust it:</b> every command here was run against a live build; every screenshot is that build, photographed
+  </div>
+</div>
+
+<!--TOC-->
+
+
+<h1 class="part"><span class="num">Part 0</span>Orientation</h1>
+
+<p class="lede">Read this part once. It is nine pages, it has no commands in it,
+and it is the difference between following a build and understanding one.</p>
+
+<h2>0.1 What you are about to build</h2>
+
+<p>You are going to build a customer relationship management system that runs on
+hardware you control. By the end of Part 2 — about half an hour of waiting and
+eleven commands — you will have, on your own machine:</p>
+
+<table class="kv">
+<tr><td>A CRM</td><td>Companies, people, a sales pipeline, notes and tasks, plus <b>31 custom objects</b> shaped around a training business: programs, cohorts, enrolments, webinars, consent records</td></tr>
+<tr><td>An automation engine</td><td><b>19 workflows</b> that capture leads, score them, chase renewals, send email, and record every run they make</td></tr>
+<tr><td>A public web form</td><td>Hosted by your own stack. Somebody fills it in; a scored, assigned, consented record appears in the CRM seconds later</td></tr>
+<tr><td>A mail catcher</td><td>So the send path runs for real without any chance of a test reaching a live human being</td></tr>
+<tr><td>Proof</td><td>A suite of <b>77 checks</b> that submits the real form, follows the real redirect, breaks something on purpose, and then asks the CRM whether the records are actually there</td></tr>
+</table>
+
+<p>Then Part 5 puts the same thing on a real server, with a real domain name, a
+real certificate, and a firewall.</p>
+
+<div class="callout ok">
+<span class="lbl">The one idea to hold on to</span>
+<p><b>Twenty holds the truth. n8n does the work.</b> The CRM is a database with
+a good interface — it stores what happened. The automation engine is what makes
+things happen: it watches for a form submission, decides what the lead is worth,
+writes the record, sends the acknowledgement, and files a note saying it did.
+Almost every question in this book resolves to "which of those two is
+responsible for this?"</p>
+</div>
+
+<h2>0.2 The system in one picture</h2>
+
+<p>Seven programs run side by side. Each one is a <i>container</i> — a packaged,
+isolated copy of a program plus everything it needs to run. You do not install
+any of them; you describe them in a file and one command starts them all.</p>
+
+<figure class="fig">
+<svg viewBox="0 0 700 356" width="100%" xmlns="http://www.w3.org/2000/svg" font-family="DejaVu Sans, sans-serif">
+  <defs>
+    <marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="2.6" orient="auto">
+      <path d="M0,0 L6,2.6 L0,5.2 z" fill="#5a6478"/>
+    </marker>
+  </defs>
+
+  <rect x="8" y="8" width="684" height="340" rx="6" fill="#f7fafd" stroke="#c8d2e0"/>
+  <text x="20" y="26" font-size="10.5" fill="#5a6478">One machine · one command starts all of it</text>
+
+  <!-- Outside world -->
+  <rect x="24" y="46" width="120" height="52" rx="4" fill="#fff" stroke="#8a94a6"/>
+  <text x="84" y="68" font-size="11" text-anchor="middle" fill="#1c2430">A visitor</text>
+  <text x="84" y="84" font-size="9" text-anchor="middle" fill="#5a6478">fills in the form</text>
+
+  <rect x="24" y="120" width="120" height="52" rx="4" fill="#fff" stroke="#8a94a6"/>
+  <text x="84" y="142" font-size="11" text-anchor="middle" fill="#1c2430">Your team</text>
+  <text x="84" y="158" font-size="9" text-anchor="middle" fill="#5a6478">uses the CRM</text>
+
+  <!-- n8n -->
+  <rect x="196" y="46" width="176" height="126" rx="5" fill="#eef4fb" stroke="#2d6cb5" stroke-width="1.6"/>
+  <text x="284" y="68" font-size="12.5" text-anchor="middle" fill="#12325a" font-weight="bold">n8n</text>
+  <text x="284" y="84" font-size="9" text-anchor="middle" fill="#2d6cb5">the automation engine</text>
+  <text x="284" y="105" font-size="9" text-anchor="middle" fill="#3a4757">hosts the public form</text>
+  <text x="284" y="121" font-size="9" text-anchor="middle" fill="#3a4757">19 workflows</text>
+  <text x="284" y="137" font-size="9" text-anchor="middle" fill="#3a4757">scores · routes · sends</text>
+  <text x="284" y="157" font-size="9" text-anchor="middle" fill="#3a4757">runs on a schedule</text>
+
+  <!-- Twenty -->
+  <rect x="424" y="46" width="176" height="126" rx="5" fill="#eefaf3" stroke="#1e7a4a" stroke-width="1.6"/>
+  <text x="512" y="68" font-size="12.5" text-anchor="middle" fill="#155c38" font-weight="bold">Twenty</text>
+  <text x="512" y="84" font-size="9" text-anchor="middle" fill="#1e7a4a">the CRM — system of record</text>
+  <text x="512" y="105" font-size="9" text-anchor="middle" fill="#3a4757">59 objects, 31 of them yours</text>
+  <text x="512" y="121" font-size="9" text-anchor="middle" fill="#3a4757">web interface + REST API</text>
+  <text x="512" y="137" font-size="9" text-anchor="middle" fill="#3a4757">server + worker</text>
+  <text x="512" y="157" font-size="9" text-anchor="middle" fill="#3a4757">(the worker runs the clock)</text>
+
+  <!-- storage row -->
+  <rect x="196" y="204" width="176" height="60" rx="5" fill="#fff" stroke="#5a6478"/>
+  <text x="284" y="226" font-size="11" text-anchor="middle" fill="#1c2430" font-weight="bold">PostgreSQL</text>
+  <text x="284" y="243" font-size="8.6" text-anchor="middle" fill="#5a6478">two databases, one server</text>
+  <text x="284" y="257" font-size="8.6" text-anchor="middle" fill="#5a6478">every record lives here</text>
+
+  <rect x="424" y="204" width="82" height="60" rx="5" fill="#fff" stroke="#5a6478"/>
+  <text x="465" y="230" font-size="10.5" text-anchor="middle" fill="#1c2430" font-weight="bold">Redis</text>
+  <text x="465" y="247" font-size="8.6" text-anchor="middle" fill="#5a6478">job queue</text>
+
+  <rect x="518" y="204" width="82" height="60" rx="5" fill="#fff" stroke="#5a6478"/>
+  <text x="559" y="224" font-size="10.5" text-anchor="middle" fill="#1c2430" font-weight="bold">Backup</text>
+  <text x="559" y="240" font-size="8.6" text-anchor="middle" fill="#5a6478">nightly dump</text>
+  <text x="559" y="254" font-size="8.6" text-anchor="middle" fill="#5a6478">30-day keep</text>
+
+  <rect x="196" y="288" width="176" height="46" rx="5" fill="#fdf8ec" stroke="#b8860b"/>
+  <text x="284" y="308" font-size="10.5" text-anchor="middle" fill="#8a6508" font-weight="bold">Mailpit</text>
+  <text x="284" y="324" font-size="8.6" text-anchor="middle" fill="#8a6508">catches mail — nothing leaves the machine</text>
+
+  <rect x="424" y="288" width="176" height="46" rx="5" fill="#f3f0fa" stroke="#5b3fa0"/>
+  <text x="512" y="308" font-size="10.5" text-anchor="middle" fill="#4b2f7a" font-weight="bold">Caddy</text>
+  <text x="512" y="324" font-size="8.6" text-anchor="middle" fill="#4b2f7a">server only — HTTPS and the front door</text>
+
+  <!-- arrows -->
+  <path d="M146,72 L192,72" stroke="#5a6478" fill="none" marker-end="url(#ar)"/>
+  <path d="M146,146 C170,146 400,146 420,120" stroke="#5a6478" fill="none" marker-end="url(#ar)"/>
+  <path d="M374,100 L420,100" stroke="#2d6cb5" stroke-width="1.6" fill="none" marker-end="url(#ar)"/>
+  <text x="397" y="94" font-size="8" text-anchor="middle" fill="#2d6cb5">REST</text>
+  <path d="M284,176 L284,200" stroke="#5a6478" fill="none" marker-end="url(#ar)"/>
+  <path d="M512,176 L512,200" stroke="#5a6478" fill="none" marker-end="url(#ar)"/>
+  <path d="M284,268 L284,284" stroke="#b8860b" fill="none" marker-end="url(#ar)"/>
+</svg>
+<figcaption>The whole system. A visitor reaches n8n, never the CRM directly.
+n8n writes to Twenty over its REST API — the same API you will use from the
+command line. Everything ends up in one PostgreSQL server holding two separate
+databases. On a laptop, Mailpit swallows outgoing mail; on a server, Caddy is
+the only thing exposed to the internet.</figcaption>
+</figure>
+
+<h2>0.3 Words this book uses</h2>
+
+<p>If you already know these, skip to §0.4. If you do not, this table is the
+only vocabulary you need for the whole build.</p>
+
+<table class="wide">
+<tr><th style="width:20%">Word</th><th>What it actually means</th></tr>
+<tr><td><b>Image</b></td><td>A frozen, downloadable copy of a program and everything it needs. <code>postgres:16</code> is an image. You never edit one.</td></tr>
+<tr><td><b>Container</b></td><td>A running copy of an image. Delete it and start another; nothing is lost, provided the data lives in a volume.</td></tr>
+<tr><td><b>Volume</b></td><td>A disk area that survives containers being deleted. Your database lives in one. This distinction is the whole reason it is safe to restart things.</td></tr>
+<tr><td><b>Docker Compose</b></td><td>A file describing several containers and how they connect, plus the command that starts them together. <code>infra/docker-compose.yml</code> is that file here.</td></tr>
+<tr><td><b>Environment variable</b></td><td>A setting passed to a program at startup, written as <code>NAME=value</code>. All of them live in <code>infra/.env</code>. This is where every password and address is configured.</td></tr>
+<tr><td><b>Port</b></td><td>A numbered door on a machine. The CRM answers on port 3000, the automation engine on 5678. <code>localhost:3000</code> means "this machine, door 3000".</td></tr>
+<tr><td><b>API</b></td><td>A way for programs to talk to each other instead of a human clicking. Twenty has one; that is how n8n writes records into it.</td></tr>
+<tr><td><b>API key</b></td><td>A long secret string that stands in for a password when a program calls an API. Treat it exactly like a password.</td></tr>
+<tr><td><b>Webhook</b></td><td>A URL that something else calls to notify you of an event. The opposite of polling: you are told rather than asking.</td></tr>
+<tr><td><b>SMTP</b></td><td>The protocol for sending email. It needs a server that will accept mail from you — a "relay".</td></tr>
+<tr><td><b>Cron / schedule</b></td><td>Run this at 06:00 every day. Several workflows here are scheduled rather than triggered.</td></tr>
+<tr><td><b>Reverse proxy</b></td><td>A program sitting in front of everything else, receiving all web traffic, handling the certificate, and passing requests to the right container. Caddy does this on the server.</td></tr>
+<tr><td><b>TLS / certificate</b></td><td>What makes a browser show a padlock instead of a warning. Caddy obtains one automatically and renews it without being asked.</td></tr>
+<tr><td><b>CIDR</b></td><td>A way of writing a range of network addresses, like <code>203.0.113.0/24</code>. You need it exactly once, to say which offices may open the automation editor.</td></tr>
+<tr><td><b>Idempotent</b></td><td>Safe to run twice. Almost every command here is; where one is not, this book says so loudly.</td></tr>
+</table>
+
+<h2>0.4 What you need before you start</h2>
+
+<table class="wide">
+<tr><th style="width:24%">You need</th><th>Detail</th></tr>
+<tr><td><b>A computer</b></td><td>macOS, Linux, or Windows with WSL. <b>At least 6 GB of free memory</b>; 8 GB is comfortable. Below 6 GB the CRM and the database fight each other and the interface crawls.</td></tr>
+<tr><td><b>Free disk</b></td><td>About 20 GB. The images alone are roughly 3.6 GB.</td></tr>
+<tr><td><b>Docker</b></td><td>Docker Engine with Compose v2. §2.1 installs it for your operating system.</td></tr>
+<tr><td><b>Python 3.9+</b></td><td>Every build step is a Python script. Almost all of them use only the standard library; one needs PyYAML.</td></tr>
+<tr><td><b>A terminal</b></td><td>You will type into it, read what it says back, and act on that. That is the entire skill required.</td></tr>
+<tr><td><b>About 40 minutes</b></td><td>Most of it waiting for downloads and the database to build itself the first time.</td></tr>
+</table>
+
+<p><b>You do not need</b> a domain name, a server, an email account, a credit
+card, or any account with anyone, to complete Parts 2 through 4. Nothing leaves
+your machine until Part 5.</p>
+
+<h2>0.5 How to read this book</h2>
+
+<p>Commands appear on a dark background and are meant to be typed exactly as
+shown. A line starting with <code>$</code> is what you type; everything else is
+what the machine says back.</p>
+
+<pre class="cmd"><span class="p">$</span> ./infra/up.sh
+<span class="c"># lines that begin with a hash are comments, not commands</span></pre>
+
+<p>Where this book shows what a command printed, that output is <b>real</b> —
+captured from an actual run of this build, not typed out from memory. If your
+screen says something different, that difference is information, and §6.7 lists
+what the common ones mean.</p>
+
+<p>Four kinds of aside appear throughout:</p>
+
+<div class="callout"><span class="lbl">Why</span><p>The reason something is done this way. Skippable on a first pass; worth reading before you change anything.</p></div>
+<div class="callout warn"><span class="lbl">Watch out</span><p>Something that commonly goes wrong here, and what it looks like when it does.</p></div>
+<div class="callout danger"><span class="lbl">Do not</span><p>An action that loses data or breaks something irreversibly. There are only a few of these. Take them literally.</p></div>
+<div class="callout ok"><span class="lbl">Good</span><p>What success looks like, so you know whether to continue.</p></div>
+
+<h2>0.6 The rule that governs this whole build</h2>
+
+<p>One idea shapes every script in this repository, and it is worth stating
+before you meet it in the wild:</p>
+
+<p class="lede">A system that fails loudly is safer than a system that appears
+to work.</p>
+
+<p>You will see this everywhere. The workflow that issues bootcamp payment links
+refuses to start if nobody has configured the prices — rather than emailing a
+student a link at the wrong price. The proof suite does not check that workflows
+exist; it makes them run and then interrogates the database. The deployment
+script stops at the first failed step instead of reporting success at the end.</p>
+
+<p>This costs you something. You will hit errors during this build that a more
+forgiving system would have swallowed. Each one is a decision somebody made on
+purpose, and §4.7 explains which failure each guard was written to catch.</p>
+
+<div class="callout warn">
+<span class="lbl">Watch out</span>
+<p>The most expensive bugs in this system were never crashes. They were things
+that returned <b>HTTP 200 and the wrong answer</b>: a database filter that was
+silently ignored and returned the entire table, a page limit that quietly capped
+at 200 rows, a consent checkbox that was never actually read. Nothing errored.
+Everything looked fine. §4.6 collects all of them in one place, and it is the
+single most useful page in this book once you start changing things.</p>
+</div>

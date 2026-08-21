@@ -110,14 +110,14 @@ just a backup taken.
 
 | Task | Detail |
 |---|---|
-| Provision the object model | `python scripts/twenty_provision.py --dry-run` then for real. 25 objects, 132 fields, 20 relations |
+| Provision the object model | `python scripts/twenty_provision.py --dry-run` then for real. 31 objects, 172 fields, 26 relations |
 | Create Twenty API key | Settings → API & Webhooks. Scope it to a role, not admin |
 | Create n8n credentials | `python scripts/n8n_credentials.py` — writes `Twenty API` (header auth) and `Aspire SMTP`. Chat alerts use an incoming webhook (`ALERT_WEBHOOK_URL`), not a credential |
-| Validate every Twenty call | `python scripts/validate_workflow_queries.py` — checks all 28 against the live schema |
+| Validate every Twenty call | `python scripts/validate_workflow_queries.py` — checks all 91 against the live schema |
 | Deploy the workflows | `python scripts/n8n_deploy.py --dev` — inactive at first |
 | Test the error handler | Force a failure; confirm the chat alert and the `automationRun` record |
 | Test the send sub-workflow | Send to yourself. Then **flip consent to opted-out and confirm it refuses** |
-| Prove the whole layer | `python scripts/prove_workflows.py` — 25 checks against the running stack |
+| Prove the whole layer | `python scripts/prove_workflows.py` — 77 checks against the running stack |
 
 **Gate:** a deliberate failure produces an alert, and the consent gate demonstrably blocks a send.
 
@@ -239,18 +239,19 @@ point of failure and it is a person, which is on the risk register for a reason.
 | Component | Status |
 |---|---|
 | `infra/docker-compose.yml` | Full stack: Postgres, Redis, Twenty server + worker, n8n, nightly backup |
-| `reference/twenty_schema.yaml` | 25 objects, 132 fields, 20 relations |
+| `reference/twenty_schema.yaml` | 31 objects, 172 fields, 26 relations |
 | `scripts/twenty_provision.py` | Idempotent three-pass provisioner |
 | `scripts/build_n8n_workflows.py` | Generates the workflow library |
-| `n8n/workflows/*.json` | **6 workflows, 58 nodes** — error handler, send email, public form, tracked links, renewal escalation, scheduled sweeps |
+| `n8n/workflows/*.json` | **19 workflows, 267 nodes** (213 executable, 54 sticky notes) — the full library, including the training funnel |
 | `scripts/n8n_deploy.py` | Idempotent deploy, dependency-ordered |
 | `scripts/ghl_pull.py` | Read-only GHL extraction |
 | `scripts/build_audit.py` | Evidence → disposition |
 
-The six workflows are the foundation, not the finished estate. They establish
-every pattern the rest need: signature handling, consent enforcement, batching
-against the rate limit, error routing, and `automationRun` logging. Workflows
-seven through fifty are variations.
+The library is generated rather than hand-written, so all nineteen share the
+same conventions: consent enforcement through a single send sub-workflow,
+batching against the rate limit, error routing bound by id at deploy time, and
+`automationRun` logging on every path. Adding the twentieth is a builder
+function, not a new set of conventions.
 
 ---
 

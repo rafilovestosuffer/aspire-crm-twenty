@@ -1,0 +1,79 @@
+[36m  ..  [0m created infra/.env from the example
+[32m  ok  [0m generated PG_DATABASE_PASSWORD
+[32m  ok  [0m generated ENCRYPTION_KEY
+[32m  ok  [0m generated APP_SECRET
+[32m  ok  [0m generated N8N_ENCRYPTION_KEY
+
+  ─────────────────────────────────────────────────────────────
+   Back up ENCRYPTION_KEY and N8N_ENCRYPTION_KEY from
+   infra/.env to somewhere other than this machine.
+
+   Lose ENCRYPTION_KEY and every secret Twenty holds — OAuth
+   tokens, connected mailboxes, application variables — becomes
+   permanently unreadable. There is no recovery.
+  ─────────────────────────────────────────────────────────────
+
+[36m  ..  [0m pulling images (first run takes a few minutes)
+[36m  ..  [0m starting
+ Network aspire-crm_default Creating 
+ Network aspire-crm_default Created 
+ Volume aspire-crm_server-local-data Creating 
+ Volume aspire-crm_server-local-data Created 
+ Volume aspire-crm_n8n-data Creating 
+ Volume aspire-crm_n8n-data Created 
+ Volume aspire-crm_db-data Creating 
+ Volume aspire-crm_db-data Created 
+ Container aspire-crm-mailpit-1 Creating 
+ Container aspire-crm-redis-1 Creating 
+ Container aspire-crm-db-1 Creating 
+ Container aspire-crm-redis-1 Created 
+ Container aspire-crm-db-1 Created 
+ Container aspire-crm-backup-1 Creating 
+ Container aspire-crm-mailpit-1 Created 
+ Container aspire-crm-server-1 Creating 
+ Container aspire-crm-n8n-1 Creating 
+ Container aspire-crm-backup-1 Created 
+ Container aspire-crm-n8n-1 Created 
+ Container aspire-crm-server-1 Created 
+ Container aspire-crm-worker-1 Creating 
+ Container aspire-crm-worker-1 Created 
+ Container aspire-crm-mailpit-1 Starting 
+ Container aspire-crm-db-1 Starting 
+ Container aspire-crm-redis-1 Starting 
+ Container aspire-crm-mailpit-1 Started 
+ Container aspire-crm-redis-1 Started 
+ Container aspire-crm-db-1 Started 
+ Container aspire-crm-db-1 Waiting 
+ Container aspire-crm-db-1 Waiting 
+ Container aspire-crm-redis-1 Waiting 
+ Container aspire-crm-db-1 Waiting 
+ Container aspire-crm-db-1 Healthy 
+ Container aspire-crm-backup-1 Starting 
+ Container aspire-crm-redis-1 Healthy 
+ Container aspire-crm-db-1 Healthy 
+ Container aspire-crm-n8n-1 Starting 
+ Container aspire-crm-db-1 Healthy 
+ Container aspire-crm-server-1 Starting 
+ Container aspire-crm-backup-1 Started 
+ Container aspire-crm-n8n-1 Started 
+ Container aspire-crm-server-1 Started 
+ Container aspire-crm-server-1 Waiting 
+ Container aspire-crm-db-1 Waiting 
+ Container aspire-crm-db-1 Healthy 
+ Container aspire-crm-server-1 Healthy 
+ Container aspire-crm-worker-1 Starting 
+ Container aspire-crm-worker-1 Started 
+[36m  ..  [0m waiting for Twenty to become healthy (up to 5 minutes on first run)
+[32m  ok  [0m Twenty healthy
+[32m  ok  [0m worker running
+
+  Twenty  http://localhost:3000
+  n8n     http://localhost:5678
+
+  Next:
+    1. Open Twenty, create the workspace and your admin user
+    2. Settings → API & Webhooks → create a key → put it in infra/.env
+       as TWENTY_API_KEY
+    3. Open n8n, Settings → n8n API → create a key → N8N_API_KEY
+    4. python scripts/stack_verify.py
+

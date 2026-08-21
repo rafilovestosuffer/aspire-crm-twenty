@@ -1,6 +1,6 @@
 # Twenty Object Model — GHL Parity Layer
 
-**25 custom objects, 132 fields, 20 relations.** Provisioned by
+**31 custom objects, 172 fields, 26 relations.** Provisioned by
 `scripts/twenty_provision.py` from `reference/twenty_schema.yaml`, scripted and
 committed rather than clicked through the UI — so the whole workspace rebuilds in
 one command when the local instance is reset, which will happen more than once.

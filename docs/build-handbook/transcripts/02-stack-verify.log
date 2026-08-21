@@ -1,0 +1,26 @@
+
+[2mContainers[0m
+  [32m  ok[0m  container: db                      [2mPostgres[0m
+  [32m  ok[0m  container: redis                   [2mRedis[0m
+  [32m  ok[0m  container: server                  [2mTwenty API + UI[0m
+  [32m  ok[0m  container: worker                  [2mscheduled workflows, mailbox sync[0m
+  [32m  ok[0m  container: n8n                     [2mautomation[0m
+
+[2mData layer[0m
+  [32m  ok[0m  postgres accepting connections     [2m/var/run/postgresql:5432 - accepting connections[0m
+  [32m  ok[0m  database: default                  [2mTwenty[0m
+  [32m  ok[0m  database: n8n                      [2mn8n[0m
+  [32m  ok[0m  redis                              [2mPONG[0m
+
+[2mTwenty[0m
+  [32m  ok[0m  twenty /healthz                    [2mHTTP 200[0m
+  [33mwarn[0m  twenty REST API                    [2mTWENTY_API_KEY not set — Settings → API & Webhooks[0m
+
+[2mn8n[0m
+  [32m  ok[0m  n8n /healthz                       [2mHTTP 200[0m
+  [33mwarn[0m  n8n API                            [2mN8N_API_KEY not set — Settings → n8n API[0m
+
+[2mBackups[0m
+  [33mwarn[0m  backup files                       [2mnone yet — the first runs 24h after start[0m
+
+[32mStack healthy[0m, 3 warning(s)

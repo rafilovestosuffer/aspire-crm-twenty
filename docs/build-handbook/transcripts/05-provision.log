@@ -1,0 +1,105 @@
+Schema: 31 object(s), 172 field(s), 26 relation(s)
+
+Connected to http://localhost:3000 — 28 object(s) already present
+
+Pass 1 — objects
+  create serviceSubscription
+  create complianceEngagement
+  create trainingAccount
+  create phishingBaseline
+  create trainingProgram
+  create cohort
+  create enrollment
+  create webinarEvent
+  create webinarRegistration
+  create aiConversation
+  create consentRecord
+  create crmTag
+  create mergeVariable
+  create messageLog
+  create callLog
+  create emailTemplate
+  create campaign
+  create trackedLink
+  create formDefinition
+  create formSubmission
+  create appointment
+  create product
+  create quote
+  create quoteLineItem
+  create invoice
+  create payment
+  create landingPage
+  create socialPost
+  create review
+  create membershipEnrollment
+  create automationRun
+
+Pass 2 — fields
+  done  serviceSubscription (7 field(s))
+  done  complianceEngagement (6 field(s))
+  done  trainingAccount (5 field(s))
+  done  phishingBaseline (4 field(s))
+  done  trainingProgram (5 field(s))
+  done  cohort (7 field(s))
+  done  enrollment (7 field(s))
+  done  webinarEvent (7 field(s))
+  done  webinarRegistration (5 field(s))
+  done  aiConversation (9 field(s))
+  done  consentRecord (6 field(s))
+  done  crmTag (3 field(s))
+  done  mergeVariable (3 field(s))
+  done  messageLog (7 field(s))
+  done  callLog (5 field(s))
+  done  emailTemplate (5 field(s))
+  done  campaign (9 field(s))
+  done  trackedLink (4 field(s))
+  done  formDefinition (5 field(s))
+  done  formSubmission (4 field(s))
+  done  appointment (6 field(s))
+  done  product (5 field(s))
+  done  quote (5 field(s))
+  done  quoteLineItem (4 field(s))
+  done  invoice (6 field(s))
+  done  payment (5 field(s))
+  done  landingPage (6 field(s))
+  done  socialPost (5 field(s))
+  done  review (5 field(s))
+  done  membershipEnrollment (5 field(s))
+  done  automationRun (7 field(s))
+
+Pass 3 — relations
+  done  serviceSubscription (1 relation(s))
+  done  complianceEngagement (1 relation(s))
+  done  trainingAccount (1 relation(s))
+  done  phishingBaseline (1 relation(s))
+  done  trainingProgram (0 relation(s))
+  done  cohort (1 relation(s))
+  done  enrollment (2 relation(s))
+  done  webinarEvent (0 relation(s))
+  done  webinarRegistration (2 relation(s))
+  done  aiConversation (1 relation(s))
+  done  consentRecord (1 relation(s))
+  done  crmTag (0 relation(s))
+  done  mergeVariable (0 relation(s))
+  done  messageLog (1 relation(s))
+  done  callLog (1 relation(s))
+  done  emailTemplate (0 relation(s))
+  done  campaign (0 relation(s))
+  done  trackedLink (0 relation(s))
+  done  formDefinition (0 relation(s))
+  done  formSubmission (2 relation(s))
+  done  appointment (1 relation(s))
+  done  product (0 relation(s))
+  done  quote (2 relation(s))
+  done  quoteLineItem (2 relation(s))
+  done  invoice (2 relation(s))
+  done  payment (1 relation(s))
+  done  landingPage (0 relation(s))
+  done  socialPost (0 relation(s))
+  done  review (1 relation(s))
+  done  membershipEnrollment (2 relation(s))
+  done  automationRun (0 relation(s))
+
+created 228 · already present 1 · failed 0 · 294 API call(s)
+Report: out/twenty_provision_report.json

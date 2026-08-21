@@ -93,7 +93,7 @@ python scripts/twenty_provision.py
 python scripts/twenty_probe.py                   # → out/twenty_capability.md
 ```
 
-25 objects, 132 fields, 20 relations. Idempotent — safe to re-run after a
+31 objects, 172 fields, 26 relations. Idempotent — safe to re-run after a
 partial failure.
 
 **If relations fail:** `relationCreationPayload` shapes vary between Twenty
@@ -205,7 +205,7 @@ The syntax the API actually wants:
 
 **`prove_workflows.py`** submits the real form, follows the real redirect,
 breaks something on purpose, triggers the real schedules, and then asks Twenty
-whether the records exist. 25 checks. Expect all of them to pass:
+whether the records exist. 77 checks. Expect all of them to pass:
 
 | Proves | Check |
 |---|---|

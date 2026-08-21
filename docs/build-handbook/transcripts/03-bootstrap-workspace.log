@@ -1,0 +1,12 @@
+Bootstrapping http://localhost:3000
+
+  ok    user created            admin@aspiretss.com
+  ok    workspace created       43d32e2d-05b5-45c2-bb52-d8e0d41f8513
+  ok    access token            workspace-scoped
+  ok    workspace activated     Aspire Tech
+  ok    API key                 written to infra/.env
+
+  Twenty   http://localhost:3000
+  login    admin@aspiretss.com / AspireDemo2026!
+
+  Next: python scripts/twenty_provision.py

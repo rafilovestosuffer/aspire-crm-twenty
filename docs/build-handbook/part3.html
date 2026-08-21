@@ -1,0 +1,199 @@
+<h1 class="part"><span class="num">Part 3</span>Look around what you built</h1>
+
+<p class="lede">Four addresses, one live demonstration. Every screenshot in this
+part is the system you have just built, photographed — not a drawing, not a
+mock-up.</p>
+
+<table class="kv">
+<tr><td>The CRM</td><td><code>http://localhost:3000</code></td></tr>
+<tr><td>The automation editor</td><td><code>http://localhost:5678</code></td></tr>
+<tr><td>The mail catcher</td><td><code>http://localhost:8025</code></td></tr>
+<tr><td>The public form</td><td><code>http://localhost:5678/form/aspire-contact</code></td></tr>
+</table>
+
+<p>The CRM and the editor share one login:
+<code>admin@aspiretss.com</code> / <code>AspireDemo2026!</code></p>
+
+<div class="callout danger">
+<span class="lbl">Do not</span>
+<p>That password is published in this handbook and in a public repository.
+Change it before this machine is on any network another person can reach. On a
+server, the deployment script never uses it — it generates a unique one
+instead. §5.10.</p>
+</div>
+
+<h2>3.1 First login</h2>
+
+<!--FIGURE {"name": "crm-login", "caption": "The sign-in screen. The application is already rendering behind the panel, which is why the page looks busy — that is the CRM, waiting."} -->
+
+<p>Sign in with the credentials above. On the very first login the CRM asks for
+a display name and then offers to invite your team.</p>
+
+<div class="callout warn">
+<span class="lbl">Watch out — the step that traps automation</span>
+<p>"Invite your team" is a real page at <code>/invite-team</code>, not a
+dismissible pop-up, and the application's router will bounce you straight back
+to it if you try to navigate anywhere else. <b>Click <i>Skip</i>.</b> Any
+script that drives this interface has to click that link too; navigating past it
+does not work.</p>
+</div>
+
+<h2>3.2 The CRM</h2>
+
+<!--FIGURE {"name": "crm-companies", "caption": "Companies, with the seeded dataset loaded. The left-hand column is the part that matters: everything below <i>Notes</i> is a custom object this build provisioned.", "marks": [[3.2, 19, "1"], [29.5, 8.6, "2"], [3.2, 56, "3"], [50, 96.5, "4"]], "legend": ["The five objects a stock CRM ships with — People, Companies, Opportunities, Tasks, Notes.", "45 companies: 40 from the seeder plus 5 the CRM creates for itself.", "Where your model begins. Service Subscriptions, Training Accounts, Cohorts, Enrollments, Consent Records, Message Logs — none of these exist in a stock install.", "A summary row. Any column can be totalled without exporting anything."]} -->
+
+<p>Click any company to open it. A record page shows its own fields at the left
+and everything related to it down the right — the people who work there, the
+opportunities, and any of the custom objects that point at it.</p>
+
+<!--FIGURE {"name": "crm-company-record", "caption": "One company record. The relationships defined in the schema are what fill the right-hand column; without them this page would be a form with nothing attached."} -->
+
+<h3>The data model, from the inside</h3>
+
+<p>Open <b>Settings → Data model</b>. This is the provisioning step, seen from
+the interface.</p>
+
+<!--FIGURE {"name": "crm-settings-objects", "caption": "The object list. Every row marked <i>Custom</i> was created by the provisioning step from the schema file; every row marked <i>Standard</i> ships with the CRM.", "marks": [[39.5, 53.0, "1"], [57.5, 56.5, "2"], [74.5, 60.1, "3"], [91.0, 3.2, "4"]], "legend": ["The provisioned objects, alphabetically. AI Conversations, Appointments, Automation Runs, Call Logs, Campaigns, Cohorts and on down the list.", "Custom versus Standard. 31 of the 59 objects here came from the schema file.", "Instances — how many records exist. Automation Runs has 51 because the proof suite has been running; Consent Records has 97 from the seed.", "You <i>can</i> add an object by hand here. Do not — §7.1 explains why the schema file has to stay the source of truth."]} -->
+
+<h3>Objects worth opening now</h3>
+
+<p><b>Consent Records</b> is the compliance backbone. One row per person, per
+channel, with a status, a source and a proof string.</p>
+
+<!--FIGURE {"name": "crm-consent", "caption": "Consent records. Note the mix of statuses — the seeder deliberately creates opted-out contacts so the refusal path can be demonstrated on a live screen."} -->
+
+<p><b>Automation Runs</b> is the execution history. Every workflow writes one on
+every run, success or failure. This is the thing the previous platform could not
+provide at all, and it is one HTTP step per workflow to populate.</p>
+
+<!--FIGURE {"name": "crm-automation-runs", "caption": "Every automation run, queryable. Status, workflow name, and — on a failure — the real error message rather than a generic one."} -->
+
+<h2>3.3 The automation editor</h2>
+
+<p>Open <code>http://localhost:5678</code> and sign in with the same
+credentials.</p>
+
+<!--FIGURE {"name": "n8n-workflows", "caption": "The workflow library after deployment. Nineteen workflows, all active. The two marked <i>(dev)</i> exist only to test the other seventeen and are never deployed to a server."} -->
+
+<p>Open <b>LEAD Form Intake</b>. This is the workflow to understand first —
+every pattern the other sixteen use appears in it.</p>
+
+<!--FIGURE {"name": "n8n-canvas", "caption": "LEAD Form Intake. The coloured panels are notes drawn on the canvas, not steps: they explain each stage in plain language to whoever opens this next. 24 executable steps and 6 notes.", "marks": [[24.4, 15.5, "1"], [40.0, 19.9, "2"], [24.4, 47.2, "3"], [24.4, 74.3, "4"], [42.5, 71.1, "5"], [58.2, 75.7, "6"]], "legend": ["A lead arrives. The form is hosted here; the next step normalises what was typed so everything downstream can assume clean values.", "Is this person already known? Look them up by email before creating anything, or one person who submits twice becomes two records.", "Attach them to a company — matched on the email domain, not the company name they typed, because people spell their own employer three different ways.", "Record consent. The evidence you would produce if a regulator ever asked.", "Score it, route it, raise a task with an owner and a deadline.", "Reply, tell sales, and log that this run happened — so a failure anywhere above is visible afterwards."]} -->
+
+<p>Click <b>Executions</b> to see what has actually run. Everything here is from
+the proof suite and your own testing.</p>
+
+<!--FIGURE {"name": "n8n-executions", "caption": "Execution history inside the automation engine. Click any row to replay it step by step and see exactly what data each step received — the capability the previous platform's API refused to expose at all."} -->
+
+<h2>3.4 The demonstration: fill the form and watch</h2>
+
+<p>This is the part to show somebody. It takes ninety seconds and it does more
+than any document.</p>
+
+<div class="step">
+<span class="n">STEP 1</span>
+<h4>Open the form</h4>
+<p><code>http://localhost:5678/form/aspire-contact</code> — ideally in a private
+window, so it is visibly not depending on your login.</p>
+</div>
+
+<!--FIGURE {"name": "public-form", "caption": "The public form, hosted by your own automation engine. No third-party form tool, no per-submission fee, no account with anyone."} -->
+
+<div class="step">
+<span class="n">STEP 2</span>
+<h4>Fill it in as a real enquiry</h4>
+<p>Use a plausible name and a company email address. Pick an interest —
+<i>Splunk bootcamp</i> scores highest, which makes the demonstration land. Tick
+the consent box.</p>
+</div>
+
+<!--FIGURE {"name": "form-filled", "caption": "Filled in. The consent tick box below the fold is required: the form will not submit without it, which is where the consent rule first shows up in the system."} -->
+
+<div class="step">
+<span class="n">STEP 3</span>
+<h4>Submit</h4>
+</div>
+
+<!--FIGURE {"name": "form-success", "caption": "Submitted. The visitor sees this immediately — the confirmation is sent on receipt, before the workflow has finished running. §4.8 explains why that distinction matters when you are testing."} -->
+
+<div class="step">
+<span class="n">STEP 4</span>
+<h4>Now look at the CRM</h4>
+<p>Refresh <b>People</b>. The person is there, seconds later, attached to a
+company matched on their email domain.</p>
+</div>
+
+<!--FIGURE {"name": "crm-people", "caption": "People. The lead submitted through the public form appears at the top, indistinguishable from a record somebody typed in by hand — except that nobody typed it."} -->
+
+<div class="step">
+<span class="n">STEP 5</span>
+<h4>And at what the automation decided</h4>
+</div>
+
+<p>Open <b>Tasks</b>. There is a new one, and its title carries the routing
+decision the workflow made:</p>
+
+<pre class="term"><span class="a-bold">BOOTCAMP: Nadia Okonkwo (HOT, score 85)</span></pre>
+
+<p>The workflow classified the enquiry as a bootcamp lead, scored it 85 on
+intent, and raised a task with an owner and a deadline drawn from that
+score.</p>
+
+<div class="step">
+<span class="n">STEP 6</span>
+<h4>And at the email that went out</h4>
+<p>Open <code>http://localhost:8025</code>.</p>
+</div>
+
+<!--FIGURE {"name": "mailpit", "caption": "The acknowledgement, caught by the local mail catcher. The whole send path ran for real — consent checked, template rendered, log written, SMTP transaction completed — and the message went nowhere near a real inbox."} -->
+
+<p>Finally, open <b>Message Logs</b> in the CRM. The send is recorded there
+too, with its status:</p>
+
+<!--FIGURE {"name": "crm-message-log", "caption": "Message logs. Every send and — more importantly — every refusal, each carrying the reason it was refused."} -->
+
+<h2>3.5 The other half of the demonstration</h2>
+
+<p>Anyone can show a system doing something. Showing it <i>refusing</i> to do
+something is what convinces an audience that the controls are real.</p>
+
+<p>Submit the form again with the <b>same email address</b> — but this time
+imagine that person had previously unsubscribed. The seeded data already
+contains opted-out contacts; pick one from <b>Consent Records</b> where the
+status is <code>OPTED_OUT</code> and submit the form using that address.</p>
+
+<p>The person record updates. No email is sent. And a row appears in Message
+Logs:</p>
+
+<pre class="term"><span class="a-r">FAILED</span>  Blocked: consent_PENDING</pre>
+
+<p>The tick box on the form is a <b>request</b> to be contacted, not an override
+of a previous refusal. If somebody has ever opted out, bounced or complained, a
+new form submission puts them into <code>PENDING</code> and a human has to
+confirm before anything is sent to them again.</p>
+
+<div class="callout ok">
+<span class="lbl">Why this is the most important thing in the demonstration</span>
+<p>A consent record that nothing consults provides no protection and considerable
+false assurance, which is worse than having none. Here the check is structural:
+there is exactly one workflow permitted to talk to the mail server, and it
+refuses before it sends. §4.3.</p>
+</div>
+
+<h2>3.6 A ten-minute walkthrough for somebody else</h2>
+
+<p>Order matters. Lead with the data model, land on the live form.</p>
+
+<table class="wide">
+<tr><th style="width:6%">#</th><th style="width:34%">Show</th><th>Say</th></tr>
+<tr><td>1</td><td>A company record with its people, enrolments and cohort</td><td>"The old system flattened all of this into contact fields and a deal stage."</td></tr>
+<tr><td>2</td><td>A cohort, paid versus unpaid enrolments</td><td>"Who is still sitting on a payment link — one click, not a spreadsheet export."</td></tr>
+<tr><td>3</td><td>Settings → Data model</td><td>"Thirty-one objects, built from a file in version control. Rebuilt identically in one command."</td></tr>
+<tr><td>4</td><td><b>Fill the public form live</b></td><td>"Watch." Person appears, scored and assigned; task raised; acknowledgement sent. <b>"That form is hosted by our own stack."</b></td></tr>
+<tr><td>5</td><td>Submit as an opted-out contact</td><td>It refuses and logs why. "This is the control we tell clients to implement."</td></tr>
+<tr><td>6</td><td>Automation Runs</td><td>"Every run, success and failure. The old platform exposed no execution history at all."</td></tr>
+<tr><td>7</td><td>Run <code>prove_workflows.py</code> on screen</td><td>"Seventy-seven checks against the running system. This is how we know it works, rather than believing it does."</td></tr>
+</table>
+
+<p>Watching a record appear from a form submission does more than any document,
+including this one.</p>

@@ -1,0 +1,8 @@
+NAME                   IMAGE                     COMMAND                  SERVICE   CREATED       STATUS                    PORTS
+aspire-crm-backup-1    postgres:16               "bash -c ' while tru…"   backup    5 hours ago   Up 37 minutes             5432/tcp
+aspire-crm-db-1        postgres:16               "docker-entrypoint.s…"   db        5 hours ago   Up 37 minutes (healthy)   5432/tcp
+aspire-crm-mailpit-1   axllent/mailpit:v1.21     "/mailpit"               mailpit   5 hours ago   Up 37 minutes (healthy)   1025/tcp, 1110/tcp, 0.0.0.0:8025->8025/tcp
+aspire-crm-n8n-1       n8nio/n8n:2.34.6          "tini -- /docker-ent…"   n8n       5 hours ago   Up 37 minutes (healthy)   0.0.0.0:5678->5678/tcp
+aspire-crm-redis-1     redis                     "docker-entrypoint.s…"   redis     5 hours ago   Up 37 minutes (healthy)   6379/tcp
+aspire-crm-server-1    twentycrm/twenty:v2.1.0   "/app/entrypoint.sh …"   server    5 hours ago   Up 37 minutes (healthy)   0.0.0.0:3000->3000/tcp
+aspire-crm-worker-1    twentycrm/twenty:v2.1.0   "/app/entrypoint.sh …"   worker    5 hours ago   Up 37 minutes             

@@ -1,0 +1,13 @@
+[1mRestore verification — default[0m
+
+  [32mPASS[0m  read source row count  [2m4601[0m
+  [32mPASS[0m  take a dump
+  [32mPASS[0m  create scratch database  [2mrestore_check_20260821115537[0m
+  [32mPASS[0m  restore into scratch  [2mclean[0m
+  [32mPASS[0m  read restored row count  [2m4601[0m
+  [32mPASS[0m  restored data matches the source  [2m4601 source → 4601 restored[0m
+
+==============================================================
+  [32mBackup of `default` restores cleanly.[0m  Verified 2026-08-21T11:55:40+00:00
+  Recorded in out/restore_verification.json
+==============================================================

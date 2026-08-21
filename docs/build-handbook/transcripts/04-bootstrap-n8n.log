@@ -1,0 +1,9 @@
+Bootstrapping http://localhost:5678
+
+  ok    owner created            admin@aspiretss.com
+  ok    API key                 written to infra/.env
+
+  n8n      http://localhost:5678
+  login    admin@aspiretss.com / AspireDemo2026!
+
+  Next: python scripts/n8n_deploy.py

@@ -1,0 +1,110 @@
+Twenty  http://localhost:3000
+n8n     http://localhost:5678
+Mailpit http://localhost:8025
+
+[1mLEAD Form Intake — public form to CRM record[0m
+  [32mPASS[0m  form accepts submission  [2mHTTP 200[0m
+  [32mPASS[0m  person created  [2m1 found[0m
+  [32mPASS[0m  company created and linked  [2me524109d-b054-4b7c-a25f-bbcc5317f698[0m
+  [32mPASS[0m  consent record linked to the person
+  [32mPASS[0m  consent recorded as OPTED_IN  [2mOPTED_IN[0m
+  [32mPASS[0m  follow-up task raised with score  [2mBOOTCAMP: Proof Leadead7c423 (HOT, score 85)[0m
+  [32mPASS[0m  acknowledgement sent to the right address  [2mproof.ead7c423@northgate-ead7c423.com[0m
+
+[1mConsent gate — the send must be refused[0m
+  [32mPASS[0m  form accepts submission  [2mHTTP 200[0m
+  [32mPASS[0m  person still created
+  [32mPASS[0m  consent recorded as PENDING, not OPTED_IN  [2mPENDING[0m
+  [32mPASS[0m  NO email was sent  [2m0 message(s)[0m
+  [32mPASS[0m  refusal logged in the CRM with a reason  [2mBlocked: consent_PENDING[0m
+
+[1mMSG Tracked Link Redirect — click tracking[0m
+  [32mPASS[0m  a tracked link exists to test  [2mproof-6918fe7c[0m
+  [32mPASS[0m  click redirects to the destination  [2mHTTP 307 -> https://aspiretss.com/cmmc[0m
+  [32mPASS[0m  click counted in Twenty  [2m0 -> 1[0m
+
+[1mMSG Inbound Events — the consent loop closes[0m
+  [32mPASS[0m  form accepts submission
+  [32mPASS[0m  person created
+  [32mPASS[0m  acknowledgement sent while opted in  [2mloop.ebe0301b@ridgeline-ebe0301b.com[0m
+  [32mPASS[0m  unsubscribe event accepted  [2mHTTP 200[0m
+  [32mPASS[0m  consent flipped to OPTED_OUT  [2mOPTED_OUT[0m
+  [32mPASS[0m  source recorded as the unsubscribe link  [2mUNSUBSCRIBE_LINK[0m
+  [32mPASS[0m  raw event kept as proof  [2m{"type":"unsubscribe","email":"loop.ebe0301b@rid[0m
+  [32mPASS[0m  second submission accepted
+  [32mPASS[0m  NO second email sent after opting out  [2m0 message(s)[0m
+  [32mPASS[0m  refusal logged against the person  [2mBlocked: consent_PENDING[0m
+
+[1mEVT Webinar Registration — the top of the funnel[0m
+  [32mPASS[0m  a webinar exists to register for  [2mb0af7783[0m
+  [32mPASS[0m  registration webhook accepts the post  [2mHTTP 200[0m
+  [32mPASS[0m  person created  [2m1 found[0m
+  [32mPASS[0m  registration linked to person and event  [2m1 found[0m
+  [32mPASS[0m  registration points at the right webinar  [2mcfa2a499-8bcb-4c4f-b8c3-b77177a94553[0m
+  [32mPASS[0m  reminder counter starts at zero  [2m0[0m
+  [32mPASS[0m  consent recorded for the registration  [2mOPTED_IN[0m
+  [32mPASS[0m  confirmation sent  [2mwebinar.b0af7783@crestwood-b0af7783.com[0m
+
+[1mENR Bootcamp Enrolment — the revenue path[0m
+  [32mPASS[0m  enrolment webhook accepts the post  [2mHTTP 200[0m
+  [32mPASS[0m  person created  [2m1 found[0m
+  [32mPASS[0m  enrolment created  [2m1 found[0m
+  [32mPASS[0m  tier recorded as sent  [2mGOLD[0m
+  [32mPASS[0m  status is PAYMENT_SENT, not PAID  [2mPAYMENT_SENT[0m
+  [32mPASS[0m  a payment link was attached  [2mhttps://pay.aspiretss.com/gold[0m
+  [32mPASS[0m  a task was raised for a human  [2mEnrolment: Proof Enrol3dc0fc91 (GOLD)[0m
+
+[1mENR Bootcamp Enrolment — an unknown tier is refused[0m
+  [32mPASS[0m  no enrolment created for an unknown tier  [2m1 -> 1[0m
+
+[1mAI FrontDesk Handover — conversations keep their history[0m
+  [32mPASS[0m  AI webhook accepts the post  [2mHTTP 200[0m
+  [32mPASS[0m  person created  [2m1 found[0m
+  [32mPASS[0m  conversation stored as its own record  [2m1 found[0m
+  [32mPASS[0m  the summary survived  [2mProof conversation d816617b.[0m
+  [32mPASS[0m  NPS captured as a number  [2m9[0m
+  [32mPASS[0m  marked as handed over  [2mTrue[0m
+  [32mPASS[0m  handover raised a task  [2mAI handover: asking about the Splunk bootcamp pric[0m
+
+[1mSEG Tag Sync — 57 tags get a migration decision[0m
+  [32mPASS[0m  a tag exists to classify  [2m3fb82ac6[0m
+  [32mPASS[0m  SEG Tag Sync deployed
+  [32mPASS[0m  SEG Tag Sync starts
+  [32mPASS[0m  tag classified as a cohort segment  [2mSEGMENT[0m
+  [32mPASS[0m  recommended action is to convert it to a field  [2mCONVERT_TO_FIELD[0m
+
+[1mSYS Error Handler — failures are caught and alerted[0m
+  [32mPASS[0m  unknown slug does not 5xx  [2mHTTP 404[0m
+  [32mPASS[0m  failure probe deployed
+  [32mPASS[0m  failure probe fired  [2mHTTP 200[0m
+  [32mPASS[0m  failure recorded in Twenty as automationRun FAILED  [2mSYS Failure Probe (dev)[0m
+  [32mPASS[0m  failure message captured, not swallowed  [2mdeliberate failure probe [line 2][0m
+  [32mPASS[0m  alert delivered for the failure  [2m1 new alert(s)[0m
+
+[1mScheduled workflows — every job that runs unattended[0m
+  [32mPASS[0m  SUB Renewal Escalation starts
+  [32mPASS[0m  SUB Renewal Escalation completes without node errors  [2msuccess[0m
+  [32mPASS[0m  OPS Scheduled Sweeps starts
+  [32mPASS[0m  OPS Scheduled Sweeps completes without node errors  [2msuccess[0m
+  [32mPASS[0m  LEAD Nurture Sequence starts
+  [32mPASS[0m  LEAD Nurture Sequence completes without node errors  [2msuccess[0m
+  [32mPASS[0m  ENR Cohort Operations starts
+  [32mPASS[0m  ENR Cohort Operations completes without node errors  [2msuccess[0m
+  [32mPASS[0m  EVT Webinar Reminders starts
+  [32mPASS[0m  EVT Webinar Reminders completes without node errors  [2msuccess[0m
+  [32mPASS[0m  EVT Post-Webinar Follow-up starts
+  [32mPASS[0m  EVT Post-Webinar Follow-up completes without node errors  [2msuccess[0m
+  [32mPASS[0m  BOOK Trainer Appointment starts
+  [32mPASS[0m  BOOK Trainer Appointment completes without node errors  [2msuccess[0m
+
+[1mSYS Daily Health Check — the stack notices silence[0m
+  [32mPASS[0m  SYS Daily Health Check deployed
+  [32mPASS[0m  SYS Daily Health Check starts
+  [32mPASS[0m  SYS Daily Health Check completes without node errors  [2msuccess[0m
+  [32mPASS[0m  health check wrote an automationRun  [2m1 new row(s)[0m
+
+  [2mcleaned up 15/15 test record(s)[0m
+
+======================================================================
+  77/77 checks passed
+======================================================================

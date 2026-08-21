@@ -1,0 +1,366 @@
+<h1 class="part"><span class="num">Part 4</span>Understand it</h1>
+
+<p class="lede">Part 2 built the system. This part explains it, so that when you
+change something you know what you are changing — and so the traps that cost
+this build weeks are ones you never have to discover.</p>
+
+<h2>4.1 Seven containers and what each is for</h2>
+
+<table class="wide">
+<tr><th style="width:14%">Container</th><th style="width:20%">Image</th><th>Job, and what breaks without it</th></tr>
+<tr><td><b>db</b></td><td><code>postgres:16</code></td><td>Every record in the system. Runs <b>two separate databases</b> — one for the CRM, one for the automation engine — on one server. Lose this and you lose everything, which is why Part 6 is about backups.</td></tr>
+<tr><td><b>redis</b></td><td><code>redis</code></td><td>The CRM's job queue. The server hands background work to the worker through it.</td></tr>
+<tr><td><b>server</b></td><td><code>twentycrm/twenty</code></td><td>The CRM interface and its REST API. This is what you see in a browser.</td></tr>
+<tr><td><b>worker</b></td><td><code>twentycrm/twenty</code></td><td><b>The same image, run differently.</b> Handles everything on a clock — scheduled jobs, mailbox synchronisation. The interface is perfectly healthy while this is dead.</td></tr>
+<tr><td><b>n8n</b></td><td><code>n8nio/n8n</code></td><td>The automation engine. Hosts the public form, serves inbound webhooks, runs the 19 workflows.</td></tr>
+<tr><td><b>mailpit</b></td><td><code>axllent/mailpit</code></td><td>Accepts mail and shows it in a browser, delivering nothing. Laptop only — it is behind a profile flag the server never enables.</td></tr>
+<tr><td><b>backup</b></td><td><code>postgres:16</code></td><td>Dumps both databases and both file volumes nightly, keeps 30 days.</td></tr>
+<tr><td><b>caddy</b></td><td><code>caddy</code></td><td><b>Server only.</b> The reverse proxy: obtains the certificate, terminates HTTPS, and enforces who may reach what.</td></tr>
+</table>
+
+<h3>Ports</h3>
+
+<p>Only two are published on a laptop: <b>3000</b> for the CRM and <b>5678</b>
+for the automation engine, plus <b>8025</b> for the mail catcher. The database
+and Redis are <b>not</b> published at all — they are reachable only from inside
+the Docker network, by name. On the server, even 3000 and 5678 are bound to
+loopback and Caddy is the only thing listening publicly.</p>
+
+<div class="callout warn">
+<span class="lbl">Watch out — two different addresses for the same CRM</span>
+<p>Inside the Docker network the CRM is <code>http://server:3000</code>. From
+your browser it is <code>http://localhost:3000</code>. The workflows use the
+first, because the second does not resolve inside a container. On a server the
+public address is a third thing again. Getting these confused is the most common
+configuration error in this build — §5.9 covers the version of it that produces
+a completely silent failure.</p>
+</div>
+
+<h3>Volumes — what survives</h3>
+
+<table class="wide">
+<tr><th style="width:26%">Volume</th><th>Holds</th></tr>
+<tr><td><code>db-data</code></td><td>Both databases. The important one.</td></tr>
+<tr><td><code>server-local-data</code></td><td>Files people attach to CRM records. <b>Not in the database.</b> A database-only restore leaves records pointing at attachments that no longer exist, which is why the backup job archives this too.</td></tr>
+<tr><td><code>n8n-data</code></td><td>The automation engine's own files.</td></tr>
+</table>
+
+<p>Deleting a container loses nothing. Deleting a <i>volume</i> loses
+everything, which is the entire difference between <code>up.sh --down</code> and
+<code>up.sh --destroy</code>.</p>
+
+<h2>4.2 The object model</h2>
+
+<p>31 custom objects sit alongside the CRM's own 28. They fall into four
+groups.</p>
+
+<table class="wide">
+<tr><th style="width:22%">Group</th><th style="width:34%">Objects</th><th>Why they exist</th></tr>
+<tr><td><b>The training funnel</b></td><td><code>trainingProgram</code>, <code>cohort</code>, <code>enrollment</code>, <code>webinarEvent</code>, <code>webinarRegistration</code>, <code>aiConversation</code></td><td>The business. These carry the actual revenue path, and they are the reason "who paid for January and who is still on a payment link" is a view rather than a spreadsheet.</td></tr>
+<tr><td><b>The discipline</b></td><td><code>consentRecord</code>, <code>automationRun</code>, <code>messageLog</code></td><td>Who may be contacted and with what proof; what the automation did; what was sent and what was refused. §4.3 and §4.4.</td></tr>
+<tr><td><b>Channel records</b></td><td><code>campaign</code>, <code>emailTemplate</code>, <code>trackedLink</code>, <code>formDefinition</code>, <code>formSubmission</code>, <code>callLog</code>, <code>appointment</code>, <code>socialPost</code>, <code>review</code>, <code>landingPage</code></td><td>A home in the CRM for every capability the old platform had, including ones the CRM cannot itself execute. The record lives here; something else does the sending.</td></tr>
+<tr><td><b>Commerce and the rest</b></td><td><code>product</code>, <code>quote</code>, <code>quoteLineItem</code>, <code>invoice</code>, <code>payment</code>, <code>serviceSubscription</code>, <code>complianceEngagement</code>, <code>trainingAccount</code>, <code>phishingBaseline</code>, <code>crmTag</code>, <code>mergeVariable</code>, <code>membershipEnrollment</code></td><td>The remaining domains. Some are provisioned and empty on purpose — absence from a marketing system is not proof of absence from the company.</td></tr>
+</table>
+
+<div class="callout">
+<span class="lbl">Why give a home to things the CRM cannot execute</span>
+<p>The alternative is leaving channel data in whichever vendor sent it, which
+recreates the exact problem a migration is meant to solve: business truth
+scattered across systems that disagree. The CRM becomes the record layer for
+everything; execution stays wherever it has to be.</p>
+</div>
+
+<h3>Reading the schema file</h3>
+
+<p><code>reference/twenty_schema.yaml</code> is the source of truth. One object
+looks like this:</p>
+
+<pre>- nameSingular: enrollment
+  namePlural: enrollments
+  labelSingular: Enrollment
+  labelPlural: Enrollments
+  description: A student's place on a cohort, and whether they have paid.
+  icon: IconCertificate
+  fields:
+    - {name: status, label: Status, type: SELECT,
+       options: [ENQUIRY, PAYMENT_SENT, PAID, ATTENDED, COMPLETED, CANCELLED]}
+    - {name: tier, label: Tier, type: SELECT, options: [BRONZE, SILVER, GOLD]}
+    - {name: amount, label: Amount, type: CURRENCY}
+  relations:
+    - {to: person, label: Student, reverseLabel: Enrollments, type: MANY_TO_ONE}
+    - {to: cohort, label: Cohort, reverseLabel: Enrollments, type: MANY_TO_ONE}</pre>
+
+<p>Options are written as plain labels; the provisioner derives the stored
+value, the display position and a colour. Relations are created in a third pass,
+after every object exists, because a relation cannot be built before both of its
+ends do.</p>
+
+<h2>4.3 Pattern one — the consent gate</h2>
+
+<p>This is the most important design decision in the build.</p>
+
+<p class="lede">Exactly one workflow is allowed to talk to the mail server.</p>
+
+<p><code>VEND Send Email</code> is a sub-workflow. Every other workflow that
+wants to send something calls it. It does four things in order:</p>
+
+<ol>
+<li>Looks up the recipient's consent record for the email channel</li>
+<li>If the status is anything other than opted in — <b>refuses</b>, writes a
+<code>messageLog</code> row with the reason, and returns</li>
+<li>Otherwise renders the template and performs the SMTP transaction</li>
+<li>Writes a <code>messageLog</code> row recording what was sent</li>
+</ol>
+
+<p>Because there is only one path to the mail server, the check cannot be
+forgotten in a new workflow. Somebody adding workflow number twenty gets consent
+enforcement whether they thought about it or not.</p>
+
+<h3>Three rules that make the record meaningful</h3>
+
+<ul>
+<li><b>It is populated before the old system is switched off.</b> A suppression
+list is usually unrecoverable after account termination. Part 6 covers the
+import.</li>
+<li><b>Every send path consults it.</b> A consent record nothing checks provides
+no protection and considerable false assurance — worse than none at all.</li>
+<li><b>Unsubscribes write back into it.</b> <code>MSG Inbound Events</code>
+listens on a webhook for unsubscribe, bounce and complaint events and flips the
+record. Without this it drifts out of date within weeks.</li>
+</ul>
+
+<div class="callout danger">
+<span class="lbl">A ticked box is a request, not an override</span>
+<p>If somebody has ever opted out, bounced or complained, a <i>new</i> form
+submission does not re-subscribe them. It records <code>PENDING</code>, keeps
+the prior status as proof, and a human decides. This is deliberate: the most
+common way an organisation mails somebody who opted out is a re-submission
+silently resetting their state.</p>
+</div>
+
+<h2>4.4 Pattern two — every run is recorded</h2>
+
+<p>Every workflow finishes by writing an <code>automationRun</code> row: which
+workflow, whether it succeeded, and on failure the <b>real error message</b>,
+not a generic one.</p>
+
+<p>This costs one HTTP step per workflow and buys three things:</p>
+
+<ul>
+<li>"Did the renewal sweep run this morning?" is a query, not an investigation</li>
+<li><code>SYS Daily Health Check</code> can ask, every morning, whether each of
+the scheduled jobs ran in the last 26 hours — by name</li>
+<li>Whoever audits this system next does in an afternoon what took weeks
+here</li>
+</ul>
+
+<div class="callout warn">
+<span class="lbl">Watch out — the bug this pattern caused</span>
+<p>The health check originally read the most recent 20 runs and looked for the
+scheduled job names in that page. Form intake writes a run on <i>every</i>
+submission, so on a busy day the scheduled jobs fell off the page and the check
+reported a dead worker on a perfectly healthy one — or, worse, missed a sweep
+that had genuinely failed. It now queries each job <b>by name and time
+window</b>. Volume changes behaviour; §4.6.</p>
+</div>
+
+<h2>4.5 Pattern three — refuse rather than guess</h2>
+
+<p><code>ENR Bootcamp Enrolment</code> issues a payment link for the price tier
+a student chose. The links live in configuration. If a tier has no link
+configured, the workflow <b>throws</b>.</p>
+
+<p>The result is an HTTP 500 on the enrolment webhook, an alert, and a
+<code>FAILED</code> run record. No enrolment happens. That looks like a bug and
+is the opposite of one — consider the alternatives:</p>
+
+<table>
+<tr><th style="width:40%">If it guessed</th><th>Consequence</th></tr>
+<tr><td>Sent an empty link</td><td>Student cannot pay; looks like incompetence; possibly nobody notices for days</td></tr>
+<tr><td>Fell back to another tier's link</td><td><b>Student is charged the wrong amount.</b> A refund, an apology, and a reconciliation problem</td></tr>
+<tr><td>Skipped the email</td><td>Silent. The worst option: revenue simply stops arriving and nothing says so</td></tr>
+</table>
+
+<p>Failing loudly costs one enrolment and produces an alert naming the exact
+missing configuration. That is the cheapest of the four outcomes, so the
+workflow is written to take it.</p>
+
+<div class="callout ok">
+<span class="lbl">Good</span>
+<p>If you hit this during your build, you have not broken anything. Set
+<code>ENROL_PAYMENT_LINKS</code> in <code>infra/.env</code>, recreate the
+automation container so it picks the value up, and redeploy.</p>
+</div>
+
+<h2>4.6 Pattern four — the queries that fail silently</h2>
+
+<p class="lede">This is the most useful page in this book once you start
+changing things.</p>
+
+<p>The CRM's REST API does not reliably reject a malformed query. It accepts it,
+ignores the part it did not understand, and returns HTTP 200 with the wrong
+answer. Every row below is a real defect that reached a live run.</p>
+
+<table class="wide">
+<tr><th style="width:16%">Purpose</th><th style="width:36%">Correct</th><th>Wrong — and what happens</th></tr>
+<tr><td>Filter</td><td><code>?filter=field[eq]:value</code></td><td><code>?filter[field][eq]=value</code> — <b>ignored; returns the entire table.</b> The workflow then uses row zero. This one emailed a lead acknowledgement to an unrelated contact.</td></tr>
+<tr><td>Multiple</td><td><code>?filter=a[eq]:1,b[eq]:2</code> (comma means AND)</td><td>—</td></tr>
+<tr><td>In a set</td><td><code>?filter=status[in]:[A,B]</code></td><td>A bare comma list is a 400</td></tr>
+<tr><td>Substring</td><td><code>?filter=domainName.primaryLinkUrl[ilike]:%acme%</code></td><td>—</td></tr>
+<tr><td>Sort</td><td><code>?order_by=field[DescNullsLast]</code></td><td><code>orderBy=</code> — <b>silently ignored.</b> You get an arbitrary order and never know</td></tr>
+<tr><td>Relation</td><td><code>?filter=personId[eq]:&lt;uuid&gt;</code></td><td>The relation is called <code>person</code>; the filter key is <code>personId</code></td></tr>
+<tr><td>Page size</td><td><code>?limit=200</code> is the <b>hard ceiling</b></td><td><code>?limit=500</code> — <b>returns 200 rows, HTTP 200, no warning</b></td></tr>
+<tr><td>Timestamps</td><td><code>2026-08-16T21:12:12.072Z</code></td><td>An offset like <code>+00:00</code> is a <b>400</b>, in filters and in write bodies alike</td></tr>
+</table>
+
+<h3>The 200-row ceiling deserves its own paragraph</h3>
+
+<p>Every scheduled scan in this build originally asked for 500 records. The
+ceiling is 200, and asking for more returns 200 with no error. With a few dozen
+records in the test data, nothing noticed. In production some months in, the
+sweep would have silently processed the first 200 rows of a larger table and
+reported success.</p>
+
+<p>Any scan that can outgrow 200 rows must <b>page</b>: request a page, then
+follow the cursor until the response says there are no more. Compare what you
+hold against the reported total and fail if they differ — a sweep reporting "all
+clear" over the first page of a larger table is worse than one that errors.</p>
+
+<div class="callout danger">
+<span class="lbl">Two more that are pure trap</span>
+<p><b>Timezones.</b> Timestamps go to the CRM as UTC with a <code>Z</code>,
+always. The obvious way to format "now" in a workflow renders in the workflow's
+configured timezone. That is identical to UTC while the timezone is UTC — and
+the moment somebody sets a local timezone, which is a reasonable thing to do,
+every timestamped write starts failing at once, on a system that passed every
+test.</p>
+<p><b>Escaping.</b> Every value interpolated into a filter must be
+URL-encoded. A space, bracket or colon corrupts the query into a 400. This broke
+the error handler's own duplicate-check on a workflow name containing brackets:
+the failure was logged, the handler then errored on the next step, and <b>the
+alert was never sent</b>. A safety net that fails silently on some inputs is
+worse than no safety net, because it is trusted.</p>
+</div>
+
+<h2>4.7 Pattern five — three gates, and the bug each one catches</h2>
+
+<p>Three things stand between a change and production. Each exists because of a
+specific defect that got through.</p>
+
+<div class="step">
+<span class="n">GATE 1</span>
+<h4>The generator refuses to emit broken code</h4>
+<p>The 19 workflows are <b>generated</b> by a script, not hand-written, so they
+share conventions no human would maintain across nineteen files. The generator
+also lints what it is about to write and refuses on:</p>
+<ul>
+<li>An expression containing a nested object literal — the syntax ends at the
+first closing brace pair, so <code>{{ {"a": {"b": x}} }}</code> terminates early
+and the remainder is a syntax error</li>
+<li>A timestamp formatted without an explicit conversion to UTC</li>
+<li>A filter value interpolated without URL-encoding</li>
+</ul>
+</div>
+
+<div class="step">
+<span class="n">GATE 2</span>
+<h4>The validator checks every call against the live schema</h4>
+<p>All <b>91</b> API calls, against the instance you actually built: field names
+exist, filter syntax is the form the API honours, enumerated values are ones the
+object declares, no limit exceeds the ceiling. This is the gate that catches
+every row in §4.6.</p>
+</div>
+
+<div class="step">
+<span class="n">GATE 3</span>
+<h4>The proof suite makes it run and then interrogates the database</h4>
+<p><b>77 checks.</b> Not "does this workflow exist" — it submits the form,
+follows the redirect, posts the unsubscribe, breaks something deliberately, and
+then asks the CRM whether the records are there.</p>
+</div>
+
+<h3>What a passing suite still does not prove</h3>
+
+<p>A check only proves the code it actually executed. Three defects passed every
+check before they were found, and all three were <b>volume-dependent</b>:
+correct on a small dataset, broken in production some months in.</p>
+
+<table class="wide">
+<tr><th style="width:30%">Defect</th><th>Why the suite was green over it</th></tr>
+<tr><td>The nurture sequence asked for email templates that did not exist</td><td>On a fresh database no lead is old enough to be nudged, so the send path never ran. The suite went green over code that would have thrown on every send.</td></tr>
+<tr><td>Every scan asked for 500 rows against a 200 ceiling</td><td>With 32 submissions in the test data, the ceiling was never reached.</td></tr>
+<tr><td>The health check read the latest 20 runs</td><td>On a quiet system the scheduled jobs were in that page. On a busy one they are not.</td></tr>
+</table>
+
+<p class="lede">When you add a check, ask what data would have to exist for it to
+execute at all.</p>
+
+<h3>The fourth: a green suite over a broken browser path</h3>
+
+<p>The consent checkbox is worth its own note, because it is the sharpest
+example of this whole category.</p>
+
+<p>The intake workflow read the tick box by comparing it to boolean
+<code>true</code>. The proof suite posted the field directly and that comparison
+held, so the check passed. But a <b>real browser</b> posts a ticked checkbox as
+a JSON array of the selected option labels — the literal text
+<code>[""]</code> — which is not boolean <code>true</code>.</p>
+
+<p>The consequence: every genuine human who ticked the box was recorded as
+<code>PENDING</code>, the acknowledgement was refused, and the refusal looked
+exactly like correct consent enforcement. The suite was green. The system was
+broken for every real user and correct for every test.</p>
+
+<div class="callout ok">
+<span class="lbl">The fix, and the lesson</span>
+<p>The workflow now accepts an array, the string, or the boolean. More
+importantly, <b>the proof suite now posts the consent field byte-for-byte the
+way a browser posts it</b>. Reverting the workflow fix makes the suite fail in
+exactly the right two places. A test that does not use the real client's wire
+format is testing something other than your system.</p>
+</div>
+
+<h2>4.8 Traps in the automation engine itself</h2>
+
+<p>Six behaviours that are not obvious and each cost real time.</p>
+
+<table class="wide">
+<tr><th style="width:30%">Behaviour</th><th>Consequence</th></tr>
+<tr><td>An expression ends at the <b>first</b> closing brace pair</td><td>A nested object literal closes it early and the rest is a syntax error. Put a space between the braces.</td></tr>
+<tr><td>Sub-workflow references and error-workflow settings resolve by <b>id, not name</b></td><td>Bound by name they dangle silently. <b>Every workflow looks like it has error handling and none of it fires.</b> This is why deployment is a script that binds ids at deploy time.</td></tr>
+<tr><td>Form inputs post as <code>field-0</code>, <code>field-1</code>… <b>by position</b></td><td>Not by label. Posting under the labels returns HTTP 200 with every value silently null.</td></tr>
+<tr><td>The error workflow fires only for <b>production</b> executions</td><td>A manual run in the editor fails and the error workflow is never called. <b>Testing failure handling by hand proves nothing</b> — which is exactly why the failure probe is webhook-triggered.</td></tr>
+<tr><td>A webhook answers on receipt, <b>before</b> the workflow runs</td><td>HTTP 200 says nothing about the outcome. Assert on the record written, never on the status code.</td></tr>
+<tr><td>Code steps run sandboxed</td><td>Environment variables are read through the engine's own accessor, not the language's usual one.</td></tr>
+</table>
+
+<h2>4.9 The seventeen production workflows</h2>
+
+<table class="wide">
+<tr><th style="width:26%">Workflow</th><th>What it does</th></tr>
+<tr><td><b>LEAD Form Intake</b></td><td>Public form → dedupe → person, and a company only when the address is not a personal one → consent → score on intent → route to a queue with a deadline → task → acknowledgement → notify sales</td></tr>
+<tr><td><b>VEND Send Email</b></td><td>The <b>only</b> path to the mail server. Checks consent, renders, logs. No other workflow may send directly</td></tr>
+<tr><td><b>MSG Tracked Link Redirect</b></td><td>Counts the click, then redirects</td></tr>
+<tr><td><b>MSG Inbound Events</b></td><td>Closes the consent loop: an unsubscribe or bounce flips the record, and a later form submission cannot quietly undo it</td></tr>
+<tr><td><b>LEAD Nurture Sequence</b></td><td>Day 3, 7 and 14 after an enquiry, then stops. Stops early on a reply, an opt-out, or a real opportunity</td></tr>
+<tr><td><b>EVT Webinar Registration</b></td><td>Public webhook. Person, registration, consent, confirmation</td></tr>
+<tr><td><b>EVT Webinar Reminders</b></td><td>Hourly. 24-hour and 1-hour reminders, counted on the registration so a re-run cannot send twice</td></tr>
+<tr><td><b>EVT Post-Webinar Follow-up</b></td><td>Daily. Recording to the absent, survey to the present, attendance written back</td></tr>
+<tr><td><b>ENR Bootcamp Enrolment</b></td><td>Public webhook. Creates the enrolment unpaid, issues the tier's payment link, raises a task. <b>Never marks anything paid</b></td></tr>
+<tr><td><b>ENR Cohort Operations</b></td><td>Daily. Chases unpaid enrolments every third day, sends joining instructions, recomputes seat counts from the enrolments themselves</td></tr>
+<tr><td><b>BOOK Trainer Appointment</b></td><td>Daily. Reminds about tomorrow's meetings and flags the ones nobody attended</td></tr>
+<tr><td><b>AI FrontDesk Handover</b></td><td>One record per conversation instead of seven fields overwriting each other, and a task when it asks for a human</td></tr>
+<tr><td><b>SEG Tag Sync</b></td><td>Daily. Classifies each tag: stay a tag, become a field, or be dropped</td></tr>
+<tr><td><b>SUB Renewal Escalation</b></td><td>Daily. 90/60/30/7 days before renewal. Dormant while no subscriptions exist, <b>and says so</b> rather than reporting success over an empty table</td></tr>
+<tr><td><b>OPS Scheduled Sweeps</b></td><td>Finds what did <i>not</i> happen — stale opportunities, no-shows, overdue invoices</td></tr>
+<tr><td><b>SYS Error Handler</b></td><td>Catches any failure, records it, alerts, and suppresses alert storms</td></tr>
+<tr><td><b>SYS Daily Health Check</b></td><td>Asks every morning whether the scheduled jobs ran in the last 26 hours, <b>each queried by name</b></td></tr>
+</table>
+
+<div class="callout">
+<span class="lbl">Why payment is never marked automatically</span>
+<p>Money clears somewhere else. The enrolment workflow issues a link and records
+that it issued one; it does not pretend a link was a receipt. A person confirms
+payment with a small script, and only then do joining instructions fire.
+Part 6 covers it.</p>
+</div>

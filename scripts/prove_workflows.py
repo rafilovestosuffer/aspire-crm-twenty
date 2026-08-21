@@ -429,10 +429,18 @@ def prove_lead_form() -> None:
     # first, last, email, company, phone, interest, certification, message,
     # consent. Adding a field to the form without changing this sends every
     # later value into the wrong slot, and the form still answers 200.
+    # The consent box is posted byte-for-byte the way a BROWSER posts it.
+    # A ticked checkbox is sent as the literal text `[""]` — a JSON array of
+    # the selected option labels, empty here because the field declares no
+    # label of its own — and the Form Trigger hands the workflow an array.
+    # Posting `"true"` instead is what only a synthetic client does, and it
+    # is how this suite used to pass over a workflow that recorded PENDING
+    # consent, and therefore sent nothing, for every real person who ticked
+    # the box. Keep this value in the browser's format.
     status = submit_form(["Proof", f"Lead{tag}", email, f"Northgate {tag}",
                           "555-0100", "Splunk bootcamp",
                           "Splunk Core Certified User",
-                          "Automated proof run.", "true"])
+                          "Automated proof run.", '[""]'])
     if not check("form accepts submission", status == 200, f"HTTP {status}"):
         return
     time.sleep(6)

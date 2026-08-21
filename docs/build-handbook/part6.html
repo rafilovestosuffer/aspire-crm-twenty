@@ -1,0 +1,302 @@
+<h1 class="part"><span class="num">Part 6</span>Operate it</h1>
+
+<p class="lede">Building this takes a day. Running it takes fifteen minutes a
+month, provided those fifteen minutes are the right ones.</p>
+
+<h2>6.1 Backups, and why a backup is not a backup</h2>
+
+<p>The backup container dumps both databases and archives both file volumes
+every night into <code>infra/backups</code>, keeping 30 days.</p>
+
+<p class="lede">An untested backup is not a backup. It is a hope.</p>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/verify_restore.py
+<span class="p">$</span> python3 scripts/verify_restore.py --database n8n</pre>
+
+<p>This does not just check the file exists. It takes a fresh dump, creates a
+scratch database, restores into it, <b>counts every row in both and compares
+them exactly</b>, then drops the scratch copy. The live databases are never
+touched.</p>
+
+<!--TERM {"name": "13-verify-restore.log"} -->
+
+<div class="callout ok">
+<span class="lbl">Why the comparison is the point</span>
+<p>A restore that "succeeds" and produces an empty schema is the failure worth
+catching, and a bare exit code will not catch it. The row count is what turns
+"the command did not error" into "the data came back".</p>
+</div>
+
+<p>The date of the last success is recorded to a file, so it is a fact on disk
+rather than a memory. <b>Re-run it monthly.</b></p>
+
+<h3>Get the backups off the machine</h3>
+
+<p>That directory is on the same disk as the database, which means it is not a
+backup — it is a second copy of a file that dies with the same disk.</p>
+
+<pre class="cmd"><span class="p">$</span> ./infra/backup-offsite.sh user@backup-host:/srv/aspire-crm/</pre>
+
+<p>Schedule it nightly.</p>
+
+<div class="callout danger">
+<span class="lbl">Attachments are not in the database</span>
+<p>Files people attach to records live in a volume, not in PostgreSQL. A
+database-only restore gives you records pointing at attachments that no longer
+exist. The nightly job archives both volumes for exactly this reason — do not
+simplify it to a database dump.</p>
+</div>
+
+<h2>6.2 The watchdog</h2>
+
+<p>A dead worker is silent. The interface stays healthy, and scheduled work
+simply stops.</p>
+
+<pre class="cmd"><span class="p">$</span> sudo crontab -e
+<span class="c"># 0 * * * * /path/to/aspire-crm-twenty/infra/watchdog.sh</span></pre>
+
+<p>Hourly, it runs the same layer verification you ran during the build and
+posts to the alert webhook if anything is down. Without it, the first person to
+notice a dead worker is whoever eventually asks why no renewal reminders went
+out.</p>
+
+<h3>Two different alerting paths</h3>
+
+<table class="wide">
+<tr><th style="width:30%">Path</th><th>Covers</th></tr>
+<tr><td>The watchdog</td><td>The <b>stack</b> — a container down, a database unreachable, the proxy dead</td></tr>
+<tr><td><code>SYS Error Handler</code></td><td>The <b>workflows</b> — any automation that threw, with the real error, deduplicated so one broken thing does not produce a hundred messages</td></tr>
+</table>
+
+<p>You need both. Neither covers the other.</p>
+
+<h2>6.3 The morning check</h2>
+
+<p><code>SYS Daily Health Check</code> asks, every morning, whether each
+scheduled job actually ran in the last 26 hours — <b>querying each one by
+name</b>, for the reason in §4.4.</p>
+
+<p>It does <b>not</b> check backup freshness. That is the restore verification
+in §6.1, and it is the one thing on this page that has to be a human habit
+rather than a scheduled job.</p>
+
+<h2>6.4 Upgrades</h2>
+
+<p>Both image versions are <b>pinned</b> in the configuration file, and they
+must stay pinned.</p>
+
+<div class="callout danger">
+<span class="lbl">Never run <code>latest</code> in production</span>
+<p>It means the server pulls whatever was released that morning — a version
+nobody has run these workflows against, which can run database migrations you
+did not choose, at a time you did not choose. The automation engine changes
+node behaviour between releases, and a workflow built for one version can
+behave differently on the next <i>without erroring</i>.</p>
+</div>
+
+<p>To upgrade, deliberately:</p>
+
+<ol>
+<li>Read the release notes for everything between your version and the new one</li>
+<li><b>Verify a restore first</b> — §6.1. This is the moment you actually need it</li>
+<li>Change the pinned version</li>
+<li><code>docker compose … up -d</code></li>
+<li><code>python3 scripts/stack_verify.py</code></li>
+<li><code>python3 scripts/prove_workflows.py</code> — the whole point of having 77 checks</li>
+</ol>
+
+<h2>6.5 Importing the suppression list</h2>
+
+<p class="lede">Do this before the old system is terminated. It is usually
+unrecoverable afterwards.</p>
+
+<p>Export everyone who has unsubscribed, bounced or complained, then:</p>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/import_consent_csv.py unsubscribed.csv --dry-run
+<span class="p">$</span> python3 scripts/import_consent_csv.py unsubscribed.csv</pre>
+
+<p>Each address gets a person — created if missing — and an opted-out consent
+record on the email channel, sourced as an import. Re-running skips addresses
+that already carry a suppressing consent, so a second import is safe.</p>
+
+<div class="callout danger">
+<span class="lbl">Reconcile the counts on both sides</span>
+<p>Not approximately. Exactly. Emailing somebody who opted out is a compliance
+incident, and a count that is off by forty means forty people you are not
+allowed to contact are about to look contactable.</p>
+</div>
+
+<h2>6.6 Confirming payment</h2>
+
+<p>The enrolment workflow creates a row as <i>payment sent</i> and will not
+promote it, because a link being emailed is not money arriving. Joining
+instructions only fire on <i>paid</i>, so a person confirms:</p>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/mark_enrolment_paid.py --email student@example.com --yes</pre>
+
+<p>It refuses to run without <code>--yes</code>, and it sends no mail itself —
+the next scheduled run of the cohort workflow picks the change up and sends the
+joining instructions.</p>
+
+<h2>6.7 Troubleshooting</h2>
+
+<table class="wide">
+<tr><th style="width:34%">Symptom</th><th>Cause and fix</th></tr>
+<tr><td>The site loops on the login page</td><td>The configured public URL does not match the address in the browser — usually HTTP versus HTTPS, or a missing subdomain. It looks like an authentication bug and is not.</td></tr>
+<tr><td>The certificate is untrusted</td><td>Almost always DNS not resolving, or port 80 blocked. The proxy log says which. It retries on its own; you do not need to restart it.</td></tr>
+<tr><td>The object model step returns HTTP 500</td><td>§5.9. Not an authentication problem.</td></tr>
+<tr><td>Scheduled work stopped happening</td><td>The worker. Check it is <i>running</i>, not merely present. This is what the watchdog exists for.</td></tr>
+<tr><td>The automation container sits "starting" forever</td><td>Its health check must target the loopback IPv4 address, not the hostname — the container listens on IPv4 only, and the hostname often resolves to IPv6 first. The check then fails forever while the service is perfectly fine.</td></tr>
+<tr><td>The public form renders but submits nowhere</td><td>The automation host's public URL is still <code>localhost</code>. Preflight catches this.</td></tr>
+<tr><td>Mail "sends" but never arrives</td><td>An empty From address. Accepted by the engine, refused by a real relay.</td></tr>
+<tr><td>Every enrolment fails with a missing payment link</td><td>Working as designed — §4.5. Set the links, recreate the automation container, redeploy.</td></tr>
+<tr><td>A workflow silently does nothing</td><td>Check it is <i>active</i>. Then check its executions. Then check §4.6 — a filter the API ignored returns the whole table and the workflow uses row zero.</td></tr>
+<tr><td>Alerts stopped arriving</td><td>Check the alert URL is not still pointing at the local development sink. §5.3.</td></tr>
+<tr><td>A scan processes only some records</td><td>The 200-row ceiling. §4.6.</td></tr>
+<tr><td>Timestamped writes started failing all at once</td><td>Somebody set a non-UTC timezone. §4.6.</td></tr>
+</table>
+
+<h3>Reading the logs</h3>
+
+<pre class="cmd"><span class="p">$</span> docker compose -f infra/docker-compose.yml -f infra/docker-compose.vps.yml \
+    logs -f --tail=100 server worker n8n caddy</pre>
+
+<h2>6.8 The monthly fifteen minutes</h2>
+
+<table class="wide">
+<tr><th style="width:8%">✓</th><th>Task</th></tr>
+<tr><td>☐</td><td>Run the restore verification against both databases. Confirm the row counts match.</td></tr>
+<tr><td>☐</td><td>Confirm off-site copies are actually arriving, and open one.</td></tr>
+<tr><td>☐</td><td>Check the automation run history for failures nobody chased.</td></tr>
+<tr><td>☐</td><td>Check disk on the database volume. Execution history grows fastest.</td></tr>
+<tr><td>☐</td><td>Confirm the watchdog has run — and that it would have told you if it had not.</td></tr>
+<tr><td>☐</td><td>Read the release notes for both pinned images. Decide, do not drift.</td></tr>
+</table>
+
+<h2>6.9 The two things that can actually hurt</h2>
+
+<div class="callout danger">
+<span class="lbl">The consent list</span>
+<p>Unrecoverable after the old account is terminated. Export it, import it,
+reconcile it exactly — <b>before any termination date is agreed</b>, not after.
+§6.5.</p>
+</div>
+
+<div class="callout danger">
+<span class="lbl">The person who knows how this works</span>
+<p>If exactly one person can restore this system, that is the most likely thing
+to hurt you, and no amount of engineering fixes it. The bar: a second named
+operator who has completed one task from this part <b>unaided</b>. Reading it
+does not count.</p>
+</div>
+
+
+<h1 class="part"><span class="num">Part 7</span>Extend it</h1>
+
+<p class="lede">Everything here is a file in version control. That is what makes
+the system extensible rather than merely configurable.</p>
+
+<h2>7.1 Add a field or an object</h2>
+
+<p>The CRM lets you add objects and fields through its settings screens. <b>Do
+not.</b> A change made in the interface exists only on that instance: it is not
+reviewable, not revertable, and gone the next time somebody rebuilds. Six months
+later nobody knows why the field is there.</p>
+
+<div class="step">
+<span class="n">1</span>
+<h4>Edit the schema</h4>
+<pre>- nameSingular: enrollment
+  fields:
+    - {name: status, label: Status, type: SELECT, options: [...]}
+    - {name: referralSource, label: Referral Source, type: TEXT}   # new</pre>
+</div>
+
+<div class="step">
+<span class="n">2</span>
+<h4>Preview, then apply</h4>
+<pre class="cmd"><span class="p">$</span> python3 scripts/twenty_provision.py --dry-run --only enrollment
+<span class="p">$</span> python3 scripts/twenty_provision.py --only enrollment</pre>
+<p>Existing objects and fields are skipped, never duplicated. Only the new field
+is created.</p>
+</div>
+
+<div class="step">
+<span class="n">3</span>
+<h4>Re-validate and re-prove</h4>
+<pre class="cmd"><span class="p">$</span> python3 scripts/validate_workflow_queries.py
+<span class="p">$</span> python3 scripts/prove_workflows.py</pre>
+</div>
+
+<div class="callout warn">
+<span class="lbl">Watch out</span>
+<p>Removing a field from the schema does <b>not</b> remove it from the instance
+— the provisioner only creates. Deleting a field deletes its data, so that
+remains a deliberate manual act.</p>
+</div>
+
+<h2>7.2 Add a workflow</h2>
+
+<p>The workflows are <b>generated</b>, not hand-written. Editing the JSON
+directly works until the next regeneration overwrites it.</p>
+
+<div class="step">
+<span class="n">1</span>
+<h4>Add a builder function</h4>
+<p>In the generator, write a function that returns the workflow, and add it to
+the list of builders at the bottom. Copy the closest existing one — every
+convention you need is already in it.</p>
+</div>
+
+<div class="step">
+<span class="n">2</span>
+<h4>Reuse the patterns rather than reinventing them</h4>
+<table class="wide">
+<tr><th style="width:30%">Need</th><th>Do this</th></tr>
+<tr><td>Send an email</td><td>Call <code>VEND Send Email</code>. <b>Never talk to the mail server directly</b> — that bypasses the consent gate</td></tr>
+<tr><td>Record that it ran</td><td>Finish with an <code>automationRun</code> write, success or failure</td></tr>
+<tr><td>Handle failure</td><td>Set the error workflow. The deploy script binds the id</td></tr>
+<tr><td>Scan a table</td><td>Page it. Assume it will outgrow 200 rows, because it will</td></tr>
+<tr><td>Interpolate into a filter</td><td>URL-encode it. The generator refuses to build without this</td></tr>
+<tr><td>Write a timestamp</td><td>Convert to UTC explicitly. The generator refuses without this too</td></tr>
+</table>
+</div>
+
+<div class="step">
+<span class="n">3</span>
+<h4>Generate, validate, deploy, prove</h4>
+<pre class="cmd"><span class="p">$</span> python3 scripts/build_n8n_workflows.py
+<span class="p">$</span> python3 scripts/validate_workflow_queries.py
+<span class="p">$</span> python3 scripts/n8n_deploy.py --dev --activate
+<span class="p">$</span> python3 scripts/prove_workflows.py</pre>
+</div>
+
+<h2>7.3 Add a proof check</h2>
+
+<p>A workflow without a check is a workflow you are trusting rather than
+verifying. Add a function that exercises the <b>real</b> path — post to the real
+webhook, submit the real form — waits, then asks the CRM what exists.</p>
+
+<div class="callout danger">
+<span class="lbl">The two rules that make a check worth having</span>
+<p><b>Use the real client's wire format.</b> The consent bug in §4.7 hid behind a
+test that posted a field the way no browser posts it. If a browser sends an
+array, send an array.</p>
+<p><b>Ask what data must exist for your check to execute at all.</b> If the
+answer is "more than a fresh database has", your check will pass over broken
+code — which is exactly how three defects survived here.</p>
+</div>
+
+<h2>7.4 Rules that must not be broken</h2>
+
+<table class="wide">
+<tr><th style="width:38%">Rule</th><th>What happens if you break it</th></tr>
+<tr><td>Only <code>VEND Send Email</code> talks to the mail server</td><td>The consent gate becomes optional, and one day somebody who opted out gets mailed</td></tr>
+<tr><td>Never remove the API throttle</td><td>Rate limiting, then partial data, then a sweep that reports success over half a table</td></tr>
+<tr><td>Never commit the environment file, backups, or the generated password</td><td>Every secret in the system, in version control, permanently</td></tr>
+<tr><td>Never run <code>latest</code></td><td>An unattended migration at a time nobody chose</td></tr>
+<tr><td>Never seed demo data on a server</td><td>Fake records indistinguishable from real ones, three months later</td></tr>
+<tr><td>Never deploy the development workflows to a server</td><td>Alerts swallowed by a sink; a probe that throws on purpose</td></tr>
+<tr><td>Never edit the object model in the interface</td><td>A change that exists on one instance and vanishes on the next rebuild</td></tr>
+<tr><td>Never mark payment automatically</td><td>The CRM starts asserting that money arrived when it has not</td></tr>
+</table>

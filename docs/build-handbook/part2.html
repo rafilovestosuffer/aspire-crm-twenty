@@ -1,0 +1,443 @@
+<h1 class="part"><span class="num">Part 2</span>Build it on your machine</h1>
+
+<p class="lede">Eleven commands. About forty minutes, most of it waiting. At the
+end you will have the whole system running locally, with realistic data in it
+and a suite that has proved the automation works.</p>
+
+<p>Every terminal listing in this part is real output from an actual run of this
+build. Where your screen differs, that difference means something — §2.14
+collects the common ones.</p>
+
+<h2>2.1 Install the prerequisites</h2>
+
+<p>You need Docker with Compose v2, and Python 3.9 or newer. Pick your operating
+system.</p>
+
+<h3>Linux</h3>
+
+<pre class="cmd"><span class="p">$</span> curl -fsSL https://get.docker.com | sudo sh
+<span class="p">$</span> sudo usermod -aG docker $USER
+<span class="p">$</span> sudo apt install -y python3 python3-yaml curl openssl git</pre>
+
+<div class="callout warn">
+<span class="lbl">Watch out</span>
+<p>After <code>usermod</code> you must <b>log out and back in</b>. The group
+change only applies to new sessions, and until you do, every Docker command
+fails with a permission error that does not mention groups.</p>
+</div>
+
+<h3>macOS</h3>
+
+<p>Install Docker Desktop from docker.com, start it, and wait for the whale icon
+to say <i>Running</i>. Python 3 is already present.</p>
+
+<h3>Windows</h3>
+
+<p>Install Docker Desktop, then open <b>Settings → Resources → WSL
+Integration</b>, enable your Linux distribution, and click <i>Apply &amp;
+Restart</i>. Then close your terminal and open a new one. Do all the work from
+inside WSL, not from PowerShell.</p>
+
+<div class="callout danger">
+<span class="lbl">Do not</span>
+<p>Do not run <code>apt install docker.io</code> inside WSL. That gives you a
+Docker command with no Compose plugin, which produces a confusing half-working
+setup. Docker Desktop's WSL integration is the supported path.</p>
+</div>
+
+<h3>Check all three</h3>
+
+<pre class="cmd"><span class="p">$</span> docker --version
+<span class="p">$</span> docker compose version      <span class="c"># v2 — note the SPACE, not a hyphen</span>
+<span class="p">$</span> python3 --version           <span class="c"># 3.9 or newer</span></pre>
+
+<p>If <code>docker compose version</code> fails but <code>docker --version</code>
+works, the Compose plugin is missing. On Linux:
+<code>sudo apt install -y docker-compose-plugin</code>. On Windows, that is the
+signature of unfinished WSL integration above.</p>
+
+<h2>2.2 Get the code</h2>
+
+<pre class="cmd"><span class="p">$</span> git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
+<span class="p">$</span> cd aspire-crm-twenty</pre>
+
+<p>Everything from here runs from that directory.</p>
+
+<div class="callout">
+<span class="lbl">Why the repository is small</span>
+<p>Nothing about the CRM or the automation engine is vendored here. This
+repository is the <i>recipe</i>: a description of which published images to run,
+a schema, a workflow library, and the scripts that assemble them. Docker runs
+the kitchen.</p>
+</div>
+
+<h2>2.3 The impatient path</h2>
+
+<p>One command runs all eleven steps in order and stops at the first failure:</p>
+
+<pre class="cmd"><span class="p">$</span> ./infra/rebuild.sh</pre>
+
+<p>If it finishes green, you are done — jump to Part 3 and go look at what you
+built. If it stops somewhere, find that step below; each one is a section.</p>
+
+<p>The rest of this part runs the same eleven steps <b>one at a time</b>, which
+is how you should do it the first time. You learn what each piece does, and when
+something breaks later you will know which piece owns it.</p>
+
+<div class="callout">
+<span class="lbl">Why every step is a gate</span>
+<p><code>rebuild.sh</code> refuses to continue past a failure rather than
+carrying on and reporting success at the end. The expensive defects in this
+system were all silent — a workflow deployed but never switched on, a database
+query that returned the whole table instead of one row. A green run of this
+script is a claim that the system works, so it fails loudly rather than
+overstating.</p>
+</div>
+
+<h2>2.4 Step 1 — Start the stack</h2>
+
+<pre class="cmd"><span class="p">$</span> ./infra/up.sh</pre>
+
+<p>This does five things: creates <code>infra/.env</code> from the example if it
+does not exist, generates any missing secret, downloads the images, starts all
+seven containers, and then waits until the CRM answers a health check.</p>
+
+<p>The first run downloads about 3.6 GB and the CRM builds its database schema
+from scratch, which takes several minutes on its own. Later runs take seconds.</p>
+
+<h4>What it prints</h4>
+<!--TERM {"name": "01-up.log", "tail": 14} -->
+
+<div class="callout ok">
+<span class="lbl">Good</span>
+<p><code>Twenty healthy</code> followed by <code>worker running</code>. Both
+lines matter, and the second one matters more than it looks — see below.</p>
+</div>
+
+<div class="callout danger">
+<span class="lbl">Do not lose these two keys</span>
+<p><code>up.sh</code> generates four secrets into <code>infra/.env</code>. Two
+of them are unrecoverable:</p>
+<ul>
+<li><code>ENCRYPTION_KEY</code> — lose it and <b>every secret the CRM holds
+becomes permanently unreadable</b>. Connected mailboxes, stored tokens, all of
+it. There is no recovery path and no support line.</li>
+<li><code>N8N_ENCRYPTION_KEY</code> — lose it and every stored automation
+credential is gone.</li>
+</ul>
+<p>Copy both somewhere other than this machine, now, before you continue. A
+password manager is fine. The file is deliberately excluded from version
+control, so it will not be backed up by accident.</p>
+</div>
+
+<h3>Why the worker gets its own line</h3>
+
+<p>Two containers run the same CRM image. The <b>server</b> serves the interface
+and the API. The <b>worker</b> runs everything on a clock: scheduled jobs and
+mailbox synchronisation.</p>
+
+<p>The interface looks completely healthy while the worker is dead. Nothing on
+screen is red. Scheduled work simply stops happening, silently, and you find out
+weeks later. That is why the worker is checked separately here, again in step 2,
+and again at the end of the build.</p>
+
+<div class="callout">
+<span class="lbl">Why the health check waits five minutes</span>
+<p>On first boot the CRM runs its full database migration set and answers
+nothing meanwhile. Without a long grace period those attempts count as failures,
+the container is declared unhealthy, and the worker — which waits for the server
+to be healthy before starting — gives up and never starts at all. The server
+then recovers on its own and everything looks fine, except no scheduled job ever
+runs again. That is a real failure this configuration exists to prevent.</p>
+</div>
+
+<h2>2.5 Step 2 — Verify every layer</h2>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/stack_verify.py</pre>
+
+<p>This checks each layer <i>independently</i> rather than inferring health from
+one service being up: containers, then the database, then Redis, then each
+application's health endpoint and API.</p>
+
+<!--TERM {"name": "02-stack-verify.log"} -->
+
+<div class="callout ok">
+<span class="lbl">Good</span>
+<p><code>Stack healthy</code>. The three warnings are expected on a first run:
+the two API keys do not exist yet — steps 3 and 4 create them — and the first
+backup does not run for 24 hours.</p>
+</div>
+
+<h2>2.6 Step 3 — Create the CRM workspace</h2>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/bootstrap_workspace.py</pre>
+
+<p>Normally you would create the first account by clicking through a signup form
+in a browser. This does the same thing over the API and writes the resulting API
+key straight into <code>infra/.env</code>.</p>
+
+<!--TERM {"name": "03-bootstrap-workspace.log"} -->
+
+<div class="callout">
+<span class="lbl">Why this is scripted rather than clicked</span>
+<p>A build that needs somebody to click through a signup form and copy a key by
+hand is a build that cannot be reproduced, cannot be tested, and cannot be
+handed to anyone else. Every manual step is a step that will be done differently
+next time. That is why there is not a single "now open your browser and…"
+instruction in this entire part.</p>
+</div>
+
+<h2>2.7 Step 4 — Create the automation owner</h2>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/bootstrap_n8n.py</pre>
+
+<!--TERM {"name": "04-bootstrap-n8n.log"} -->
+
+<p>Same idea, same reason. The key it creates is deliberately <b>not</b> full
+admin: it can manage workflows, credentials and executions, and nothing else.
+The key is stored on disk and used by automation, so it gets the narrowest
+permission set that works.</p>
+
+<h2>2.8 Step 5 — Build the object model</h2>
+
+<p>This is the step that turns a generic CRM into yours.</p>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/twenty_provision.py --dry-run   <span class="c"># preview, sends nothing</span>
+<span class="p">$</span> python3 scripts/twenty_provision.py</pre>
+
+<p>It reads <code>reference/twenty_schema.yaml</code> and creates every object,
+field and relation in three passes — objects first, then scalar fields, then
+relations, because a relation cannot be created before both of its ends
+exist.</p>
+
+<!--TERM {"name": "05-provision.log", "tail": 16} -->
+
+<div class="callout ok">
+<span class="lbl">Good</span>
+<p><code>failed 0</code>. The counts add up: <b>31 objects + 172 fields + 26
+relations = 229 definitions</b>, of which 228 were created and 1 already
+existed.</p>
+</div>
+
+<p>It is <b>idempotent</b> — anything already present is skipped rather than
+duplicated, so a run that fails halfway is fixed by running it again. Try it:</p>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/twenty_provision.py
+<span class="c"># created 0 · already present 229 · failed 0</span></pre>
+
+<h3>Changing the model</h3>
+
+<p>Because the schema is a file, adding a field is an edit and a re-run rather
+than twenty minutes of clicking — and the change is reviewable, revertable, and
+identical on every machine that runs it. §7.1 walks through adding one.</p>
+
+<div class="callout warn">
+<span class="lbl">Watch out — this is the step that fails on a server</span>
+<p>If this returns <b>HTTP 500 with an empty body</b> on a server deployment, it
+is almost never an authentication problem, however much it looks like one. The
+CRM's metadata API is not served in-process: the server makes an HTTP call to
+its <i>own public URL</i> and hands back the result. If the server cannot reach
+or trust that URL, every metadata request fails with a bare 500 and <b>no log
+line at all</b>, while the ordinary API keeps working perfectly. §5.9 has the
+diagnosis and the fix. On a laptop this cannot happen, because the URL is
+<code>localhost</code>.</p>
+</div>
+
+<h2>2.9 Step 6 — Seed realistic data</h2>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/seed_demo_data.py --wipe</pre>
+
+<p>Empty screens do not teach anything, and they do not demo. This fills every
+view with data shaped like a real business: companies, people, opportunities,
+subscriptions, compliance engagements, training accounts, phishing scores,
+consent records and tasks.</p>
+
+<!--TERM {"name": "06-seed.log", "tail": 14} -->
+
+<p>Two properties worth knowing. It is <b>deterministic</b> — a fixed seed means
+every rebuild produces identical records, so a demo looks the same every time
+you rehearse it. And it is <b>paced</b> to stay under the CRM's rate limit,
+which is why it takes about six minutes rather than thirty seconds.</p>
+
+<div class="callout">
+<span class="lbl">Why <code>--wipe</code></span>
+<p>Without it, a second run adds another 448 records instead of reproducing the
+same dataset. <code>--wipe</code> deletes only what the seeder itself created,
+identified by the reserved <code>.example.com</code> address domain and a
+marker on seeded tasks. It will not touch real records. With no seeded parent
+found it deletes nothing at all, by design.</p>
+</div>
+
+<div class="callout danger">
+<span class="lbl">Do not</span>
+<p>Never run the seeder on a production server. It is demo data, and it is
+indistinguishable from real data three months later when somebody is trying to
+work out why the pipeline totals are wrong.</p>
+</div>
+
+<h2>2.10 Step 7 — Create the automation credentials</h2>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/n8n_credentials.py</pre>
+
+<!--TERM {"name": "07-credentials.log"} -->
+
+<p>Two credentials, both referenced by <i>name</i> from the workflows. On a
+laptop the mail credential points at the local catcher, so the entire send path
+— consent check, template render, log write, SMTP transaction — runs for real
+with no mail account and no possibility of reaching a live human.</p>
+
+<div class="callout">
+<span class="lbl">Why credentials are never inlined into a workflow</span>
+<p>A credential typed into a step is a credential in your version control, in
+every export, and in every screenshot. The store keeps them encrypted and the
+workflow refers to them by name. This is also why losing
+<code>N8N_ENCRYPTION_KEY</code> loses all of them.</p>
+</div>
+
+<h2>2.11 Step 8 — Validate every API call</h2>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/validate_workflow_queries.py</pre>
+
+<!--TERM {"name": "08-validate.log"} -->
+
+<p>Ninety-one calls, checked against the schema of the instance you just built:
+every field name exists, every filter uses the correct syntax, every enumerated
+value is one the object actually declares.</p>
+
+<div class="callout danger">
+<span class="lbl">Why this step exists</span>
+<p>The CRM does not reliably reject a malformed query. Send it the filter syntax
+most people reach for first and it <b>ignores the filter and returns the entire
+table</b>. The workflow then happily uses row zero. Nothing errors, nothing is
+logged.</p>
+<p>In the run that caused this script to be written, a lead acknowledgement was
+emailed to a completely unrelated contact, and the only reason anyone noticed
+was that the name in the email was wrong. Every rule this script enforces is a
+silent-wrong-data failure that reached a live run. §4.6 lists them all.</p>
+</div>
+
+<p>It also runs without a stack — <code>--offline</code> checks against the
+schema file instead of a live instance, which is what the continuous-integration
+pipeline uses.</p>
+
+<h2>2.12 Step 9 — Deploy and switch on</h2>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/n8n_deploy.py --dev --activate</pre>
+
+<!--TERM {"name": "09-deploy.log", "tail": 24} -->
+
+<p>Order matters, and the script enforces it: <code>SYS Error Handler</code> and
+<code>VEND Send Email</code> go first because every other workflow refers to
+them.</p>
+
+<div class="callout warn">
+<span class="lbl">Watch out — what <code>--dev</code> means</span>
+<p>Two of the 19 workflows exist only to test the other 17. One is a probe that
+throws an exception on purpose; the other catches alerts so alerting can be
+proved without a chat account. <b>Both are correct on a laptop and dangerous on
+a server</b>, where the alert sink would swallow alerts meant for a human. The
+server deployment never passes <code>--dev</code>, and §5.8 says so again.</p>
+</div>
+
+<div class="callout">
+<span class="lbl">Why deployment is a script rather than an import</span>
+<p>The source of truth is the JSON in version control, not whatever is currently
+in the automation engine's database. The script is idempotent: a workflow whose
+name already exists is <i>updated</i>, never duplicated. It also rebinds
+sub-workflow references to the ids in <i>this</i> environment — references
+resolve by id, not by name, and a workflow imported by hand into a fresh
+instance ends up pointing at nothing while looking perfectly correct.</p>
+</div>
+
+<h2>2.13 Step 10 — Prove it actually works</h2>
+
+<p>This is the step that separates this build from most.</p>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/prove_workflows.py</pre>
+
+<p>It does not check that workflows exist. It <b>submits the real form</b>,
+follows the real redirect, posts a real unsubscribe, breaks something on
+purpose, triggers every scheduled job, and then asks the CRM whether the records
+it was supposed to create are actually there.</p>
+
+<!--TERM {"name": "10-prove.log", "head": 26} -->
+
+<p>…and after seventy-seven such assertions across eleven groups:</p>
+
+<!--TERM {"name": "10-prove.log", "tail": 6} -->
+
+<div class="callout ok">
+<span class="lbl">Good</span>
+<p><code>77/77 checks passed</code>, and <code>cleaned up 15/15 test
+record(s)</code> — the suite removes everything it created, so your seeded
+demo data is not polluted with records called "Proof Lead".</p>
+</div>
+
+<h3>What each group proves</h3>
+
+<table class="wide">
+<tr><th style="width:26%">Group</th><th>The claim it establishes</th></tr>
+<tr><td>Lead capture</td><td>A form submission produces a person, a company, a linked consent record, a scored task, and an acknowledgement <b>to the right address</b></td></tr>
+<tr><td>Consent gate</td><td>A contact who has not consented gets <b>no email</b>, and the refusal is logged with its reason</td></tr>
+<tr><td>Tracked link</td><td>A click redirects to the destination and is counted</td></tr>
+<tr><td>Inbound events</td><td>An unsubscribe flips consent, and a <i>later</i> form submission cannot quietly undo it</td></tr>
+<tr><td>Webinar registration</td><td>Person, registration, correct event link, reminder counter at zero, confirmation sent</td></tr>
+<tr><td>Enrolment</td><td>The revenue path creates an unpaid enrolment — and <b>refuses an unknown price tier</b> rather than guessing</td></tr>
+<tr><td>AI handover</td><td>A conversation is stored as its own record, and asking for a human raises a task</td></tr>
+<tr><td>Tag sync</td><td>Each tag receives a migration decision</td></tr>
+<tr><td>Error handling</td><td>A deliberate failure produces a FAILED record <b>carrying the real error message</b>, plus a delivered alert</td></tr>
+<tr><td>Scheduled work</td><td>All seven scheduled jobs start and finish with no step errors</td></tr>
+<tr><td>Health check</td><td>The morning check runs and records that it ran</td></tr>
+</table>
+
+<h2>2.14 Step 11 — Verify everything again</h2>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/stack_verify.py</pre>
+
+<!--TERM {"name": "11-stack-verify-final.log"} -->
+
+<div class="callout ok">
+<span class="lbl">Good</span>
+<p>Three lines confirm the build landed: <b>59 objects (31 custom)</b>,
+<b>10/10</b> of the business-specific objects present, and <b>19 workflows, 19
+active</b>.</p>
+</div>
+
+<p>This runs last, not first, deliberately. The worker can be dead while every
+other check passes, and a build that ends green with no worker has no scheduled
+jobs and no mailbox sync. Re-checking after everything has settled catches
+it.</p>
+
+<h3>And the containers themselves</h3>
+
+<pre class="cmd"><span class="p">$</span> docker compose -f infra/docker-compose.yml ps</pre>
+
+<!--TERM {"name": "12-compose-ps.log"} -->
+
+<h2>2.15 When something goes wrong</h2>
+
+<table class="wide">
+<tr><th style="width:32%">What you see</th><th>What it means, and what to do</th></tr>
+<tr><td><code>docker: command not found</code></td><td>Docker is not installed, or on Windows the WSL integration is off. §2.1.</td></tr>
+<tr><td><code>docker compose</code> not recognised, but <code>docker</code> works</td><td>The Compose v2 plugin is missing. On Windows this is the signature of half-finished Docker Desktop WSL integration.</td></tr>
+<tr><td><code>permission denied</code> on the Docker socket</td><td>You ran <code>usermod -aG docker</code> but did not start a new session. Log out and back in.</td></tr>
+<tr><td>Daemon not reachable</td><td>Docker Desktop is not running. Start it and wait for <i>Running</i>.</td></tr>
+<tr><td>Never becomes healthy</td><td>Read the log: <code>docker compose -f infra/docker-compose.yml logs server</code>. On a first boot, give it five minutes before concluding anything.</td></tr>
+<tr><td><code>worker STILL not running</code></td><td>Scheduled work will silently not happen. Usually the server took longer than the health grace period on first boot. <code>docker compose -f infra/docker-compose.yml up -d worker</code>.</td></tr>
+<tr><td>Provisioner returns HTTP 500</td><td>On a laptop, check the CRM is actually healthy. On a server, this is the self-URL problem — §5.9.</td></tr>
+<tr><td>Automation API answers <code>Cannot GET /api/v1/workflows</code></td><td>The container restarted and has not finished booting. Wait ten seconds and re-run.</td></tr>
+<tr><td>Enrolment check fails with HTTP 500</td><td><b>Correct behaviour</b> when no payment links are configured. §4.5 explains why this is a feature. Set <code>ENROL_PAYMENT_LINKS</code> in <code>infra/.env</code>, recreate the automation container, redeploy.</td></tr>
+<tr><td>Everything worked yesterday, nothing works today</td><td>Check the containers are actually up. <code>./infra/up.sh</code> is safe to re-run and restarts anything stopped.</td></tr>
+</table>
+
+<h3>Starting over</h3>
+
+<pre class="cmd"><span class="p">$</span> ./infra/up.sh --down       <span class="c"># stop, keep all data</span>
+<span class="p">$</span> ./infra/up.sh              <span class="c"># start again</span></pre>
+
+<div class="callout danger">
+<span class="lbl">Do not, unless you mean it</span>
+<p><code>./infra/up.sh --destroy</code> deletes the databases and every
+workflow. It asks you to type <code>DESTROY</code> in full, which is the only
+protection you get. There is no undo.</p>
+</div>

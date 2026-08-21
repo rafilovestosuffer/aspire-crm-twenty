@@ -1,0 +1,274 @@
+<h1 class="part"><span class="num">Part 1</span>Why the system is shaped this way</h1>
+
+<p class="lede">You are about to provision 31 custom objects. Somebody chose
+those 31, and not 20 or 60. This part explains how, because the same method is
+how you will decide what <i>your</i> version needs — and because a data model
+you do not understand is one you cannot safely change.</p>
+
+<p>If you only want to build, skip to Part 2 and come back. Nothing here is a
+prerequisite. But the single most common way a migration like this fails is
+that somebody rebuilt what they assumed was in use, went live, and discovered
+in week three that a form nobody had inventoried was still feeding leads
+somewhere.</p>
+
+<h2>1.1 The problem this method solves</h2>
+
+<p>A marketing-and-CRM platform accumulates configuration the way a house
+accumulates cables. After a few years there are forms nobody submits, workflows
+that were drafted and never switched on, tags that encode a process somebody
+left, and automations that quietly do something important four times a year.</p>
+
+<p>When you replace that platform you have to answer one question, for every
+feature it offers:</p>
+
+<p class="lede">Do we actually use this — and if we do, what replaces it?</p>
+
+<p>There are two wrong ways to answer. Rebuilding everything wastes months on
+features nobody touches. Rebuilding what you remember silently kills the ones
+you forgot. The method below answers it from evidence instead.</p>
+
+<h2>1.2 Four rules</h2>
+
+<div class="step">
+<span class="n">RULE 1</span>
+<h4>Extract with tools, judge with people</h4>
+<p>The configuration is already structured data sitting behind an API. Read it
+with a script. Photographing screens is slow, incomplete, and gives you no way
+to know what you missed. Anything a script can pull, a script pulls; humans then
+decide what it means.</p>
+</div>
+
+<div class="step">
+<span class="n">RULE 2</span>
+<h4>Discard before you map</h4>
+<p>Every feature retired is a feature nobody has to migrate, test, document or
+explain. Filtering by actual usage typically removes a third to a half of the
+surface area. Do it <i>first</i>, while it is cheap.</p>
+</div>
+
+<div class="step">
+<span class="n">RULE 3</span>
+<h4>Evidence, or <code>unknown</code> — never a guess</h4>
+<p>Every "in use" answer names its source: an endpoint that returned a count, a
+row in an export, a dated observation in the interface. A feature nobody has
+checked is recorded as <code>unknown</code>, and <code>unknown</code> is a
+legitimate, reportable answer.</p>
+<p><b>Guessing "no" is how a live automation dies at cutover</b>, and nobody
+notices for three weeks. Guessing "yes" only wastes effort. The two errors are
+not symmetrical, so the method never guesses at all.</p>
+</div>
+
+<div class="step">
+<span class="n">RULE 4</span>
+<h4>Configuration, never contacts</h4>
+<p>The audit needs structure, not people. No contact records, no message bodies,
+no call recordings, no form-submission payloads. Endpoints that might carry
+personal data have their response bodies <b>discarded at the moment they are
+read</b> — only counts and field names are written to disk.</p>
+<p>This is a governance position and a practical one. It also means the audit
+can be handed to anyone without a data-protection conversation.</p>
+</div>
+
+<h2>1.3 The six tiers</h2>
+
+<p>The work is ordered so that each tier is useful on its own. If the audit is
+cut short, whatever you finished still stands.</p>
+
+<table class="wide">
+<tr><th style="width:14%">Tier</th><th style="width:26%">What it does</th><th>Why it is in this position</th></tr>
+<tr><td><b>0 · Access</b></td><td>Determine what level of access you have and how many accounts are in scope. Create a read-only token and <b>record exactly which permissions were granted</b>.</td><td>Blocks everything. The granted permission list defines what the audit can and cannot reach, and belongs in the final report as a stated limitation.</td></tr>
+<tr><td><b>1 · Structural pull</b></td><td>A script walks a registry of <b>43 endpoints</b> and writes one file per endpoint: custom fields, tags, pipelines, calendars, forms, templates, products, invoices, users, workflow names.</td><td>Roughly 60% of the surface, automated, in one pass.</td></tr>
+<tr><td><b>2 · Snapshot diff</b></td><td>Export the platform's own configuration snapshot and compare it against Tier 1.</td><td>Anything present in the snapshot but absent from the pull is your manual-inspection list — and it is short. Needs agency-level access; skip it if you do not have that and widen Tier 5.</td></tr>
+<tr><td><b>3 · Usage filter</b></td><td>Compute what to drop: forms with no submissions, calendars with no bookings, channels with no conversations, products with no orders.</td><td>This is the discard pass. Everything that survives it is what actually gets audited.</td></tr>
+<tr><td><b>4 · Workflow internals</b></td><td>Capture what each automation actually does, step by step.</td><td>The real work — and the part no public API will give you. See §1.5.</td></tr>
+<tr><td><b>5 · Manual sweep</b></td><td>Everything no API serves: domains, DNS, phone registration, installed apps, third-party connections, dashboards.</td><td>Roughly 15–20 pages of interface. <b>Copy the text, not screenshots</b> — text is searchable and diffable; an image is neither.</td></tr>
+<tr><td><b>6 · Classify</b></td><td>Merge everything into one row-per-feature report, then <b>check five rows by hand</b> against the live system.</td><td>A classification that is 90% right looks exactly like one that is 100% right, until go-live day.</td></tr>
+</table>
+
+<h2>1.4 The instrument: a puller that cannot write</h2>
+
+<p>Tier 1 is a script driven by a registry file. The registry describes each
+endpoint — its path, how it paginates, where the array lives in the response,
+and one field that matters more than the rest:</p>
+
+<table class="wide">
+<tr><th style="width:16%">Class</th><th>Effect</th></tr>
+<tr><td><code>config</code></td><td>Structure. Safe to write to disk in full.</td></tr>
+<tr><td><code>volume</code></td><td>May contain personal data. <b>The body is discarded</b>; only a count and the field names survive, and that count is the usage evidence.</td></tr>
+<tr><td><code>agency</code></td><td>Needs account-level access. Recorded as <i>skipped</i>, not <i>failed</i>, when you do not have it — those are different facts.</td></tr>
+</table>
+
+<p>Four guards make the script safe to hand to anyone:</p>
+
+<ul>
+<li><b>GET only.</b> Any other HTTP method is refused at the transport layer, not by convention. The script cannot modify the system it is reading, even by mistake.</li>
+<li><b>Throttled below the ceiling.</b> 80 requests per 10 seconds against a limit of 100, with exponential backoff. Never remove the throttle to make it faster.</li>
+<li><b>Tokens redacted.</b> Authorization headers are stripped from every error message before anything is printed or logged.</li>
+<li><b>Failure is data.</b> The first run is a <i>discovery</i> run: it records the status and response shape of every endpoint into a coverage report and keeps going. You read that report before you trust anything in the output.</li>
+</ul>
+
+<div class="callout">
+<span class="lbl">Why the coverage report comes first</span>
+<p>An endpoint returning <code>401</code> means a permission you were not
+granted — a stated limitation of the audit, not a broken script. An endpoint
+returning <code>404</code> means it does not exist on your account tier. An
+endpoint returning <code>0</code> might mean the feature is unused, or it might
+mean you are reading the wrong field. Those are four different conclusions and
+only the coverage report tells them apart.</p>
+</div>
+
+<h2>1.5 The finding that shapes the whole project</h2>
+
+<p>Tier 4 exists because of a single, load-bearing limitation, and every plan
+built on this method has to account for it:</p>
+
+<p class="lede">The platform's public API exposes workflow <i>metadata</i> only —
+id, name, status, dates. It will not tell you what any workflow actually does.</p>
+
+<p>There is no steps endpoint, no actions endpoint, no versions endpoint. So
+<code>GET /workflows/</code> answers "how many automations exist and how many
+are switched on". It cannot answer "what do they do", which is the entire point
+of the exercise.</p>
+
+<p>Worse, <b>execution counts are not available either</b>. The discard pass in
+Tier 3 wants to drop any workflow that has enrolled nobody in 90 days — and that
+number cannot be fetched. It has to come from the execution-log view in the
+interface, by hand.</p>
+
+<p>The route that does work is to open one workflow in a browser, capture the
+request the interface itself makes to fetch the step tree, and replay it across
+the workflow list using your own session. Three consequences follow, and all
+three must be planned for rather than discovered mid-run:</p>
+
+<table class="wide">
+<tr><th style="width:30%">Constraint</th><th>How the script handles it</th></tr>
+<tr><td>The session credential expires in hours, not days</td><td>Checkpoint after every workflow and resume. A restart-from-zero design loses an afternoon. Expect to re-capture the session once or twice per full run — that is normal, not a failure.</td></tr>
+<tr><td>It is an internal, undocumented interface whose shape can change</td><td>Store the raw response verbatim; parse in a separate pass. Never parse at capture time.</td></tr>
+<tr><td>It sits outside the read-only token's permission story</td><td>Disclose it in the writeup rather than leaving it implicit.</td></tr>
+</table>
+
+<div class="callout warn">
+<span class="lbl">Watch out</span>
+<p>This is legitimate for a one-off audit of configuration you own. It is not a
+basis for anything ongoing, and it should never end up in a scheduled job.</p>
+</div>
+
+<h2>1.6 The checklist that makes sure nothing is missed</h2>
+
+<p>The spine of the audit is a single file listing <b>111 features across 23
+areas</b> — the complete surface of the platform being replaced, whether or not
+this particular company uses any given one. Each row carries how to detect it,
+where the evidence lives, and a starting hypothesis.</p>
+
+<p>Rows are never deleted. A feature that turns out to be unused is marked as
+such, with its evidence. That is why the list can be trusted as complete: the
+only way for something to leave it is to be answered.</p>
+
+<h3>The six answers a feature can get</h3>
+
+<table class="wide">
+<tr><th style="width:20%">Disposition</th><th>Meaning</th></tr>
+<tr><td><code>TWENTY</code></td><td>The CRM does this natively. Configuration only, no code.</td></tr>
+<tr><td><code>N8N</code></td><td>The automation engine reproduces it with no CRM involvement.</td></tr>
+<tr><td><code>TWENTY+N8N</code></td><td>The record lives in the CRM; the logic runs in the automation engine. Most of the interesting ones land here.</td></tr>
+<tr><td><code>DROP</code></td><td>Evidence shows it is not in use. Retire it.</td></tr>
+<tr><td><code>ESCALATE</code></td><td>Neither tool can do it. Needs a vendor and a budget decision.</td></tr>
+<tr><td><code>UNKNOWN</code></td><td>Not yet checked. Not a final state — the audit is finished when this count reaches zero.</td></tr>
+</table>
+
+<div class="callout ok">
+<span class="lbl">Why ESCALATE must never be hidden</span>
+<p>Some capabilities cannot be self-hosted at any price, because the obstacle is
+regulatory rather than technical. Sending SMS requires a licensed carrier
+relationship. Phone numbers, voice menus and call recording require the same.
+Business messaging on the large chat platforms is only issued through approved
+providers. No amount of engineering changes this, for the same reason software
+cannot make itself a phone company.</p>
+<p><b>A short, specific ESCALATE list beside a long TWENTY/N8N list is what
+makes the rest of the report credible.</b> A report with no escalations is one
+nobody should believe.</p>
+</div>
+
+<h2>1.7 What the evidence produced here</h2>
+
+<p>Run against a real account, this method turned 111 catalogued features into a
+decision for every one. The resulting split — reproduced from the audit file
+itself, not retyped — is:</p>
+
+<table>
+<tr><th>Disposition</th><th class="num">Count</th><th>What it meant in practice</th></tr>
+<tr><td><code>ESCALATE</code></td><td class="num">52</td><td>Mostly telephony and hosting. Consolidates into a small number of real decisions, most of which stayed deferred because the usage evidence was near zero.</td></tr>
+<tr><td><code>TWENTY+N8N</code></td><td class="num">20</td><td>The core of the build: record in the CRM, logic in the automation engine.</td></tr>
+<tr><td><code>TWENTY</code></td><td class="num">15</td><td>Native. Configuration only.</td></tr>
+<tr><td><code>N8N</code></td><td class="num">14</td><td>Forms, tracked links, scheduled sweeps, notifications.</td></tr>
+<tr><td><code>UNKNOWN</code></td><td class="num">7</td><td>Evidence rows resolved by the pull rather than by design work.</td></tr>
+<tr><td><code>DROP</code></td><td class="num">3</td><td>Verified unused.</td></tr>
+</table>
+
+<p>Two findings from the live pull did more to shape the object model than
+anything else:</p>
+
+<h3>The account was a training business wearing a CRM</h3>
+
+<p>The live configuration described a funnel — a webinar, a nurture sequence, a
+trainer meeting, a bootcamp enrolment paid through an external link, then a
+cohort — flattened into contact fields and deal stages. There were three
+separate pipelines with 11, 8 and 4 stages, none of which mapped onto the CRM's
+defaults. There were 53 custom fields, <b>every one of them on the contact
+record</b>, because a contact field was the only place to put anything.</p>
+
+<p>That is why the object model has <code>trainingProgram</code>,
+<code>cohort</code>, <code>enrollment</code>, <code>webinarEvent</code> and
+<code>webinarRegistration</code> as real objects. "Who paid for the January
+bootcamp and who is still sitting on a payment link" becomes a saved view rather
+than a spreadsheet export.</p>
+
+<h3>The automation history did not exist anywhere</h3>
+
+<p>The single hardest part of the audit was that the old platform would not say
+what its own automations had done. That gap is why <b>every workflow in this
+build writes an <code>automationRun</code> record back into the CRM</b> — every
+run, success and failure, queryable in one call. It costs one extra step per
+workflow, and it means the next person to audit this system does in an afternoon
+what took weeks here.</p>
+
+<div class="callout danger">
+<span class="lbl">Do not</span>
+<p>If you are running this method against a real account you intend to close:
+<b>export the suppression list first</b> — everyone who has unsubscribed,
+bounced or complained. That list is usually not recoverable once the account is
+terminated, and mailing someone who opted out is a compliance incident. Part 6
+covers importing it. Do it before any termination date is agreed, not after.</p>
+</div>
+
+<h2>1.8 Applying this to your own account</h2>
+
+<p>If you are adapting this build rather than reproducing it, the method
+transfers directly:</p>
+
+<ol>
+<li><b>Create a read-only token.</b> Grant every permission ending in
+"readonly"; grant nothing implying write. Record the granted list — it is a
+stated limitation of your report.</li>
+<li><b>Write down the version header.</b> Most platform APIs require one, and
+omitting it produces an error that reads exactly like an authentication failure
+and will cost you an afternoon.</li>
+<li><b>Verify one endpoint by hand</b> with <code>curl</code> before running any
+script. If that returns your account object, authentication works and everything
+after is logic.</li>
+<li><b>Do a discovery run</b> across your whole endpoint registry, then read the
+coverage report before drawing a single conclusion.</li>
+<li><b>Check five classifications by hand.</b> If all five are right, trust the
+rest. If any is wrong, fix the rule and re-run everything.</li>
+</ol>
+
+<div class="callout warn">
+<span class="lbl">Watch out</span>
+<p>Two traps that cost real time here. A response of <b>HTTP 200 with an empty
+list</b> is the most dangerous result in an audit — it looks like "this feature
+is unused" and it is often "you read the wrong field name". Check the field the
+array actually lives under against a real response before believing any count of
+zero. And choose your evidence window deliberately: a 90-day window makes
+anything annual — renewals, compliance reviews, yearly training resets — look
+completely dead.</p>
+</div>

@@ -1,0 +1,152 @@
+<!--APPENDIX schema -->
+
+<!--APPENDIX workflows -->
+
+<h2 class="newpage">Appendix E · How this system fails silently</h2>
+
+<p>Every entry below is a real defect that reached a running system. None of
+them crashed. Each returned success and the wrong answer, which is why they
+survived long enough to be expensive.</p>
+
+<p class="lede">If you read one page of this handbook twice, make it this
+one.</p>
+
+<h3>Queries the API accepted and ignored</h3>
+
+<table class="wide">
+<tr><th style="width:30%">The mistake</th><th style="width:34%">What it looked like</th><th>What it actually did</th></tr>
+<tr><td>Bracket-style filter syntax</td><td>HTTP 200, records returned</td><td><b>Filter ignored; whole table returned.</b> The workflow used row zero and emailed a lead acknowledgement to an unrelated contact. Noticed only because the name in the email was wrong</td></tr>
+<tr><td>Camel-case sort parameter</td><td>HTTP 200, sorted-looking data</td><td>Sort silently ignored. Arbitrary order, forever</td></tr>
+<tr><td>Requesting 500 rows</td><td>HTTP 200, 200 rows</td><td><b>Capped at 200 with no warning.</b> Every scheduled scan would have processed the first 200 rows of a growing table and reported success</td></tr>
+<tr><td>Un-encoded value in a filter</td><td>HTTP 400 — but only for some inputs</td><td>Broke the error handler's own duplicate check on a workflow name containing brackets. The failure was logged, the handler then errored, and <b>the alert was never sent</b></td></tr>
+<tr><td>Timestamp with an offset instead of <code>Z</code></td><td>HTTP 400</td><td>Fine while the timezone is UTC. The day somebody sets a local timezone, every timestamped write fails at once on a system that passed every test</td></tr>
+</table>
+
+<h3>Things that looked deployed and were not connected</h3>
+
+<table class="wide">
+<tr><th style="width:30%">The mistake</th><th style="width:34%">What it looked like</th><th>What it actually did</th></tr>
+<tr><td>Error workflow bound by name</td><td>Every workflow shows error handling configured</td><td>References resolve by id. <b>None of it fires.</b> Every failure passes silently</td></tr>
+<tr><td>Workflow deployed but not activated</td><td>Present in the list, looks correct</td><td>Never runs</td></tr>
+<tr><td>Form fields posted under their labels</td><td>HTTP 200</td><td>Every value silently null. Inputs post by position, not by label</td></tr>
+<tr><td>Testing failure handling by hand</td><td>The step fails in the editor as expected</td><td>The error workflow only fires for production executions. <b>A manual test proves nothing</b></td></tr>
+<tr><td>Asserting on a webhook's status code</td><td>HTTP 200</td><td>A webhook answers on receipt, before the workflow runs. The 200 says nothing about the outcome</td></tr>
+</table>
+
+<h3>Green tests over broken code</h3>
+
+<table class="wide">
+<tr><th style="width:30%">The defect</th><th>Why every check passed</th></tr>
+<tr><td>Nurture sequence referenced templates that did not exist</td><td>On a fresh database no lead is old enough to be nudged, so the send path never executed</td></tr>
+<tr><td>Health check read only the latest 20 runs</td><td>On a quiet system the scheduled jobs were in that page. On a busy one they are not — it then reports a dead worker on a healthy one, or misses a real failure</td></tr>
+<tr><td><b>Consent checkbox compared to boolean <code>true</code></b></td><td>The test posted the field directly, where the comparison holds. A <b>browser</b> posts a ticked checkbox as a JSON array. Every real human who ticked the box was recorded as pending, the acknowledgement was refused, and <b>the refusal looked exactly like correct consent enforcement</b></td></tr>
+</table>
+
+<div class="callout danger">
+<span class="lbl">The pattern behind all three</span>
+<p>Each was <b>volume-dependent or client-dependent</b>: correct on a small
+dataset or a synthetic client, broken with real data or a real browser. When you
+add a check, ask two questions — what data would have to exist for this code to
+run at all, and does my test speak the same wire format as the real client?</p>
+</div>
+
+<h3>Infrastructure that fails without saying so</h3>
+
+<table class="wide">
+<tr><th style="width:30%">The failure</th><th>How it presents</th></tr>
+<tr><td>The worker container is dead</td><td>The interface is perfectly healthy. Scheduled work and mailbox sync stop, silently, indefinitely</td></tr>
+<tr><td>The server cannot reach its own public URL</td><td>Every metadata request answers <b>HTTP 500 with an empty body and no log line</b>, while the ordinary API works perfectly. Looks exactly like a bad API key</td></tr>
+<tr><td>The proxy allowlist is wrong</td><td>The site looks equally healthy whether the rule works or not. Reading the file does not prove it — the proxy applies directives in its own order</td></tr>
+<tr><td>The alert URL points at an undeployed workflow</td><td>Every alert posts into a 404, <i>inside the error handler</i>. Weeks of apparent health while nothing that broke is reported</td></tr>
+<tr><td>Health check targets a hostname, not the loopback address</td><td>The container listens on IPv4 only; the hostname resolves to IPv6 first. The check fails forever while the service is fine</td></tr>
+<tr><td>Backups run and are never restored</td><td>A restore that produces an empty schema exits zero. Only a row-count comparison catches it</td></tr>
+</table>
+
+<h2 class="newpage">Appendix F · Glossary</h2>
+
+<table class="wide">
+<tr><th style="width:24%">Term</th><th>Meaning in this build</th></tr>
+<tr><td><b>API</b></td><td>How programs talk to each other instead of a human clicking</td></tr>
+<tr><td><b>API key</b></td><td>A long secret standing in for a password when a program calls an API. Treat it as a password</td></tr>
+<tr><td><b>CIDR</b></td><td>A written range of network addresses, like <code>203.0.113.0/24</code>. A single address is <code>/32</code></td></tr>
+<tr><td><b>Container</b></td><td>A running copy of an image. Disposable</td></tr>
+<tr><td><b>Cron</b></td><td>Run this at a fixed time, repeatedly</td></tr>
+<tr><td><b>Compose</b></td><td>A file describing several containers and how they connect, plus the command that starts them together</td></tr>
+<tr><td><b>Consent record</b></td><td>One row per person per channel: may we contact them, how do we know, and what is the proof</td></tr>
+<tr><td><b>Environment variable</b></td><td>A setting passed to a program at startup. All of them live in one file</td></tr>
+<tr><td><b>Idempotent</b></td><td>Safe to run twice. Almost everything here is</td></tr>
+<tr><td><b>Image</b></td><td>A frozen, downloadable copy of a program and its dependencies</td></tr>
+<tr><td><b>Migration</b></td><td>A change to the database's structure, applied automatically at startup. Why the first boot is slow</td></tr>
+<tr><td><b>Overlay</b></td><td>A second compose file layered on the first to change settings for one environment</td></tr>
+<tr><td><b>Paging</b></td><td>Fetching a large result a page at a time, following a cursor. Mandatory above 200 rows</td></tr>
+<tr><td><b>Port</b></td><td>A numbered door on a machine</td></tr>
+<tr><td><b>Proxy (reverse)</b></td><td>The program in front of everything, handling the certificate and routing requests</td></tr>
+<tr><td><b>Relation</b></td><td>A link between two objects. Created last, because both ends must exist first</td></tr>
+<tr><td><b>SMTP</b></td><td>The protocol for sending email. Needs a server willing to accept mail from you</td></tr>
+<tr><td><b>Sub-workflow</b></td><td>A workflow called by other workflows. The send path is one</td></tr>
+<tr><td><b>Suppression list</b></td><td>Everyone who must not be emailed. Usually unrecoverable once an account is closed</td></tr>
+<tr><td><b>TLS / certificate</b></td><td>What makes a browser show a padlock. Obtained and renewed automatically</td></tr>
+<tr><td><b>Volume</b></td><td>Disk that survives containers being deleted. Your data lives here</td></tr>
+<tr><td><b>Webhook</b></td><td>A URL something else calls to tell you an event happened</td></tr>
+<tr><td><b>Worker</b></td><td>The container that runs everything on a clock. Its death is silent</td></tr>
+</table>
+
+<h2 class="newpage">Appendix G · Verified API behaviour</h2>
+
+<p>Behaviour established by running against live instances, not read from
+documentation. Where the two disagreed, this is what the software actually
+did.</p>
+
+<h3>The CRM's REST API</h3>
+
+<table class="wide">
+<tr><th style="width:34%">Behaviour</th><th>Consequence</th></tr>
+<tr><td>Filters use <code>?filter=field[op]:value</code>; comma means AND</td><td>Any other shape is <b>ignored</b>, not rejected</td></tr>
+<tr><td>Sorting is <code>?order_by=field[DescNullsLast]</code></td><td>A camel-case parameter name is silently ignored</td></tr>
+<tr><td>A relation <code>person</code> is filtered as <code>personId</code></td><td>Filtering on the relation name does not work</td></tr>
+<tr><td><b>200 rows is a hard ceiling</b></td><td>Asking for more returns 200, HTTP 200, no warning. Page with a cursor and compare against the reported total</td></tr>
+<tr><td>Timestamps must be UTC with <code>Z</code></td><td>An offset is a 400 — in filters and in write bodies</td></tr>
+<tr><td>Pages do not overlap and sum exactly to the total</td><td>Verified live. Paging is safe to trust once implemented</td></tr>
+<tr><td>Metadata endpoints reject every query string</td><td>And embed only a slice of each object's fields — merge with a real row to get the full picture</td></tr>
+<tr><td><b>Metadata is not served in-process</b></td><td>The server calls its own public URL. If it cannot reach or trust that URL: HTTP 500, empty body, no log line, while the ordinary API works. §5.9</td></tr>
+<tr><td>Rich-text fields take a structured object, not a string</td><td>A bare string is a 400</td></tr>
+<tr><td>Default opportunity stages have no "won" stage</td><td>Any pipeline mapping has to be explicit</td></tr>
+</table>
+
+<h3>The automation engine</h3>
+
+<table class="wide">
+<tr><th style="width:34%">Behaviour</th><th>Consequence</th></tr>
+<tr><td>An expression ends at the <b>first</b> closing brace pair</td><td>A nested object literal closes it early; the rest is a syntax error</td></tr>
+<tr><td>A JSON body parameter is only evaluated when the <b>whole</b> parameter is an expression</td><td>Partial interpolation silently sends the literal text</td></tr>
+<tr><td>Sub-workflow and error-workflow references resolve by <b>id</b></td><td>Bound by name they dangle silently. Bind ids at deploy time</td></tr>
+<tr><td>Form inputs post as <code>field-0</code>, <code>field-1</code>… by position</td><td>Posting under labels returns 200 with null values</td></tr>
+<tr><td><b>A ticked checkbox posts as a JSON array</b>, not a boolean</td><td>Comparing to boolean true fails for every browser submission while passing every synthetic test</td></tr>
+<tr><td>The form path lives in different places across versions</td><td>Set both, or the URL falls back to a random identifier</td></tr>
+<tr><td>The error workflow fires only for <b>production</b> executions</td><td>Manual runs never trigger it. Test failure handling through a webhook</td></tr>
+<tr><td>A webhook responds on receipt</td><td>The status code says nothing about the outcome. Assert on the record</td></tr>
+<tr><td>Code steps run sandboxed</td><td>Environment access is through the engine's own accessor</td></tr>
+<tr><td>The container listens on IPv4 only</td><td>Health checks must target the loopback address, not the hostname</td></tr>
+</table>
+
+<h3>The platform being replaced</h3>
+
+<table class="wide">
+<tr><th style="width:34%">Behaviour</th><th>Consequence</th></tr>
+<tr><td><b>Workflow internals are not on any public endpoint</b></td><td>The API says how many automations exist and whether they are on. It cannot say what they do. This shapes the entire migration — §1.5</td></tr>
+<tr><td>Execution counts are not available either</td><td>The discard pass depends on a number the API will not give you</td></tr>
+<tr><td>A version header is mandatory</td><td>Omitting it produces an error that reads exactly like an authentication failure</td></tr>
+<tr><td>Some list endpoints return the array under an unexpected key</td><td>Read the wrong key and you get <b>HTTP 200 and an empty list</b> — indistinguishable from "this feature is unused". The worst failure mode in an audit</td></tr>
+<tr><td>Some endpoints require an undocumented parameter</td><td>Omitted, they 422</td></tr>
+<tr><td>Page-size limits vary by endpoint</td><td>One endpoint's valid limit is another's 422</td></tr>
+<tr><td>A default scripting user-agent may be blocked upstream</td><td>Reads as an authentication failure and is not. Send a user-agent</td></tr>
+<tr><td>A sub-account token cannot discover its own account id</td><td>It has to come from the browser address bar</td></tr>
+</table>
+
+<div class="callout ok">
+<span class="lbl">The habit worth taking from this appendix</span>
+<p>Verify empirically before writing logic against it. Documentation and live
+behaviour disagree often enough that a script written blind fails in ten places
+at once. Make the first run of anything a <b>discovery run</b> that records what
+each call actually returned, and read that before trusting the output.</p>
+</div>

@@ -1,0 +1,26 @@
+19 workflow(s) to deploy
+
+Connected to http://localhost:5678 — 0 workflow(s) already there
+Credentials available: Aspire SMTP, Twenty API
+
+  ok    SYS Error Handler                created + activated
+  ok    VEND Send Email                  created + activated
+  ok    AI FrontDesk Handover            created + activated
+  ok    BOOK Trainer Appointment         created + activated
+  ok    ENR Bootcamp Enrolment           created + activated
+  ok    ENR Cohort Operations            created + activated
+  ok    EVT Post-Webinar Follow-up       created + activated
+  ok    EVT Webinar Registration         created + activated
+  ok    EVT Webinar Reminders            created + activated
+  ok    LEAD Form Intake                 created + activated
+  ok    LEAD Nurture Sequence            created + activated
+  ok    MSG Inbound Events               created + activated
+  ok    MSG Tracked Link Redirect        created + activated
+  ok    OPS Scheduled Sweeps             created + activated
+  ok    SEG Tag Sync                     created + activated
+  ok    SUB Renewal Escalation           created + activated
+  ok    SYS Alert Sink (dev)             created + activated
+  ok    SYS Daily Health Check           created + activated
+  ok    SYS Failure Probe (dev)          created + activated
+
+19/19 deployed and activated.

@@ -1013,7 +1013,17 @@ return [{ json: {
   kind,
   certification: cert === 'Not sure yet' ? '' : cert,
   message: String(j['Message'] || '').slice(0, 2000),
-  consent: j['I agree to be contacted by Aspire Tech'] === true,
+  // A ticked checkbox arrives from the Form Trigger as an ARRAY of the
+  // selected option labels — `[""]` here, because the field declares no
+  // option label of its own. It is only ever the boolean `true` when
+  // something posts the field directly, which is exactly what the proof
+  // suite does. `=== true` therefore passes every synthetic test while
+  // recording PENDING consent for every real person who ticks the box, so
+  // the acknowledgement is refused and nobody is ever told.
+  consent: (() => {
+    const v = j['I agree to be contacted by Aspire Tech'];
+    return Array.isArray(v) ? v.length > 0 : (v === true || v === 'true');
+  })(),
   emailDomain: email.split('@')[1] || '',
 }}];
 """.strip())

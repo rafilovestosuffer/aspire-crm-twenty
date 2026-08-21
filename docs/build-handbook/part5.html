@@ -1,0 +1,361 @@
+<h1 class="part"><span class="num">Part 5</span>Build it for real: the server</h1>
+
+<p class="lede">The laptop stack and the server stack are the <b>same files</b>.
+What changes is one configuration file, one overlay, and a reverse proxy in
+front. Nothing is rebuilt and nothing is untested at cutover.</p>
+
+<p>Budget half a day, most of it waiting for DNS.</p>
+
+<h2>5.1 What you need before you touch the server</h2>
+
+<table class="wide">
+<tr><th style="width:22%">Requirement</th><th>Detail</th></tr>
+<tr><td><b>A server</b></td><td>4 cores, 8 GB RAM, 60 GB SSD as a minimum. 8 cores and 16 GB for real load. On 4 GB the CRM and the database contend and the interface feels slow under any load worth having.</td></tr>
+<tr><td><b>A public address</b></td><td>Confirm it: <code>curl -s ifconfig.me</code> on the server, and check the answer does not begin <code>192.168.</code>, <code>10.</code> or <code>172.16–31.</code>. If it does, the machine is behind NAT and §5.12 applies instead.</td></tr>
+<tr><td><b>Two DNS records</b></td><td>One for the CRM, one for the automation host, both pointing at the server and <b>already resolving</b>.</td></tr>
+<tr><td><b>Ports 80 and 443</b></td><td>Open inbound. Nothing else needs to be.</td></tr>
+<tr><td><b>SSH with key auth</b></td><td>Password authentication off.</td></tr>
+<tr><td><b>A mail relay</b></td><td>Host, user, and an application password. Without it the deploy stops rather than half-working.</td></tr>
+<tr><td><b>Your office's public address</b></td><td>Run <code>curl ifconfig.me</code> <b>from the office</b>, not from the server. §5.7 explains why this single line matters more than anything else here.</td></tr>
+<tr><td><b>A chat webhook</b></td><td>Any incoming-webhook URL that accepts a JSON message. Without it, no failure ever reaches a person.</td></tr>
+</table>
+
+<div class="callout danger">
+<span class="lbl">Confirm DNS before you start</span>
+<p>The certificate authority validates by fetching a file over HTTP from the
+name you claim. If DNS is not live yet the request fails, the proxy serves an
+untrusted certificate, and browsers refuse the site. Worse, <b>failures are rate
+limited</b> — discovering a bad DNS record during the real request costs you an
+hour of waiting.</p>
+<pre class="cmd"><span class="p">$</span> dig +short crm.example.com
+<span class="p">$</span> dig +short auto.example.com</pre>
+</div>
+
+<h2>5.2 Prepare the host</h2>
+
+<pre class="cmd"><span class="p">$</span> sudo apt update &amp;&amp; sudo apt upgrade -y
+<span class="p">$</span> sudo apt install -y ufw git python3 python3-yaml curl openssl
+
+<span class="c"># The SSH rule goes FIRST, or enabling the firewall locks you out.</span>
+<span class="p">$</span> sudo ufw allow 22/tcp
+<span class="p">$</span> sudo ufw allow 80/tcp
+<span class="p">$</span> sudo ufw allow 443/tcp
+<span class="p">$</span> sudo ufw --force enable
+
+<span class="p">$</span> curl -fsSL https://get.docker.com | sudo sh
+<span class="p">$</span> sudo usermod -aG docker $USER
+<span class="p">$</span> exit                       <span class="c"># log out and back in, or docker stays denied</span></pre>
+
+<p>Log back in, clone, and harden:</p>
+
+<pre class="cmd"><span class="p">$</span> git clone https://github.com/rafilovestosuffer/aspire-crm-twenty.git
+<span class="p">$</span> cd aspire-crm-twenty
+<span class="p">$</span> sudo ./infra/harden-host.sh    <span class="c"># unattended upgrades + fail2ban. Leaves SSH alone.</span></pre>
+
+<div class="callout warn">
+<span class="lbl">Watch out</span>
+<p>Some hosting providers do not filter any traffic by default, which means
+<code>ufw</code> is your <i>only</i> firewall — do not skip it. Others offer a
+separate firewall in their control panel; if that is enabled, allow 22, 80 and
+443 there too, or the certificate request times out with no explanation.</p>
+</div>
+
+<h2>5.3 Generate the environment</h2>
+
+<pre class="cmd"><span class="p">$</span> ./infra/init-vps-env.sh --yes</pre>
+
+<p>This generates the four secrets (and refuses to rotate any that already have
+a value), sets the public hostnames and the HTTPS scheme, clears the local-only
+settings that must never travel from a laptop, and then <b>lists the lines only
+you can fill in</b>.</p>
+
+<div class="callout danger">
+<span class="lbl">Back up two keys before going further</span>
+<p><code>ENCRYPTION_KEY</code> and <code>N8N_ENCRYPTION_KEY</code>, to a password
+manager, now. Lose the first and every secret the CRM holds becomes permanently
+unreadable. There is no recovery path and no support to call.</p>
+</div>
+
+<div class="callout danger">
+<span class="lbl">Do not copy a laptop configuration onto a server</span>
+<p>Two settings make this actively dangerous. A laptop's mail allowlist would
+become the <i>only</i> addresses your server will ever mail. A laptop's alert
+URL points at a workflow that is not deployed on a server, so every alert would
+be posted into a 404 — <b>inside the error handler</b>, whose entire job is
+making sure a failure reaches a person. The system would run for weeks looking
+healthy while nothing that broke was ever reported. The preflight check fails on
+both.</p>
+</div>
+
+<h2>5.4 Fill in the four things it cannot know</h2>
+
+<pre class="cmd"><span class="p">$</span> nano infra/.env</pre>
+
+<pre># Your office and VPN ranges, space separated, CIDR notation.
+# Find it by running `curl ifconfig.me` FROM THE OFFICE.
+N8N_EDITOR_ALLOWED_IPS=203.0.113.0/24 198.51.100.42/32
+
+# The mail relay. A workspace relay is not the same host as a personal account.
+EMAIL_SMTP_USER=&lt;user&gt;
+EMAIL_SMTP_PASSWORD=&lt;application password, never the account password&gt;
+
+# Any incoming webhook that accepts {"text": "..."} — chat, or anything else.
+ALERT_WEBHOOK_URL=&lt;real webhook URL&gt;
+
+# One payment link per price tier. Unset, every enrolment fails loudly (§4.5).
+ENROL_PAYMENT_LINKS=BRONZE=https://...,SILVER=https://...,GOLD=https://...</pre>
+
+<p>Appendix B documents every other setting in the file, with the reason each
+one exists.</p>
+
+<h2>5.5 Preflight</h2>
+
+<pre class="cmd"><span class="p">$</span> ./infra/preflight.sh</pre>
+
+<p>Twenty seconds. Every check here corresponds to something that otherwise
+fails halfway through a deploy, at a point where the error does not name the
+cause.</p>
+
+<table class="wide">
+<tr><th style="width:26%">It checks</th><th>Because otherwise</th></tr>
+<tr><td>Memory, disk, Docker, Compose, Python, PyYAML</td><td>The object-model step dies eight minutes in on a missing library</td></tr>
+<tr><td>All four secrets are set and look long enough</td><td>Containers refuse to boot with an error that does not mention the key</td></tr>
+<tr><td>The CRM's public URL matches its domain exactly</td><td>A mismatch produces a login page that loops forever and looks like an authentication bug</td></tr>
+<tr><td>The automation host and protocol are not still <code>localhost</code>/http</td><td>The public form renders and submits nowhere, which looks like a bug in the engine rather than a line nobody edited</td></tr>
+<tr><td>A From address is set</td><td>An empty From is accepted by the engine and refused by a real relay — the send "succeeds" and never arrives</td></tr>
+<tr><td>The mail allowlist is <b>empty</b></td><td>A copied laptop file would silently refuse every real recipient</td></tr>
+<tr><td>The alert URL is not the local sink</td><td>See §5.3</td></tr>
+<tr><td>Payment links are present and well formed</td><td>Every enrolment fails, once per prospective student</td></tr>
+<tr><td>DNS resolves <b>to this server</b></td><td>The certificate request fails and burns rate limit</td></tr>
+<tr><td>Ports 80 and 443 are free; the firewall allows 22, 80, 443</td><td>The proxy cannot bind, or the challenge cannot reach it</td></tr>
+<tr><td>The editor allowlist is set and is not still an example range</td><td>Nobody, including you, can open the automation editor</td></tr>
+</table>
+
+<div class="callout ok">
+<span class="lbl">Good</span>
+<p><code>Ready to deploy.</code> Anything it calls a blocker, fix and re-run.
+Warnings are worth reading but do not stop you.</p>
+</div>
+
+<h2>5.6 Rehearse the certificate</h2>
+
+<p>Optional, and worth the ten minutes the first time. Before the real run,
+switch the proxy to the certificate authority's <b>staging</b> endpoint by
+uncommenting the marked line in <code>infra/Caddyfile</code>, then:</p>
+
+<pre class="cmd"><span class="p">$</span> ./infra/up.sh --vps
+<span class="p">$</span> docker compose -f infra/docker-compose.yml -f infra/docker-compose.vps.yml logs -f caddy</pre>
+
+<p>You want <code>certificate obtained successfully</code>. Your browser will
+warn that the certificate is untrusted — that is <b>expected</b> from a staging
+authority and means the challenge worked. Staging has far looser rate limits, so
+a misconfigured DNS record costs you nothing here.</p>
+
+<p>Then comment the line out again and recreate the proxy. Real certificates
+arrive within a minute, and renewal is automatic — there is no cron job to add
+and nothing to diarise.</p>
+
+<h2>5.7 The single most important line in the file</h2>
+
+<p class="lede">The automation editor holds every credential in the stack.</p>
+
+<p>The automation host has to be publicly reachable — the public form and
+inbound webhooks depend on it. But <i>everything else</i> on that host is the
+editor, and the editor can read every stored credential. Exposing it to the
+internet is the single largest avoidable risk in this deployment.</p>
+
+<pre>N8N_EDITOR_ALLOWED_IPS=203.0.113.0/24 198.51.100.42/32</pre>
+
+<p>Space separated, CIDR notation, a single address written as <code>/32</code>.
+Public forms, webhooks and the authentication callback stay open to anyone;
+only the editor is gated.</p>
+
+<div class="callout ok">
+<span class="lbl">Both ways of getting it wrong fail safe</span>
+<p>Leave it unset and <b>the proxy refuses to start at all</b>, rather than
+starting with the editor open. Set it wrong and you lock yourself out rather
+than letting the world in. Both are the safer direction, and you can still reach
+the proxy over SSH either way.</p>
+</div>
+
+<p>This is a line in the configuration file, not an edit to a tracked file, so
+it will not fight the next update. After changing it, recreate the proxy
+container.</p>
+
+<h3>The rules are proven, not assumed</h3>
+
+<p>Step 11 of the deploy runs the real proxy configuration against the running
+stack and checks each rule <b>from a client outside the allowlist</b>: the
+editor answers 403, while the form, the webhooks and the authentication callback
+go through. Then it widens the allowlist by the one line an operator is told to
+edit and confirms the editor is served.</p>
+
+<p>This matters because <b>the site looks equally healthy whether that rule
+works or not</b>. Reading the file does not prove it either: the proxy applies
+directives in its own order, not the order they are written.</p>
+
+<h2>5.8 Deploy</h2>
+
+<pre class="cmd"><span class="p">$</span> ./infra/deploy.sh</pre>
+
+<p>Eleven gated steps, about fifteen minutes, stopping at the first failure.
+Every step is idempotent, so if it stops part-way you fix what it named and run
+it again.</p>
+
+<table class="wide">
+<tr><th style="width:6%">#</th><th style="width:30%">Step</th><th>Note</th></tr>
+<tr><td>1</td><td>Start the stack</td><td>Waits until the server container can fetch <b>its own public URL</b> — see §5.9</td></tr>
+<tr><td>2</td><td>Check the worker</td><td>Separately, for the reason in §2.4</td></tr>
+<tr><td>3</td><td>Create the workspace</td><td>With a <b>generated</b> password, not the demo one</td></tr>
+<tr><td>4</td><td>Create the automation owner</td><td>Same password</td></tr>
+<tr><td>5</td><td>Build the object model</td><td>The step that exposes the self-URL problem</td></tr>
+<tr><td>6</td><td>Create credentials</td><td>Refuses to invent a mail relay rather than silently sending nothing</td></tr>
+<tr><td>7</td><td>Validate every API call</td><td>All 91, against this instance</td></tr>
+<tr><td>8</td><td>Deploy and activate</td><td><b>Without <code>--dev</code></b></td></tr>
+<tr><td>9</td><td>Verify every layer</td><td>Including the proxy</td></tr>
+<tr><td>10</td><td>Prove <b>both</b> databases restore</td><td>On this machine's own disk</td></tr>
+<tr><td>11</td><td>Prove the proxy rules hold</td><td>§5.7</td></tr>
+</table>
+
+<div class="callout danger">
+<span class="lbl">Three things not to do here</span>
+<ul>
+<li><b>Do not run the Python steps by hand.</b> One command is the whole build,
+including the restore proof and the proxy proof that a hand-run list skips.</li>
+<li><b>Do not seed demo data.</b> It is demo data, and three months later
+somebody will be trying to work out why the pipeline totals are wrong.</li>
+<li><b>Do not pass <code>--dev</code>.</b> That deploys the alert sink, which
+swallows alerts meant for a human, and the failure probe, which throws on
+purpose.</li>
+</ul>
+</div>
+
+<h2>5.9 When the object model step returns HTTP 500</h2>
+
+<p>This is the failure that wastes an evening, so it gets its own section.</p>
+
+<p class="lede">It is not an authentication problem, however much it looks like
+one.</p>
+
+<p>The CRM's metadata API is <b>not served in-process</b>. The server makes an
+HTTP call to its own configured public URL and hands back the result. If the
+server cannot resolve, reach, <i>or trust</i> that URL, every metadata request
+answers <b>HTTP 500 with an empty body and no log line at all</b>. The
+provisioner, the query validator and the stack check all fail together and none
+of them names the cause.</p>
+
+<p>Meanwhile the ordinary API keeps working perfectly, which is exactly what
+sends people looking at the API key.</p>
+
+<h3>Ask the server directly</h3>
+
+<pre class="cmd"><span class="p">$</span> docker compose -f infra/docker-compose.yml -f infra/docker-compose.vps.yml \
+    exec server curl -sS -o /dev/null -w '%{http_code}\n' "$SERVER_URL/healthz"</pre>
+
+<table class="wide">
+<tr><th style="width:32%">What you see</th><th>What it means</th></tr>
+<tr><td><code>could not resolve host</code></td><td>The container network has no alias for the public name. The overlay sets one — check it is not commented out. Without it the server only reaches its own public URL if the provider supports hairpin routing, which is not something to discover mid-deploy.</td></tr>
+<tr><td><code>certificate verify failed</code></td><td>Usually the certificate has not finished being issued. Until it is, the proxy answers with a self-signed one that the server does not trust. Check the proxy log, fix DNS or port 80, wait, then re-run the deploy — it is idempotent.</td></tr>
+<tr><td><code>connection refused</code></td><td>The proxy is down, or the URL names a host that is not it.</td></tr>
+<tr><td><code>200</code></td><td>The self-call is fine; the problem is elsewhere.</td></tr>
+</table>
+
+<div class="callout">
+<span class="lbl">On an internal server this is guaranteed</span>
+<p>Internally the certificate always comes from the proxy's own authority, which
+the application does not trust by default. The internal deployment path copies
+that authority's root out of the proxy container into a directory and points the
+application at it — the certificate store is owned by root with restrictive
+permissions and the application does not run as root, which is why it is copied
+rather than mounted.</p>
+</div>
+
+<h2>5.10 Immediately after the deploy</h2>
+
+<div class="step">
+<span class="n">1</span>
+<h4>Change the password</h4>
+<p>The deploy wrote a generated one to <code>infra/admin-initial-password.txt</code>,
+readable only by you. Change it in the CRM and in the automation engine. The
+demo password in this handbook was never used on this machine.</p>
+</div>
+
+<div class="step">
+<span class="n">2</span>
+<h4>Check the padlock</h4>
+<p>Open the CRM. A warning means the certificate authority could not reach the
+server on port 80.</p>
+</div>
+
+<div class="step">
+<span class="n">3</span>
+<h4>Check you can open the editor from the office</h4>
+<p>If the allowlist does not include the address you are browsing from, it
+refuses you too — by design. Fix the value and recreate the proxy.</p>
+</div>
+
+<div class="step">
+<span class="n">4</span>
+<h4>Make the repository private</h4>
+<p>If it is public, it documents the demo password.</p>
+</div>
+
+<div class="step">
+<span class="n">5</span>
+<h4>Schedule the watchdog and copy backups off the disk</h4>
+<p>Part 6. Same-disk dumps are not a backup.</p>
+</div>
+
+<h2>5.11 Verification</h2>
+
+<table class="wide">
+<tr><th style="width:44%">Check</th><th>Expected</th></tr>
+<tr><td>The CRM in a browser</td><td>Loads, valid certificate, no warning</td></tr>
+<tr><td>The public form</td><td>Renders</td></tr>
+<tr><td>The automation host root, from an untrusted network</td><td><b>403</b></td></tr>
+<tr><td><code>curl -I http://crm.example.com</code></td><td>308 redirect to HTTPS</td></tr>
+<tr><td><code>python3 scripts/stack_verify.py</code></td><td>All green, worker <b>and proxy</b> running</td></tr>
+<tr><td><code>docker compose … ps</code></td><td>All eight services up</td></tr>
+</table>
+
+<h3>Proving the workflows on a server</h3>
+
+<pre class="cmd"><span class="p">$</span> python3 scripts/prove_workflows.py --production --live-email you@example.com</pre>
+
+<p>There is no mail catcher here, so this needs a real relay and a real inbox.
+It skips the failure probe, which is not deployed.</p>
+
+<div class="callout danger">
+<span class="lbl">Run this only against an empty CRM</span>
+<p>Before any real data exists. The suite triggers the nurture sequence, and on
+a populated system that would be eligible to email real leads.</p>
+</div>
+
+<h2>5.12 The variant: a server with no public address</h2>
+
+<p>If the machine sits on an office network behind NAT, most of this part still
+applies — but three things change:</p>
+
+<table class="wide">
+<tr><th style="width:26%">Aspect</th><th>How it differs</th></tr>
+<tr><td>Certificates</td><td>Issued by the proxy's own internal authority, not a public one. Every client machine has to be told to trust that authority's root once. §5.9 explains why the application also has to be told.</td></tr>
+<tr><td>The editor allowlist</td><td>Not used. The network itself is the boundary — the host is unreachable from outside the office by definition.</td></tr>
+<tr><td>Public forms and webhooks</td><td><b>Do not work from outside</b>, because nothing outside can reach the server. If you need a public form, that traffic has to be brought in deliberately.</td></tr>
+</table>
+
+<p>Preflight and deploy both take an <code>--internal</code> flag that skips the
+public-address and public-DNS checks — which a correctly configured private
+server is supposed to fail — and selects the internal overlay.</p>
+
+<h2>5.13 What this part does not do for you</h2>
+
+<ul>
+<li><b>Monitoring beyond the watchdog.</b> Worker liveness, workflow failure
+rate, disk, and backup freshness. Part 6 has the pieces; something has to run
+them and shout.</li>
+<li><b>A second operator.</b> One person who can restore this system is a single
+point of failure, and it is the most likely thing to actually hurt. The bar to
+clear: somebody else has completed one task from the runbook unaided.</li>
+<li><b>Load testing.</b> A local build cannot tell you how the interface behaves
+at your real record volume.</li>
+</ul>

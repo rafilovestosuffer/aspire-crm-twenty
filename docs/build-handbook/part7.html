@@ -1,0 +1,78 @@
+<h1 class="part"><span class="num">Appendices</span>Reference</h1>
+
+<h2>Appendix A · Command reference</h2>
+
+<h3>Building</h3>
+<table class="wide">
+<tr><th style="width:47%">Command</th><th>Does</th></tr>
+<tr><td><code>./infra/rebuild.sh</code></td><td>All eleven build steps, gated. The whole laptop build in one command</td></tr>
+<tr><td><code>./infra/rebuild.sh --destroy</code></td><td>Wipe the databases first, then build. <b>Destroys data</b></td></tr>
+<tr><td><code>./infra/up.sh</code></td><td>Start the stack. Generates any missing secret. Safe to re-run</td></tr>
+<tr><td><code>./infra/up.sh --no-dev</code></td><td>Start without the mail catcher</td></tr>
+<tr><td><code>./infra/up.sh --vps</code></td><td>Start with the server overlay</td></tr>
+<tr><td><code>./infra/up.sh --down</code></td><td>Stop. <b>Keeps all data</b></td></tr>
+<tr><td><code>./infra/up.sh --destroy</code></td><td>Stop and <b>delete every database and workflow</b>. Requires typing DESTROY</td></tr>
+</table>
+
+<h3>The eleven steps, individually</h3>
+<table class="wide">
+<tr><th style="width:47%">Command</th><th>Does</th></tr>
+<tr><td><code>python3 scripts/stack_verify.py</code></td><td>Verify every layer independently</td></tr>
+<tr><td><code>python3 scripts/bootstrap_workspace.py</code></td><td>Create the CRM workspace, admin and API key</td></tr>
+<tr><td><code>python3 scripts/bootstrap_n8n.py</code></td><td>Create the automation owner and API key</td></tr>
+<tr><td><code>python3 scripts/twenty_provision.py</code></td><td>Build the object model. Idempotent</td></tr>
+<tr><td><code>… --dry-run</code></td><td>Print every payload, send nothing</td></tr>
+<tr><td><code>… --only &lt;object&gt;</code></td><td>One object at a time</td></tr>
+<tr><td><code>… --skip-relations</code></td><td>Everything except relations</td></tr>
+<tr><td><code>python3 scripts/seed_demo_data.py --wipe</code></td><td>448 deterministic demo records. <b>Never on a server</b></td></tr>
+<tr><td><code>python3 scripts/n8n_credentials.py</code></td><td>Create the two credentials from configuration</td></tr>
+<tr><td><code>python3 scripts/validate_workflow_queries.py</code></td><td>Check all 91 API calls against the live schema</td></tr>
+<tr><td><code>… --offline</code></td><td>Check against the schema file; no stack needed</td></tr>
+<tr><td><code>python3 scripts/build_n8n_workflows.py</code></td><td>Regenerate the workflow library from the generator</td></tr>
+<tr><td><code>python3 scripts/n8n_deploy.py --activate</code></td><td>Deploy and switch on. Idempotent</td></tr>
+<tr><td><code>… --dev</code></td><td>Also deploy the two test-only workflows. <b>Laptop only</b></td></tr>
+<tr><td><code>… --only "&lt;name&gt;"</code></td><td>One workflow</td></tr>
+<tr><td><code>python3 scripts/prove_workflows.py</code></td><td>77 checks against the running system</td></tr>
+<tr><td><code>… --only lead</code></td><td>One group: lead, consent, link, inbound, webinar, enrol, ai, tags, error, scheduled, health</td></tr>
+<tr><td><code>… --production --live-email you@…</code></td><td>Server mode: real relay, real inbox, no failure probe. <b>Empty CRM only</b></td></tr>
+</table>
+
+<h3>Deploying and operating a server</h3>
+<table class="wide">
+<tr><th style="width:47%">Command</th><th>Does</th></tr>
+<tr><td><code>./infra/init-vps-env.sh --yes</code></td><td>Generate secrets and public hostnames; list what only you can fill</td></tr>
+<tr><td><code>sudo ./infra/harden-host.sh</code></td><td>Unattended upgrades and intrusion blocking. Leaves SSH alone</td></tr>
+<tr><td><code>./infra/preflight.sh</code></td><td>Is this server ready? Run before deploying</td></tr>
+<tr><td><code>./infra/preflight.sh --internal</code></td><td>Same, skipping the public-address and public-DNS checks</td></tr>
+<tr><td><code>./infra/deploy.sh</code></td><td>Eleven gated deploy steps. Idempotent</td></tr>
+<tr><td><code>./infra/deploy.sh --internal</code></td><td>Deploy with the internal overlay and internal certificate authority</td></tr>
+<tr><td><code>python3 scripts/verify_restore.py</code></td><td>Restore a backup into a scratch database and compare row counts</td></tr>
+<tr><td><code>… --database n8n</code></td><td>The automation engine's database</td></tr>
+<tr><td><code>python3 scripts/verify_proxy_rules.py</code></td><td>Prove the proxy refuses the editor and allows the form</td></tr>
+<tr><td><code>./infra/backup-offsite.sh user@host:/path/</code></td><td>Copy backups off this disk</td></tr>
+<tr><td><code>./infra/watchdog.sh</code></td><td>Verify the stack; alert if a layer is down. Run hourly from cron</td></tr>
+<tr><td><code>python3 scripts/import_consent_csv.py file.csv</code></td><td>Load a suppression export into consent records</td></tr>
+<tr><td><code>python3 scripts/mark_enrolment_paid.py --email … --yes</code></td><td>Promote an enrolment after money cleared</td></tr>
+</table>
+
+<h3>Docker, when you need it directly</h3>
+<table class="wide">
+<tr><th style="width:47%">Command</th><th>Does</th></tr>
+<tr><td><code>docker compose -f infra/docker-compose.yml ps</code></td><td>What is running, and whether it is healthy</td></tr>
+<tr><td><code>… logs -f --tail=100 server worker n8n</code></td><td>Follow the logs</td></tr>
+<tr><td><code>… up -d worker</code></td><td>Start a single container</td></tr>
+<tr><td><code>… up -d --force-recreate caddy</code></td><td>Recreate the proxy after changing the allowlist</td></tr>
+<tr><td><code>… exec server curl -sS localhost:3000/healthz</code></td><td>Ask a container about itself — §5.9</td></tr>
+</table>
+
+<h3>Documentation</h3>
+<table class="wide">
+<tr><th style="width:47%">Command</th><th>Does</th></tr>
+<tr><td><code>python3 docs/build-handbook/verify_facts.py</code></td><td>Re-derive every count from source; fail if any document disagrees</td></tr>
+<tr><td><code>… --json</code></td><td>The derived facts, for tooling</td></tr>
+<tr><td><code>python3 docs/build-handbook/build.py</code></td><td>Rebuild this handbook</td></tr>
+<tr><td><code>node docs/build-handbook/capture.js</code></td><td>Re-photograph the running system</td></tr>
+<tr><td><code>… --only crm-companies,n8n-canvas</code></td><td>Re-take specific figures</td></tr>
+</table>
+
+<!--APPENDIX env -->

@@ -1,0 +1,37 @@
+Dataset
+  companies                  40
+  people                    120
+  opportunities              35
+  serviceSubscriptions       25
+  complianceEngagements      18
+  trainingAccounts           15
+  phishingBaselines          45
+  consentRecords            120
+  tasks                      30
+  TOTAL                     448
+
+Wiping previously seeded records...
+  phishingBaselines        0 deleted
+  consentRecords           0 deleted
+  trainingAccounts         0 deleted
+  complianceEngagements    0 deleted
+  serviceSubscriptions     0 deleted
+  opportunities            0 deleted
+  tasks                    0 deleted
+  people                   0 deleted
+  companies                0 deleted
+
+Seeding http://localhost:3000 ...
+  companies                40/40
+  people                   120/120
+  opportunities            35/35
+  serviceSubscriptions     25/25
+  complianceEngagements    18/18
+  trainingAccounts         15/15
+  phishingBaselines        45/45
+  consentRecords           120/120
+  tasks                    30/30
+
+453 request(s) made.
+Open Twenty and confirm no view shows an empty state.
+Opted-out contacts exist on purpose — use one to demonstrate the consent gate refusing a send.
