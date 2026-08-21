@@ -12,7 +12,8 @@ the recipe; Docker runs the kitchen.
 
 | Document | What it answers |
 |---|---|
-| [`docs/08-local-build.md`](docs/08-local-build.md) | **Start here to build.** Laptop to demo-ready CRM, step by step |
+| [`docs/build-handbook/`](docs/build-handbook/) | **Start here if you have never built this.** The illustrated handbook — empty machine to proven CRM, every command run, every screen photographed. Rendered to [`out/Aspire-CRM-Build-Handbook.pdf`](out/Aspire-CRM-Build-Handbook.pdf) |
+| [`docs/08-local-build.md`](docs/08-local-build.md) | The condensed laptop runbook, for a reader who already knows Docker |
 | [`docs/05-runbook.md`](docs/05-runbook.md) | The GHL audit runbook — exact commands and what to send back |
 | [`docs/00-audit-method.md`](docs/00-audit-method.md) | How the audit runs — six tiers, disposition rules, what it cannot tell you |
 | [`docs/01-scope-and-questions.md`](docs/01-scope-and-questions.md) | Open decisions still outstanding |
@@ -109,6 +110,8 @@ scripts/mark_enrolment_paid.py       PAYMENT_SENT → PAID after money cleared
 infra/Caddyfile                      reverse proxy + Let's Encrypt (internet-facing)
 infra/Caddyfile.internal             reverse proxy + local CA (office network)
 scripts/verify_restore.py            restores a backup and compares row counts
+docs/build-handbook/                 the illustrated build handbook (HTML source → PDF)
+docs/build-handbook/verify_facts.py  re-derives every documented count from source
 scripts/stack_verify.py              verifies every layer independently
 scripts/seed_demo_data.py            448 deterministic Aspire demo records
 docs/                                method, findings, open decisions

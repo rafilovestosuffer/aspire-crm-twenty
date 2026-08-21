@@ -232,6 +232,7 @@ out/*
 !out/*.pdf
 docs/migration-guide/_combined.html
 docs/build-handbook/_combined.html
+docs/build-handbook/_web.html
 # The handbook prints real captured output rather than paraphrasing it, so
 # these transcripts are source, not logs. The blanket *.log rule above would
 # otherwise drop them and the handbook would not build for anyone else.
