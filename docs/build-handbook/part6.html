@@ -287,7 +287,69 @@ answer is "more than a fresh database has", your check will pass over broken
 code — which is exactly how three defects survived here.</p>
 </div>
 
-<h2>7.4 Rules that must not be broken</h2>
+<h2>7.4 Add a language model</h2>
+
+<p>This is the one extension in this book that is <b>planned rather than
+built</b>. Nothing in the running stack calls a language model today. It is
+described here because the shape of the integration decides how safe it is, and
+that decision is much cheaper to take now than to unpick later.</p>
+
+<p>Three of the catalogued features are waiting on it: the conversation bot, the
+content assistant, and review handling. All three were classed as work for the
+automation engine rather than the CRM, because the CRM cannot do them — its own
+AI action is not available in the version this book pins.</p>
+
+<h3>Where it plugs in</h3>
+
+<p>In exactly one place: a node inside an n8n workflow, called over HTTPS like
+any other API. It never talks to the CRM, the database or the mail server
+directly. The workflow calls the model, reads the answer, and writes the result
+to Twenty using the same REST calls every other workflow uses — so the query
+validator in §4.6 still checks it and the run still lands in
+<code>automationRun</code>.</p>
+
+<p>There is already a home for the output. <code>aiConversation</code> is
+provisioned and in use: <code>AI FrontDesk Handover</code> writes one record per
+conversation, with the summary, the sentiment score and whether a human was
+asked for. A model you add writes to the same object rather than inventing a
+new one.</p>
+
+<div class="callout danger">
+<span class="lbl">Decide this before you write a single node</span>
+<p>Every other component in this book runs on your machine. A hosted model does
+not. The moment a workflow sends a lead's enquiry, a conversation transcript or
+a contact's name to a model API, <b>the text of your records is on somebody
+else's computer</b> — subject to their retention policy, their jurisdiction and
+their breach history.</p>
+<p>That may be perfectly acceptable. It is not acceptable <i>by accident</i>, and
+for a company that sells security advice it is a question a client will
+eventually ask. The alternative is a model you host yourself, which is slower
+and less capable and keeps every record in the building. Pick deliberately,
+write the decision down, and put it where the next person will find it.</p>
+</div>
+
+<h3>The rules it inherits</h3>
+
+<p>A language model is not exempt from anything in §7.5. Four constraints matter
+more than the rest.</p>
+
+<table class="wide">
+<tr><th style="width:34%">Rule</th><th>Why</th></tr>
+<tr><td>It never sends anything</td><td><code>VEND Send Email</code> stays the only path to the mail server. A model may <i>draft</i>; a person or the consent gate decides whether it goes. A model that can send is a model that can mail somebody who opted out.</td></tr>
+<tr><td>It never writes a field a human would not check</td><td>Have it write to a draft or summary field and raise a task. A model writing straight into the record of truth means nobody can later tell which facts were observed and which were guessed.</td></tr>
+<tr><td>Its runs are logged like every other run</td><td>Same <code>automationRun</code> record, same error routing. When a model starts answering badly you want the history, and this is the one system that has it.</td></tr>
+<tr><td>A failure is loud</td><td>Follow §4.5: if the model is unreachable or returns something unparseable, fail and alert. Never fall through to a blank summary or a default score — a confidently wrong score is worse than no score.</td></tr>
+</table>
+
+<h3>What not to use it for</h3>
+
+<p>Not consent. Not scoring that decides whether a person is contacted. Not
+anything where a wrong answer is invisible. The rules engine in
+<code>LEAD Form Intake</code> is worse at nuance than a model and far better in
+one respect that outweighs it: you can read it, and it does the same thing
+twice.</p>
+
+<h2>7.5 Rules that must not be broken</h2>
 
 <table class="wide">
 <tr><th style="width:38%">Rule</th><th>What happens if you break it</th></tr>
