@@ -139,7 +139,10 @@ def main() -> int:
 
     dest = OUT / "feature_audit.csv"
     with dest.open("w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=COLUMNS)
+        # lineterminator: csv defaults to \r\n, which .gitattributes forbids for
+        # *.csv here. Left at the default the committed report is permanently
+        # "modified" in git and a trailing \r rides on the last column.
+        w = csv.DictWriter(fh, fieldnames=COLUMNS, lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
 

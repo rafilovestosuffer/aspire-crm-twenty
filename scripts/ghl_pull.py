@@ -473,8 +473,10 @@ def main() -> int:
 
     cov_path = OUT / "pull_coverage.csv"
     with cov_path.open("w", newline="", encoding="utf-8") as fh:
+        # LF, not csv's default \r\n — see .gitattributes.
         w = csv.DictWriter(fh, fieldnames=["endpoint", "area", "class", "status",
-                                           "count", "fields", "note"])
+                                           "count", "fields", "note"],
+                           lineterminator="\n")
         w.writeheader()
         w.writerows(coverage)
 
