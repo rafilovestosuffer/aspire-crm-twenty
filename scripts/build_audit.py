@@ -138,8 +138,12 @@ def main() -> int:
             })
 
     dest = OUT / "feature_audit.csv"
+    # lineterminator="\n": csv.writer defaults to \r\n on every platform, and
+    # .gitattributes pins *.csv to eol=lf, so the default leaves this file
+    # permanently modified in git after each regeneration. newline="" stays —
+    # it stops the interpreter translating on top of the writer.
     with dest.open("w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=COLUMNS)
+        w = csv.DictWriter(fh, fieldnames=COLUMNS, lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
 
