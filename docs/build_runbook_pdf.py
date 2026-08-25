@@ -93,8 +93,6 @@ li.task { list-style: none; margin-left: -3.5mm; }
 .cover .meta { font-size: 9pt; color: #48566c; line-height: 1.85;
                border-top: 0.5pt solid #c8d2e0; padding-top: 5mm; }
 .cover .meta b { color: #12325a; }
-.cover .warnstrip { margin-top: 12mm; border-left: 3pt solid #a02c2c; background: #fbf0f0;
-                    padding: 3mm 3.5mm; font-size: 8.6pt; color: #6b1f1f; }
 
 .toc { page-break-after: always; }
 .toc h1 { border: none; font-size: 17pt; margin-bottom: 1mm; bookmark-level: none; }
@@ -155,15 +153,9 @@ def build_cover(meta: dict[str, str]) -> str:
   <div class="meta">
     <b>Status</b> &nbsp;{m("Status", "Current")}<br>
     <b>Owner</b> &nbsp;{m("Owner")}<br>
-    <b>Second operator</b> &nbsp;{m("Second operator", "Not yet named")}<br>
     <b>Source</b> &nbsp;docs/RUNBOOK.md — this PDF is generated from it<br>
     <b>Repository</b> &nbsp;{m("Repository")}<br>
     <b>Classification</b> &nbsp;{m("Classification", "Internal")}
-  </div>
-  <div class="warnstrip">
-    This document is generated. Edit <b>docs/RUNBOOK.md</b> and re-run
-    <b>docs/build_runbook_pdf.py</b> — never the PDF. An out-of-date runbook is
-    worse than none, because it is trusted.
   </div>
 </div>
 """
