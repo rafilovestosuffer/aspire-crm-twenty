@@ -17,10 +17,11 @@ the recipe; Docker runs the kitchen.
 | [`docs/00-audit-method.md`](docs/00-audit-method.md) | How the audit runs — six tiers, disposition rules, what it cannot tell you |
 | [`docs/01-scope-and-questions.md`](docs/01-scope-and-questions.md) | Open decisions still outstanding |
 | [`docs/02-ghl-api-findings.md`](docs/02-ghl-api-findings.md) | Verified API facts with sources — read before writing anything against GHL |
-| [`docs/03-replacement-stack.md`](docs/03-replacement-stack.md) | What "no GHL in Phase 1" actually requires. 52 ESCALATE rows → 8 vendor decisions |
+| [`docs/03-replacement-stack.md`](docs/03-replacement-stack.md) | **Superseded** — written under a "no GHL in Phase 1" decision that Q1 reversed. Kept for the reasoning trail |
 | [`docs/04-manual-sweep.md`](docs/04-manual-sweep.md) | Tier 5 checklist for everything no API serves |
 | [`docs/06-twenty-object-model.md`](docs/06-twenty-object-model.md) | The 25-object GHL parity model provisioned into Twenty |
 | [`docs/09-status-and-handover.md`](docs/09-status-and-handover.md) | **Start here.** What exists, what is proven, what is left, what it costs, how to run it |
+| [`docs/14-ghl-contact-sync.md`](docs/14-ghl-contact-sync.md) | Keeping Twenty's data current as a GHL-outage fallback — the recurring sync job, and its verification status |
 | [`docs/11-internal-server-deployment.md`](docs/11-internal-server-deployment.md) | **Office server** (private IP, no inbound internet). Written for a first-time server admin |
 | [`docs/10-vps-deployment.md`](docs/10-vps-deployment.md) | Company server: DNS, TLS, the editor allowlist, and what this doc does *not* do |
 | [`docs/07-build-plan.md`](docs/07-build-plan.md) | **The build plan.** What Twenty + n8n alone delivers, and the sprint sequence |
@@ -72,6 +73,14 @@ python scripts/twenty_probe.py            # probe the live Twenty instance
 python scripts/twenty_provision.py --dry-run   # preview the object model
 python scripts/twenty_provision.py         # build it
 python scripts/build_audit.py             # → out/feature_audit.csv
+
+# Keep Twenty current as a GHL-outage fallback (continuity, not migration — see
+# docs/01-scope-and-questions.md Q1). Run twenty_provision.py above first: it
+# adds the ghlContactId/ghlBusinessId/ghlOpportunityId fields this sync matches on.
+python scripts/ghl_contact_sync.py --discover   # probe response shapes first, writes nothing
+python scripts/ghl_contact_sync.py --dry-run --limit 25   # small trial run
+python scripts/ghl_contact_sync.py         # full sync
+# Then schedule it: crontab -e →  0 */4 * * *  /path/to/infra/ghl_sync.sh
 ```
 
 Read `out/pull_coverage.csv` before drawing any conclusion from `raw/`. It records
@@ -84,7 +93,8 @@ on this account tier.
 reference/ghl_feature_taxonomy.csv   111-feature master checklist — the spine
 reference/ghl_endpoints.yaml         43 read-only endpoints driving the puller
 reference/twenty_schema.yaml         25-object GHL parity model for Twenty
-scripts/ghl_pull.py                  GET-only, throttled, PII-classified puller
+scripts/ghl_pull.py                  GET-only, throttled, PII-free config puller
+scripts/ghl_contact_sync.py          recurring GHL->Twenty contact/company/opportunity sync
 scripts/twenty_probe.py              reads the live Twenty instance's real capability
 scripts/twenty_provision.py          builds the object model via the Metadata API
 scripts/build_audit.py               merges evidence + taxonomy → the report
@@ -103,6 +113,7 @@ infra/init-vps-env.sh                generate secrets + public hostnames on a VP
 infra/deploy.sh                      one-command server deploy, eleven gated steps
 infra/harden-host.sh                 unattended-upgrades + fail2ban (run as root)
 infra/watchdog.sh                    hourly stack_verify → chat webhook on failure
+infra/ghl_sync.sh                    cron wrapper for scripts/ghl_contact_sync.py
 infra/backup-offsite.sh              rsync infra/backups/ off this disk
 scripts/import_consent_csv.py        GHL suppression CSV → consentRecord
 scripts/mark_enrolment_paid.py       PAYMENT_SENT → PAID after money cleared

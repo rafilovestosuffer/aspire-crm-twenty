@@ -564,3 +564,25 @@ objects:
       - {name: errorMessage, label: Error Message, type: TEXT}
       - {name: n8nExecutionId, label: n8n Execution ID, type: TEXT}
       - {name: ghlWorkflowId, label: Origin GHL Workflow ID, type: TEXT}
+
+# ======================= Standard object extensions =======================
+#
+# Fields added to Twenty's built-in Person, Company and Opportunity objects
+# (never redefined, only extended) by scripts/twenty_provision.py. These exist
+# for one reason: scripts/ghl_contact_sync.py needs a stable key to match a GHL
+# record to a Twenty record on every run without relying on name or email,
+# which change. Without this, every sync run would re-guess identity by name/
+# email match and eventually create duplicates.
+standard_extensions:
+  - nameSingular: person
+    fields:
+      - {name: ghlContactId, label: GHL Contact ID, type: TEXT}
+      - {name: ghlSyncedAt, label: GHL Synced At, type: DATE_TIME}
+  - nameSingular: company
+    fields:
+      - {name: ghlBusinessId, label: GHL Business ID, type: TEXT}
+      - {name: ghlSyncedAt, label: GHL Synced At, type: DATE_TIME}
+  - nameSingular: opportunity
+    fields:
+      - {name: ghlOpportunityId, label: GHL Opportunity ID, type: TEXT}
+      - {name: ghlSyncedAt, label: GHL Synced At, type: DATE_TIME}

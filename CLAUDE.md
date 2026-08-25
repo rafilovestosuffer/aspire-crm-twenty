@@ -15,10 +15,25 @@ is not the Twenty deployment itself — no Docker config, no server settings.
 1. **READ-ONLY against GHL.** No POST / PUT / PATCH / DELETE to any GHL endpoint,
    ever. The puller refuses non-GET methods at the transport layer; do not remove
    that guard.
-2. **No PII.** Do not pull contact records, conversation bodies, message content,
-   call recordings, or form-submission payloads. Configuration objects only.
-   Endpoints classified `volume` in the registry return counts only — the body is
-   discarded before it is written to disk.
+2. **No PII — with one named, narrow exception.** `scripts/ghl_pull.py` (the
+   audit puller) and everything in the registry it drives stay PII-free: do not
+   pull contact records, conversation bodies, message content, call recordings,
+   or form-submission payloads. Configuration objects only. Endpoints classified
+   `volume` in the registry return counts only — the body is discarded before it
+   is written to disk.
+
+   **Exception, authorized 25 Aug 2026:** `scripts/ghl_contact_sync.py` is a
+   separate, recurring job whose entire purpose is keeping Twenty's contacts,
+   companies and opportunities current as a GHL-outage fallback (Q1,
+   `docs/01-scope-and-questions.md` — GHL is retained, this is continuity
+   insurance, not a Phase 1 migration). It is explicitly permitted to pull
+   contact/company/opportunity **CRM fields** (name, email, phone, deal value,
+   pipeline stage) — the minimum needed for that purpose. It is still GET-only
+   against GHL, still rate-limited, and it must never touch conversation
+   bodies, call recordings, or form-submission payloads — only structured CRM
+   fields. Nothing it pulls is ever written to a committed file; it flows
+   GHL → memory → Twenty API only. Do not widen this exception to cover a
+   different script without a matching entry here.
 3. **Secrets stay in `.env`.** Never print, echo, log, or commit `GHL_TOKEN`,
    `TWENTY_API_KEY`, or any session JWT. The puller redacts `Authorization`
    headers from all error output.
@@ -55,10 +70,12 @@ something GHL itself doesn't do and Aspire wants anyway.
 reference/ghl_feature_taxonomy.csv   master checklist — the spine, nothing gets missed
 reference/ghl_endpoints.yaml         endpoint registry driving the puller
 reference/twenty_schema.yaml         25-object GHL parity model for Twenty
-scripts/ghl_pull.py                  read-only GHL puller (registry-driven)
+scripts/ghl_pull.py                  read-only GHL puller (registry-driven), PII-free
+scripts/ghl_contact_sync.py          recurring GHL->Twenty CRM sync, the named PII exception
 scripts/twenty_probe.py              probes the live Twenty instance for capability truth
 scripts/twenty_provision.py          builds the object model via the Metadata API
 scripts/build_audit.py               merges pulls + taxonomy → out/feature_audit.csv
+infra/ghl_sync.sh                    cron wrapper for ghl_contact_sync.py
 raw/                                 GHL pull output          (gitignored)
 workflows/                           workflow internals       (gitignored)
 out/                                 reports                  (feature_audit.csv committed)

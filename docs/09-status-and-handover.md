@@ -12,16 +12,19 @@ the account is lost, Aspire keeps operating instead of going dark. Read
 everything below with that framing; "moved off GoHighLevel" language in this
 document predates that clarification.
 
-**Open gap this raises — no ongoing sync.** None of the 18 n8n workflows pull
-data *from* GHL into Twenty; they all handle Twenty's own native intake (its
-own form, its own webhooks, its own schedules). Twenty's contacts, companies
-and pipeline are populated by the one-time 18 Aug 2026 pull and by whatever
-comes in through Twenty's own paths since then — they are **not** kept current
-with GHL's live data. As a continuity fallback, that matters: if the GHL
-subscription lapsed today, Twenty would be missing every lead and deal change
-GHL captured after 18 Aug. Closing this is real work — either a recurring
-read-only GHL→Twenty sync job, or a documented, rehearsed "pull the latest GHL
-export before relying on this" procedure — and it is not built yet.
+**The sync gap — status 25 Aug 2026: built, not yet verified live.**
+`scripts/ghl_contact_sync.py` now pulls GHL companies, contacts and
+opportunities and upserts them into Twenty on a recurring basis
+(`infra/ghl_sync.sh`, cron). See `docs/14-ghl-contact-sync.md` for the design,
+what it does and does not cover, and — this is the part that matters before
+trusting it — **it has never run against a real GHL account.** The endpoint
+paths, list keys and pagination cursors are written from GHL's public API
+documentation, not verified the way every other GHL fact in this file was
+(this repo's own working style, and its own history — the `/emails/builder`
+silent-zero incident — is why that distinction is called out explicitly
+rather than assumed fine). Run `python scripts/ghl_contact_sync.py --discover`
+against a live token and read `out/ghl_sync_coverage.json` before scheduling
+it unattended.
 
 ---
 

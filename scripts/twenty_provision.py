@@ -73,7 +73,7 @@ def read_env() -> dict[str, str]:
     return env
 
 
-def load_schema() -> list[dict]:
+def load_schema() -> tuple[list[dict], list[dict]]:
     text = SCHEMA.read_text(encoding="utf-8")
     try:
         import yaml  # type: ignore
@@ -83,7 +83,7 @@ def load_schema() -> list[dict]:
             "the fallback parser does not cover).\n"
             "  pip install -r scripts/requirements.txt")
     data = yaml.safe_load(text)
-    return data.get("objects", [])
+    return data.get("objects", []), data.get("standard_extensions", [])
 
 
 def option_value(label: str) -> str:
@@ -298,14 +298,17 @@ def main() -> int:
     ap.add_argument("--only", default="", help="comma-separated nameSingular values")
     args = ap.parse_args()
 
-    specs = load_schema()
+    specs, extensions = load_schema()
     wanted = {s.strip() for s in args.only.split(",") if s.strip()}
     if wanted:
         specs = [s for s in specs if s["nameSingular"] in wanted]
+        extensions = [e for e in extensions if e["nameSingular"] in wanted]
 
     n_fields = sum(len(s.get("fields", [])) for s in specs)
     n_rels = sum(len(s.get("relations", [])) for s in specs)
-    print(f"Schema: {len(specs)} object(s), {n_fields} field(s), {n_rels} relation(s)\n")
+    n_ext = sum(len(e.get("fields", [])) for e in extensions)
+    print(f"Schema: {len(specs)} object(s), {n_fields} field(s), {n_rels} relation(s), "
+          f"{n_ext} standard-object extension field(s)\n")
 
     env = read_env()
     base = env.get("TWENTY_BASE_URL", "http://localhost:3000")
@@ -371,6 +374,32 @@ def main() -> int:
                 failures += 1
                 print(f"    FAILED {name}.{f['name']}  {err[:180]}")
         print(f"  done  {name} ({len(spec.get('fields', []))} field(s))")
+
+    # ---- Pass 2b: standard object extensions ----
+    # Person/Company/Opportunity are never created (STANDARD), only extended —
+    # scripts/ghl_contact_sync.py needs these fields to match a GHL record to a
+    # Twenty record on every run without guessing by name or email.
+    if extensions:
+        print("\nPass 2b — standard object extensions")
+        for ext in extensions:
+            name = ext["nameSingular"]
+            obj = existing.get(name)
+            if not obj and not args.dry_run:
+                print(f"  skip  {name} (standard object not found on this "
+                      f"instance — may be named differently)")
+                continue
+            have = api.existing_fields(obj) if obj else set()
+            obj_id = (obj or {}).get("id", "DRY-RUN-ID")
+            for f in ext.get("fields", []):
+                if f["name"] in have:
+                    continue
+                ok, err = api.create_field(obj_id, f)
+                report.append({"kind": "field", "name": f"{name}.{f['name']}",
+                               "result": _outcome(ok, err)})
+                if not ok:
+                    failures += 1
+                    print(f"    FAILED {name}.{f['name']}  {err[:180]}")
+            print(f"  done  {name} ({len(ext.get('fields', []))} field(s))")
 
     # ---- Pass 3: relations ----
     if args.skip_relations:
