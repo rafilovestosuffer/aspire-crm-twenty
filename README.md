@@ -12,6 +12,7 @@ the recipe; Docker runs the kitchen.
 
 | Document | What it answers |
 |---|---|
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | **The master runbook.** The whole project start to end — purpose, audit, build, deploy, migrate, cut over, operate, hand over. Every command, every gate, every failure mode |
 | [`docs/08-local-build.md`](docs/08-local-build.md) | **Start here to build.** Laptop to demo-ready CRM, step by step |
 | [`docs/05-runbook.md`](docs/05-runbook.md) | The GHL audit runbook — exact commands and what to send back |
 | [`docs/00-audit-method.md`](docs/00-audit-method.md) | How the audit runs — six tiers, disposition rules, what it cannot tell you |

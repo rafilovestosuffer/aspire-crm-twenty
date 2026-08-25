@@ -1,4 +1,8 @@
-# Runbook — Local Execution
+# Runbook — Local Execution (the GHL audit)
+
+> This covers **the GoHighLevel audit only**. For the whole project start to
+> end — build, deploy, migrate, cut over, operate — see the master runbook,
+> [`docs/RUNBOOK.md`](RUNBOOK.md); this document is expanded there as §4.
 
 Everything runs on your machine. The token never leaves it.
 
