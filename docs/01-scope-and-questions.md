@@ -5,36 +5,42 @@ reference in the report and in JIRA.
 
 ---
 
-## Q1 — Is GHL out entirely in Phase 1, or retained for sending? **(blocking)**
+## Q1 — Is GHL out entirely in Phase 1, or retained for sending? **RESOLVED 25 Aug 2026**
 
-This is the question that sizes the whole project, and there are currently two
-answers on record.
+There were two conflicting answers on record; this closes it.
 
 - **Master context §3.2, decision 1** — reviewed and annotated by the boss:
   GHL is *"retained as secondary CRM and sending platform."*
-- **Current instruction:** *"in our first phase, we don't want to add GHL. We are
-  only doing everything by Twenty."*
+- **Earlier instruction (superseded):** *"in our first phase, we don't want to
+  add GHL. We are only doing everything by Twenty."*
 
-These lead to very different projects:
+**Answer: GHL is retained.** GHL keeps running as the system of record — this
+build is not replacing it in Phase 1. Its purpose is **business continuity**:
+if the GHL subscription lapses, is forgotten, or the account is otherwise
+lost, Aspire can keep operating — contacts, pipeline, and core workflows —
+on infrastructure it owns, instead of going dark. It is insurance, not a
+cutover.
 
-| | GHL retained for sending | GHL fully out in Phase 1 |
-|---|---|---|
-| Bulk email, SMS, voice, forms, booking pages, funnels | Stay in GHL — mapped, not replaced | Every one needs a **replacement vendor, contract and budget** |
-| ~30 execution-layer items of the 82 | `RETAIN-GHL` | `ESCALATE` |
-| Audit output | A mapping exercise | A mapping exercise **plus a procurement plan** |
-| Realistic Phase 1 shape | Twenty as record layer | Twenty + n8n + 3–5 new paid services |
+This means:
 
-The reason this cannot be finessed: Twenty's `Send Email` action sends from a
-synced mailbox, **one recipient at a time** (`docs/02` §6). It has no campaign
-engine, no suppression list, no SMS, no telephony, no forms, no booking pages.
-n8n can orchestrate a send but cannot be the sender. So "everything by Twenty"
-is not achievable for any feature that reaches a person through a channel — not
-because of a configuration gap, but because those capabilities do not exist in
-either tool.
+| | Answer: GHL retained for sending |
+|---|---|
+| Bulk email, SMS, voice, forms, booking pages, funnels | Stay in GHL — mapped, not replaced |
+| ~30 execution-layer items of the 82 | `RETAIN-GHL` |
+| Audit output | A mapping exercise, not a procurement plan |
+| Realistic Phase 1 shape | Twenty as record layer + n8n automation, running in parallel with GHL as a fallback, not instead of it |
 
-**What is needed:** confirmation of which reading is current. If Phase 1 really
-does exclude GHL, the audit stays the same but its output becomes a vendor
-shortlist with costs, and the timeline extends well past the current estimate.
+The reason this could not be finessed either way: Twenty's `Send Email` action
+sends from a synced mailbox, **one recipient at a time** (`docs/02` §6). It has
+no campaign engine, no suppression list, no SMS, no telephony, no forms, no
+booking pages. n8n can orchestrate a send but cannot be the sender. Under the
+retained-GHL answer this is not a gap to close — GHL keeps doing those jobs.
+
+**Follow-on:** the `ESCALATE` rows in `out/feature_audit.csv` and the vendor
+list in `docs/03-replacement-stack.md` should be re-read against this —
+several of those "needs a vendor decision" items are actually `RETAIN-GHL`
+under this answer and do not need new budget. Re-pass the audit's
+dispositions before treating that ESCALATE list as a procurement ask.
 
 ---
 
@@ -100,9 +106,11 @@ one place the plan currently assumes data that does not exist.
 
 ## Q7 — Does the sunset date exist yet?
 
-Still open from master context §12.1. If Phase 1 excludes GHL (Q1), a sunset date
-stops being a governance nicety and becomes a **contract-termination date** with
-budget consequences. It should be answered in the same conversation as Q1.
+Still open from master context §12.1, but lower stakes now that Q1 is resolved
+as GHL-retained: there is no Phase 1 cutover, so no contract-termination date
+is forced by this project. GHL's own subscription/renewal date is still worth
+tracking, since the whole point of this build is to survive that date lapsing
+unexpectedly — but it is no longer a blocking question for this audit.
 
 ---
 
