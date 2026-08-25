@@ -1,7 +1,16 @@
 # Replacement Stack — What "No GHL in Phase 1" Actually Requires
 
-**Decision on record:** GoHighLevel is out entirely in Phase 1. Twenty + n8n
-carry everything.
+**Superseded 25 Aug 2026.** Q1 (`docs/01-scope-and-questions.md`) is resolved
+the other way: GHL is **retained** as the system of record. This document's
+premise — no GHL in Phase 1 — no longer holds. The 52 rows described below as
+`ESCALATE` have been reclassified to `RETAIN-GHL` in `out/feature_audit.csv`:
+they stay in GHL, and none of the eight vendor decisions below are needed for
+Phase 1. Kept here for the reasoning trail and in case Phase 1 scope changes
+again later — do not read it as current guidance.
+
+---
+
+**Original text below, written under the "GHL fully out" decision:**
 
 This document exists because that decision has a consequence the feature list
 does not make obvious: **52 of 111 catalogued features currently classify as

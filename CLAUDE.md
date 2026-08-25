@@ -36,11 +36,19 @@ dated UI observation. "I think we use it" is not evidence. Unknown is a valid
 answer and must be recorded as `unknown`, never guessed.
 
 ## Disposition values
-`TWENTY` · `N8N` · `TWENTY+N8N` · `DROP` · `ESCALATE` · `UNKNOWN`
+`TWENTY` · `N8N` · `TWENTY+N8N` · `DROP` · `RETAIN-GHL` · `ESCALATE` · `UNKNOWN`
 
 `ESCALATE` = cannot be done by Twenty or n8n alone and needs a vendor/budget
 decision (bulk email, SMS, voice, telephony numbers, funnels/websites, payments).
 Do not hide these — a short, honest ESCALATE list is what makes the rest credible.
+
+`RETAIN-GHL` = Q1 is resolved (`docs/01-scope-and-questions.md`): GHL stays
+running as the system of record. This build is a continuity fallback, not a
+Phase 1 replacement. A feature gets `RETAIN-GHL` when it would otherwise need
+a vendor decision (the old `ESCALATE` cases) but GHL already does the job and
+keeps doing it — no new budget, no new contract. Reserve `ESCALATE` for
+something that would need a vendor decision *even with GHL retained* — e.g.
+something GHL itself doesn't do and Aspire wants anyway.
 
 ## Layout
 ```
