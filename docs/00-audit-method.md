@@ -104,14 +104,17 @@ right, right up until go-live.
 | `N8N` | n8n reproduces it without Twenty involvement. |
 | `TWENTY+N8N` | Record lives in Twenty, logic runs in n8n. |
 | `DROP` | Evidence shows it is not in use. Retire it. |
-| `ESCALATE` | Neither Twenty nor n8n can do it. Needs a vendor and a budget. |
+| `RETAIN-GHL` | Neither Twenty nor n8n can do it, but GHL is retained (Q1, `docs/01`) and already does it. No vendor decision needed. |
+| `ESCALATE` | Neither Twenty nor n8n can do it, and GHL retained does not cover it either — Aspire wants it and it needs a vendor and a budget. |
 | `UNKNOWN` | Not yet checked. Not a final state — the audit ends when this is zero. |
 
-`ESCALATE` is not failure and must not be buried. It is the honest output of the
-capability boundary in `docs/02` §6: Twenty is a record layer, and every feature
-that reaches a human through a channel needs something else behind it. A short,
-specific ESCALATE list beside a long TWENTY/N8N list is a credible report. A
-report with no ESCALATE items is one nobody should believe.
+**Since Q1 resolved as GHL-retained (25 Aug 2026),** `RETAIN-GHL` absorbed what
+used to be the whole ESCALATE list — everything that reaches a human through a
+channel (bulk email, SMS, forms, booking pages) simply stays on GHL, which is
+still running. `ESCALATE` is now reserved for the narrower case: something GHL
+itself doesn't do that Aspire wants anyway. It should still not be buried when
+it does show up — the reasoning below about a report with no ESCALATE items
+being one nobody should believe still holds, just against a shorter list.
 
 ---
 

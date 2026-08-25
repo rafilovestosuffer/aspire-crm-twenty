@@ -1,5 +1,13 @@
 # Build Plan — Twenty + n8n Only
 
+**Context as of 25 Aug 2026:** Q1 (`docs/01-scope-and-questions.md`) resolved
+as GHL-retained — this build is a continuity fallback, not a Phase 1
+replacement. Nothing below is wrong because of that; what changes is urgency.
+Everything here is still worth building because it makes the fallback more
+capable and because it costs nothing extra to run alongside GHL, but none of
+it is blocking a cutover that isn't happening. Read it as "what this stack can
+do," not "what has to ship before GHL is turned off."
+
 **Decision taken:** build everything achievable with Twenty and n8n alone.
 Third-party services are deferred, not designed out.
 
