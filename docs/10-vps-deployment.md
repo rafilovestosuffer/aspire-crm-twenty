@@ -1,5 +1,32 @@
 # Deploying to the Company Server
 
+## If the server is already running something else
+
+The Contabo box currently runs **Qdrant**. Clear it before the sequence below,
+with the data kept, in case someone wants it back:
+
+```bash
+./infra/reclaim-server.sh              # inventory. Changes nothing
+./infra/reclaim-server.sh --yes        # archive Qdrant's data, then stop it
+./infra/reclaim-server.sh --yes --purge   # also delete its volumes and images
+```
+
+`--yes` tars every bind mount and named volume the Qdrant container had into
+`~/qdrant-archive/` **before** anything stops, then stops and removes the
+container, brings down any compose project in `~/qdrant`, and disables a
+systemd unit if there is one. Removing the container is the part that matters:
+`restart=always` otherwise brings it back on the next reboot, and it would then
+be competing with Twenty for memory with nobody watching.
+
+Stopping is reversible. `--purge` is not — it deletes the volumes and images
+and makes you type the word. The archive survives it either way, and the
+directories on disk are left alone.
+
+Qdrant listens on 6333/6334, so it is not what blocks Caddy. The script reports
+what holds **80 and 443** and deliberately does not kill it: on a server you did
+not set up, the thing on port 80 is as likely to be someone's way in as it is to
+be junk. Deal with that by hand, then run `preflight.sh`.
+
 ## Tonight, in order
 
 Everything below is explained in detail further down. This is the sequence.
