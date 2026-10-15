@@ -36,6 +36,16 @@ if [[ "${1:-}" == "--internal" ]]; then
   MODE_ARGS=(--internal)
   shift
 fi
+HOST_PROXY=0
+if [[ "${1:-}" == "--host-proxy" ]]; then
+  HOST_PROXY=1
+  # Shared server: the host already runs Caddy on 80/443 for other sites, so
+  # the stack runs without its own proxy and infra/aspire-crm.caddy (from
+  # render-host-caddy.sh) is installed into the host Caddy before this runs.
+  OVERLAY=(-f "$HERE/docker-compose.yml" -f "$HERE/docker-compose.hostproxy.yml")
+  MODE_ARGS=(--host-proxy)
+  shift
+fi
 
 TOTAL=11
 step=0
@@ -197,6 +207,30 @@ check_worker() {
   printf "  ${G}ok${O}    worker running\n"
 }
 
+# The host Caddy is not ours to start a throwaway copy of, so the rules are
+# asserted against the live sites instead. Run from this host, the request
+# comes from the server's own public address, which is outside the office
+# allowlist — so the editor must answer 403 here.
+prove_host_proxy() {
+  local crm auto code fails=0
+  crm=$(grep -E '^CRM_DOMAIN=' "$HERE/.env" | tail -1 | cut -d= -f2- | tr -d '"')
+  auto=$(grep -E '^AUTOMATION_DOMAIN=' "$HERE/.env" | tail -1 | cut -d= -f2- | tr -d '"')
+  expect() {
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$2" || true)
+    if [[ "$code" == "$1" ]]; then
+      printf "  ${G}ok${O}    %-44s ${D}%s${O}\n" "$2" "$code"
+    else
+      printf "  ${R}FAIL${O}  %-44s got %s, expected %s — %s\n" "$2" "$code" "$1" "$3"
+      fails=$((fails + 1))
+    fi
+  }
+  expect 200 "https://$crm/healthz"            "the CRM is not served through the host Caddy"
+  expect 308 "http://$crm/"                    "plain HTTP is not redirected to HTTPS"
+  expect 200 "https://$auto/form/aspire-contact" "the public form is not reachable"
+  expect 403 "https://$auto/"                  "the n8n editor is NOT blocked outside N8N_EDITOR_ALLOWED_IPS"
+  [[ $fails -eq 0 ]]
+}
+
 prove_restores() {
   python3 scripts/verify_restore.py || return 1
   python3 scripts/verify_restore.py --database n8n
@@ -235,9 +269,18 @@ run "Validate every CRM API call" python3 scripts/validate_workflow_queries.py
 run "Deploy and activate"         python3 scripts/n8n_deploy.py --activate
 run "Verify every layer"          python3 scripts/stack_verify.py
 run "Prove the backups restore"   prove_restores
-run "Prove the proxy rules hold"  python3 scripts/verify_proxy_rules.py ${MODE_ARGS[@]+"${MODE_ARGS[@]}"}
+if [[ $HOST_PROXY -eq 1 ]]; then
+  run "Prove the proxy rules hold"  prove_host_proxy
+else
+  run "Prove the proxy rules hold"  python3 scripts/verify_proxy_rules.py ${MODE_ARGS[@]+"${MODE_ARGS[@]}"}
+fi
 
 CRM=$(grep -E '^CRM_DOMAIN=' "$HERE/.env" | cut -d= -f2- | tr -d '"')
+if [[ $HOST_PROXY -eq 1 ]]; then
+  RECREATE_PROXY="./infra/render-host-caddy.sh, copy it to /etc/caddy/sites/, sudo systemctl reload caddy"
+else
+  RECREATE_PROXY="docker compose ${OVERLAY[*]} up -d --force-recreate caddy"
+fi
 AUTO=$(grep -E '^AUTOMATION_DOMAIN=' "$HERE/.env" | cut -d= -f2- | tr -d '"')
 
 cat <<EOF
@@ -262,7 +305,7 @@ $(printf '=%.0s' {1..64})
      is N8N_EDITOR_ALLOWED_IPS in infra/.env, not infra/Caddyfile. If it still
      has RFC 5737 example ranges, nobody — including you — can get in. Fix
      the CIDRs, then:
-       docker compose ${OVERLAY[*]} up -d --force-recreate caddy
+       ${RECREATE_PROXY}
 
   4. Make the GitHub repo private. It is public and still documents the old
      demo password.

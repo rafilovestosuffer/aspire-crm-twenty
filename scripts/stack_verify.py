@@ -34,12 +34,20 @@ def compose_cmd(env: dict[str, str]) -> list[str]:
     cmd = ["docker", "compose", "-f", str(ROOT / "infra" / "docker-compose.yml")]
     if not (env.get("CRM_DOMAIN") or "").strip():
         return cmd
+    if host_proxy(env):
+        return cmd + ["-f", str(ROOT / "infra" / "docker-compose.hostproxy.yml")]
     overlay = (ROOT / "infra" / "docker-compose.internal.yml"
                if not (env.get("ACME_EMAIL") or "").strip()
                else ROOT / "infra" / "docker-compose.vps.yml")
     if overlay.exists():
         cmd += ["-f", str(overlay)]
     return cmd
+
+
+def host_proxy(env: dict[str, str]) -> bool:
+    """REVERSE_PROXY=host: the host's own Caddy fronts the stack (shared server)."""
+    return (env.get("REVERSE_PROXY") or "").strip().lower() == "host"
+
 
 OK, WARN, FAIL = "ok", "warn", "FAIL"
 GREEN, YELLOW, RED, DIM, RESET = "\033[32m", "\033[33m", "\033[31m", "\033[2m", "\033[0m"
@@ -144,7 +152,7 @@ def main() -> int:
 
     env = read_env()
     compose = compose_cmd(env)
-    require_caddy = bool((env.get("CRM_DOMAIN") or "").strip())
+    require_caddy = bool((env.get("CRM_DOMAIN") or "").strip()) and not host_proxy(env)
     rep = Report()
 
     print(f"\n{DIM}Containers{RESET}")

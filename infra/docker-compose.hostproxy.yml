@@ -1,0 +1,40 @@
+# Shared-server overlay. Use instead of docker-compose.vps.yml when the host
+# already runs its own reverse proxy (a system Caddy that other sites share)
+# and ports 80/443 are therefore taken.
+#
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.hostproxy.yml up -d
+#   ./infra/deploy.sh --host-proxy
+#
+# Differences from the VPS overlay:
+#   - no caddy service. TLS and the editor allowlist live in the host Caddy,
+#     in the site file written by infra/render-host-caddy.sh
+#   - app ports are still bound to 127.0.0.1 only, so the host Caddy is the
+#     only way in from outside
+#   - no network aliases (there is no caddy container to put them on).
+#     Instead the public CRM name is pinned to the host itself with
+#     host-gateway, so the server's call to its own SERVER_URL (which is how
+#     /rest/metadata/* is served) lands on the host Caddy without leaving the
+#     machine and without depending on hairpin NAT
+#
+# Set TWENTY_PORT and N8N_PORT in infra/.env to ports nothing else on the host
+# uses (3000 and 5678 are often taken on a shared server).
+
+services:
+
+  server:
+    # !override: see docker-compose.vps.yml. Without it the base file's
+    # all-interfaces binding is kept as well and the proxy can be bypassed.
+    ports: !override
+      - "127.0.0.1:${TWENTY_PORT:-3000}:3000"
+    extra_hosts:
+      - "${CRM_DOMAIN:?set CRM_DOMAIN in infra/.env}:host-gateway"
+  worker:
+    extra_hosts:
+      - "${CRM_DOMAIN:?set CRM_DOMAIN in infra/.env}:host-gateway"
+  n8n:
+    ports: !override
+      - "127.0.0.1:${N8N_PORT:-5678}:5678"
+    environment:
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: none
+      N8N_SECURE_COOKIE: "true"
+      N8N_PROXY_HOPS: "1"

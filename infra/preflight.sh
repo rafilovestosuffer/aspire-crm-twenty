@@ -17,6 +17,10 @@ set -uo pipefail   # deliberately not -e: every check should run
 # else — memory, disk, Docker, secrets, ports, firewall — still applies.
 INTERNAL=0
 [[ "${1:-}" == "--internal" ]] && INTERNAL=1
+# Shared server whose own Caddy already holds 80/443 for other sites. Ours is
+# added to it as a site file, so a busy 80/443 is expected, not a problem.
+HOST_PROXY=0
+[[ "${1:-}" == "--host-proxy" ]] && HOST_PROXY=1
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$HERE/.env"
@@ -296,7 +300,27 @@ done
 
 # Port 80 must be reachable from the internet or the HTTP-01 challenge fails.
 # Anything already listening there will also block Caddy from starting.
-if command -v ss >/dev/null 2>&1; then
+if [[ $HOST_PROXY -eq 1 ]]; then
+  if systemctl is-active --quiet caddy 2>/dev/null; then
+    ok "host Caddy" "running — serves 80/443 for this stack"
+  else
+    bad "host Caddy" "not running — --host-proxy needs the system Caddy"
+  fi
+  if [[ -f /etc/caddy/sites/aspire-crm.caddy ]]; then
+    ok "host Caddy site file" "/etc/caddy/sites/aspire-crm.caddy"
+  else
+    bad "host Caddy site file" "missing — ./infra/render-host-caddy.sh, then copy it to /etc/caddy/sites/ and reload caddy"
+  fi
+  for p in "$(env_get TWENTY_PORT)" "$(env_get N8N_PORT)"; do
+    [[ -z "$p" ]] && continue
+    if ss -lntH "sport = :$p" 2>/dev/null | grep -q . \
+       && ! docker ps --format '{{.Names}} {{.Ports}}' 2>/dev/null | grep -E "^aspire-crm-" | grep -q ":$p->"; then
+      bad "port $p" "already used by something else on this host — pick another in infra/.env"
+    else
+      ok "port $p" "free (or ours)"
+    fi
+  done
+elif command -v ss >/dev/null 2>&1; then
   for p in 80 443; do
     if ss -lntH "sport = :$p" 2>/dev/null | grep -q .; then
       holder=$(ss -lntpH "sport = :$p" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1)
