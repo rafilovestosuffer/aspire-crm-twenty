@@ -374,7 +374,11 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--wipe", action="store_true",
                     help="delete previously seeded records first")
+    ap.add_argument("--wipe-only", action="store_true",
+                    help="delete previously seeded records and stop (no reseed)")
     args = ap.parse_args()
+    if args.wipe_only:
+        args.wipe = True
 
     data = build_dataset()
     total = sum(len(v) for v in data.values())
@@ -426,6 +430,9 @@ def main() -> int:
                     n += 1
             print(f"  {plural:24} {n} deleted")
         print()
+        if args.wipe_only:
+            print(f"{api.calls} request(s) made. Demo data removed; nothing reseeded.")
+            return 0
 
     ids: dict[str, str] = {}
 
