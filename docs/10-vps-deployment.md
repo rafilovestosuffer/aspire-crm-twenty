@@ -413,6 +413,65 @@ is not a backup. Copy it off the host nightly:
 POSTs to `ALERT_WEBHOOK_URL` if a layer is down. A dead worker is silent
 without this.
 
+**Parallel run: daily GHL → Twenty sync.** While both systems are live, GHL
+stays the front door and the sender: every form, booking, email and SMS goes
+through it as before. Twenty receives a one-way copy once a day from
+`infra/ghl-sync.sh`: a GET-only export (`ghl_export_records.py`), then the
+import (`ghl_import_records.py`), which matches on GHL ids — new contacts
+are created, changed ones updated, nothing duplicated. The import runs only if
+the export matched GHL's own totals. Edit records in GHL, not Twenty, during
+this period: when a contact changes in GHL, the next sync overwrites the copy
+in Twenty.
+
+Once, on the server, as the user that owns the repo (not root):
+
+```bash
+sudo apt install python3-phonenumbers
+nano infra/.env    # add GHL_TOKEN, GHL_LOCATION, TWENTY_BASE_URL=http://127.0.0.1:3000
+                   # (TWENTY_API_KEY is already there)
+chmod +x infra/ghl-sync.sh
+./infra/ghl-sync.sh          # first run by hand: must print "ghl-sync ok"
+crontab -e
+# 30 2 * * * /home/rafi/aspire-crm-twenty/infra/ghl-sync.sh
+```
+
+A failure POSTs to `ALERT_WEBHOOK_URL`, naming the step only. The log is
+`raw/ghl_sync.log`, which holds contact data and stays on the server. The time
+of the last good run is in `out/ghl_sync_last_ok.txt`; if it is more than a
+day old, the cron is not running.
+
+**n8n during the parallel run.** GHL already emails these people. If n8n's
+intake and sending workflows are also on, a customer gets two of everything,
+and on this server n8n emails anyone (`LIVE_MAIL_ALLOWLIST` is empty). Switch
+these **off** in the n8n editor (open the workflow, Active toggle) for the
+parallel run:
+
+| Workflow | Why off |
+|---|---|
+| `LEAD Form Intake` | Public form; sends an acknowledgement and a sales alert GHL already sends |
+| `EVT Webinar Registration` | Public webhook; sends a confirmation |
+| `ENR Bootcamp Enrolment` | Public webhook; sends a payment link |
+| `AI FrontDesk Handover` | The AI receptionist still runs in GHL and is not pointed here |
+| `LEAD Nurture Sequence` | Day 3/7/14 emails |
+| `EVT Webinar Reminders` | 24 h / 1 h reminder emails |
+| `EVT Post-Webinar Follow-up` | Recording and survey emails |
+| `ENR Cohort Operations` | Payment chases and joining instructions |
+| `BOOK Trainer Appointment` | Appointment reminders |
+| `SYS Daily Health Check` | Checks that the five scheduled jobs above ran; with them off it alerts every morning |
+
+Leave **on**: `SYS Error Handler`, `VEND Send Email` (sends only when one of
+the workflows above calls it), `MSG Inbound Events` and `MSG Tracked Link
+Redirect` (they only react to n8n's own emails), `OPS Scheduled Sweeps`
+(internal stale-opportunity summary to the sales chat, built from the synced
+data), `SUB Renewal Escalation` (no subscriptions exist) and `SEG Tag Sync`.
+`infra/watchdog.sh` keeps checking the stack hourly.
+
+`deploy.sh` re-activates every workflow (`n8n_deploy.py --activate`). After
+any deploy during the parallel run, switch the ten off again.
+
+At cutover, reverse it: switch the ten back on, point the website at the n8n
+form and webhooks, remove the sync cron, and keep GHL read-only for 30–60 days.
+
 **Suppression list.** Before GHL is terminated:
 
 ```bash
